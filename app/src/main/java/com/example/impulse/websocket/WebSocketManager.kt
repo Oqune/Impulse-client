@@ -1,12 +1,9 @@
 package com.example.impulse.websocket
 
 import android.util.Log
-import kotlinx.coroutines.CoroutineScope
-import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
-import kotlinx.coroutines.launch
 import okhttp3.*
 import okio.ByteString
 import java.util.concurrent.TimeUnit
@@ -22,6 +19,7 @@ class WebSocketManager {
         .readTimeout(15, TimeUnit.SECONDS)
         .writeTimeout(15, TimeUnit.SECONDS)
         .build()
+
 
     private val _currentState = MutableStateFlow(WebSocketState.DISCONNECTED)
     val currentState: StateFlow<WebSocketState> = _currentState.asStateFlow()
@@ -40,10 +38,6 @@ class WebSocketManager {
                     Log.d("WebSocket", "✅ WebSocket подключен успешно")
                     _currentState.value = WebSocketState.CONNECTED
                     onMessageReceived?.invoke("✅ WebSocket подключен успешно")
-
-                    CoroutineScope(Dispatchers.IO).launch {
-                        webSocket.send("Hello from Android")
-                    }
                 }
 
                 override fun onMessage(webSocket: WebSocket, text: String) {
@@ -103,7 +97,7 @@ class WebSocketManager {
                 false
             }
         } else {
-            Log.w("WebSocket", "⚠️ Нет подключения для отправки сообщения. Состояние: ${_currentState.value}, сообщение не пустое: ${message.isNotEmpty()}")
+            Log.w("WebSocket", "⚠️ Нет подключения для отправки сообщения.")
             onMessageReceived?.invoke("⚠️ Нет подключения к серверу")
             false
         }

@@ -15,7 +15,7 @@ data class ServerConfig(
             name = "Production",
             ipAddress = "192.168.1.50",
             port = 8080,
-            description = "Основной продакшен сервер"
+            description = "Основной продакшн сервер"
         )
 
         val local = ServerConfig(
