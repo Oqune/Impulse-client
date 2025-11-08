@@ -19,6 +19,6 @@ dependencyResolutionManagement {
     }
 }
 
-rootProject.name = "Impulse"
+rootProject.name = "Impulse-client"
 include(":app")
  
