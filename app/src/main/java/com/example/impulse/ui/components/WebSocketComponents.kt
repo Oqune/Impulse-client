@@ -5,6 +5,7 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Close
+import androidx.compose.material.icons.filled.Lock
 import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material3.*
 import androidx.compose.runtime.Composable
@@ -30,22 +31,47 @@ object WebSocketComponents {
                     .fillMaxWidth()
                     .padding(16.dp)
             ) {
-                Text(
-                    text = "Сервер подключения",
-                    style = MaterialTheme.typography.titleMedium,
-                    fontWeight = FontWeight.Bold
-                )
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Text(
+                        text = "Сервер подключения",
+                        style = MaterialTheme.typography.titleMedium,
+                        fontWeight = FontWeight.Bold
+                    )
+
+                    if (server.password.isNotEmpty()) {
+                        Icon(
+                            imageVector = Icons.Default.Lock,
+                            contentDescription = "Требуется пароль",
+                            tint = MaterialTheme.colorScheme.primary
+                        )
+                    }
+                }
+
                 Spacer(modifier = Modifier.height(8.dp))
+
                 Text(
                     text = server.getWebSocketUrl(),
                     style = MaterialTheme.typography.bodyMedium,
                     color = MaterialTheme.colorScheme.primary
                 )
+
                 Text(
                     text = "${server.ipAddress}:${server.port}",
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
+
+                if (server.password.isNotEmpty()) {
+                    Text(
+                        text = "Пароль: ********",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.primary
+                    )
+                }
             }
         }
     }
@@ -74,6 +100,13 @@ object WebSocketComponents {
                         tint = MaterialTheme.colorScheme.primary
                     )
                 }
+                WebSocketState.AUTHENTICATED -> {
+                    Icon(
+                        Icons.Default.PlayArrow,
+                        contentDescription = "Аутентифицирован",
+                        tint = MaterialTheme.colorScheme.primary
+                    )
+                }
                 WebSocketState.ERROR -> {
                     Icon(
                         Icons.Default.Close,
@@ -91,12 +124,13 @@ object WebSocketComponents {
                         WebSocketState.DISCONNECTED -> "Отключено"
                         WebSocketState.CONNECTING -> "Подключение..."
                         WebSocketState.CONNECTED -> "Подключено"
+                        WebSocketState.AUTHENTICATED -> "Аутентифицирован"
                         WebSocketState.ERROR -> "Ошибка"
                     },
                     style = MaterialTheme.typography.bodyMedium,
                     fontWeight = FontWeight.Medium,
                     color = when (state) {
-                        WebSocketState.CONNECTED -> MaterialTheme.colorScheme.primary
+                        WebSocketState.AUTHENTICATED, WebSocketState.CONNECTED -> MaterialTheme.colorScheme.primary
                         WebSocketState.ERROR -> MaterialTheme.colorScheme.error
                         else -> MaterialTheme.colorScheme.onSurface
                     }
@@ -122,8 +156,8 @@ object WebSocketComponents {
         ) {
             Button(
                 onClick = onConnect,
-                enabled = connectionState != WebSocketState.CONNECTING &&
-                        connectionState != WebSocketState.CONNECTED,
+                enabled = connectionState == WebSocketState.DISCONNECTED ||
+                         connectionState == WebSocketState.ERROR,
                 modifier = Modifier.weight(1f)
             ) {
                 Text("Подключиться")
@@ -134,7 +168,7 @@ object WebSocketComponents {
             Button(
                 onClick = onDisconnect,
                 enabled = connectionState == WebSocketState.CONNECTED ||
-                        connectionState == WebSocketState.ERROR,
+                        connectionState == WebSocketState.AUTHENTICATED,
                 modifier = Modifier.weight(1f)
             ) {
                 Text("Отключиться")
@@ -189,7 +223,8 @@ object WebSocketComponents {
                     modifier = Modifier.padding(16.dp)
                 )
 
-                HorizontalDivider()
+                // Исправлено: заменено Divider() на горизонтальный Divider из material3
+                Divider(color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.12f))
 
                 Column(
                     modifier = Modifier

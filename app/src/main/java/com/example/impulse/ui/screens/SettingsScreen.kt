@@ -25,6 +25,7 @@ fun SettingsScreen(
     var showCustomServerDialog by remember { mutableStateOf(false) }
     var customIpAddress by remember { mutableStateOf("") }
     var customPort by remember { mutableStateOf("8080") }
+    var customPassword by remember { mutableStateOf("") }
     var ipError by remember { mutableStateOf("") }
     var portError by remember { mutableStateOf("") }
 
@@ -96,6 +97,14 @@ fun SettingsScreen(
                             style = MaterialTheme.typography.bodySmall,
                             color = MaterialTheme.colorScheme.onSurfaceVariant
                         )
+
+                        if (server.password.isNotEmpty()) {
+                            Text(
+                                text = "Пароль установлен",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.primary
+                            )
+                        }
                     }
                 }
             }
@@ -107,6 +116,7 @@ fun SettingsScreen(
             onClick = {
                 customIpAddress = ""
                 customPort = "8080"
+                customPassword = ""
                 ipError = ""
                 portError = ""
                 showCustomServerDialog = true
@@ -157,6 +167,14 @@ fun SettingsScreen(
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.primary
                 )
+
+                if (selectedServer.password.isNotEmpty()) {
+                    Text(
+                        text = "Пароль: ********",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.primary
+                    )
+                }
             }
         }
     }
@@ -166,6 +184,7 @@ fun SettingsScreen(
             showCustomServerDialog = showCustomServerDialog,
             customIpAddress = customIpAddress,
             customPort = customPort,
+            customPassword = customPassword,
             ipError = ipError,
             portError = portError,
             onIpAddressChange = { newIp ->
@@ -183,6 +202,7 @@ fun SettingsScreen(
                     "Порт должен быть числом"
                 }
             },
+            onPasswordChange = { customPassword = it },
             onDismiss = { showCustomServerDialog = false },
             onConfirm = {
                 val isIpValid = customIpAddress.isNotBlank() && isValidIpAddress(customIpAddress)
@@ -198,7 +218,8 @@ fun SettingsScreen(
                         name = "Custom",
                         ipAddress = customIpAddress,
                         port = customPort.toInt(),
-                        description = "Пользовательский сервер"
+                        description = "Пользовательский сервер",
+                        password = customPassword
                     )
                     onServerSelected(customServer)
                     showCustomServerDialog = false
@@ -220,10 +241,12 @@ private fun CustomServerDialog(
     showCustomServerDialog: Boolean,
     customIpAddress: String,
     customPort: String,
+    customPassword: String,
     ipError: String,
     portError: String,
     onIpAddressChange: (String) -> Unit,
     onPortChange: (String) -> Unit,
+    onPasswordChange: (String) -> Unit,
     onDismiss: () -> Unit,
     onConfirm: () -> Unit
 ) {
@@ -233,7 +256,7 @@ private fun CustomServerDialog(
             title = { Text("Кастомный сервер") },
             text = {
                 Column {
-                    Text("Введите IP-адрес и порт сервера:")
+                    Text("Введите IP-адрес, порт и пароль сервера:")
                     Spacer(modifier = Modifier.height(16.dp))
 
                     OutlinedTextField(
@@ -264,6 +287,16 @@ private fun CustomServerDialog(
                                 Text(portError)
                             }
                         }
+                    )
+
+                    Spacer(modifier = Modifier.height(8.dp))
+
+                    OutlinedTextField(
+                        value = customPassword,
+                        onValueChange = onPasswordChange,
+                        modifier = Modifier.fillMaxWidth(),
+                        label = { Text("Пароль (необязательно)") },
+                        placeholder = { Text("Введите пароль, если требуется") }
                     )
                 }
             },

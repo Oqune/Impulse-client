@@ -6,7 +6,8 @@ data class ServerConfig(
     val name: String,
     val ipAddress: String,
     val port: Int = 8080,
-    val description: String
+    val description: String,
+    val password: String = "" // Default empty password
 ) {
     fun getWebSocketUrl(): String = "ws://$ipAddress:$port"
 
@@ -15,14 +16,16 @@ data class ServerConfig(
             name = "Production",
             ipAddress = "192.168.1.50",
             port = 8080,
-            description = "Основной продакшн сервер"
+            description = "Основной продакшн сервер",
+            password = "your_secure_password_here"
         )
 
         val local = ServerConfig(
             name = "Local",
             ipAddress = "127.0.0.1",
             port = 8080,
-            description = "Локальный сервер разработки"
+            description = "Локальный сервер разработки",
+            password = "your_secure_password_here"
         )
 
         val defaultServer = production

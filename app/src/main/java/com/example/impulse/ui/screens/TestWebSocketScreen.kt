@@ -33,13 +33,22 @@ fun TestWebSocketScreen(
     var messageInput by remember { mutableStateOf("") }
     var messages by remember { mutableStateOf<List<String>>(emptyList()) }
 
-    val webSocketManager = remember { WebSocketManager() }
+    // Используем remember для сохранения WebSocketManager между recompositions
+    val webSocketManager = remember(selectedServer) {
+        WebSocketManager()
+    }
+
     val connectionState by webSocketManager.currentState.collectAsState()
 
     LaunchedEffect(webSocketManager) {
         webSocketManager.onMessageReceived = { message ->
             messages = messages + "[${getCurrentTime()}] $message"
         }
+    }
+
+    // Логирование изменений состояния для отладки
+    LaunchedEffect(connectionState) {
+        Log.d("TestWebSocket", "Состояние подключения изменилось: $connectionState")
     }
 
     Column(
@@ -67,7 +76,8 @@ fun TestWebSocketScreen(
             connectionState = connectionState,
             onConnect = {
                 CoroutineScope(Dispatchers.IO).launch {
-                    webSocketManager.connect(selectedServer.getWebSocketUrl())
+                    // Pass the password when connecting
+                    webSocketManager.connect(selectedServer.getWebSocketUrl(), selectedServer.password)
                 }
             },
             onDisconnect = {
@@ -96,7 +106,8 @@ fun TestWebSocketScreen(
                     Log.w("TestWebSocket", "Попытка отправить пустое сообщение")
                 }
             },
-            enabled = connectionState == WebSocketState.CONNECTED
+            // Enable message input when authenticated
+            enabled = connectionState == WebSocketState.AUTHENTICATED
         )
 
         Spacer(modifier = Modifier.height(16.dp))
@@ -110,6 +121,7 @@ private fun getStatusMessage(state: WebSocketState): String {
         WebSocketState.DISCONNECTED -> "Не подключено"
         WebSocketState.CONNECTING -> "Подключение..."
         WebSocketState.CONNECTED -> "Подключено"
+        WebSocketState.AUTHENTICATED -> "Аутентифицирован"
         WebSocketState.ERROR -> "Ошибка подключения"
     }
 }
