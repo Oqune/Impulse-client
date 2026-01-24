@@ -1,9 +1,10 @@
 package com.example.impulse.ui.screens
 
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Email
 import androidx.compose.material.icons.filled.Home
-import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material3.Icon
 import androidx.compose.material3.NavigationBar
@@ -18,6 +19,8 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.unit.dp
 import com.example.impulse.data.ServerConfig
 
 data class TabItem(val title: String, val icon: ImageVector)
@@ -29,17 +32,28 @@ fun MainScreen() {
 
     val items = listOf(
         TabItem("Главная", Icons.Default.Home),
-        TabItem("Тест WS", Icons.Default.PlayArrow),
+        TabItem("Чат", Icons.Default.Email),
         TabItem("Настройки", Icons.Default.Settings)
     )
 
     Scaffold(
-        bottomBar = {
-            NavigationBar {
+        topBar = {
+            // Добавляем отступ для системной панели и делаем панель тоньше
+            NavigationBar(
+                modifier = Modifier.statusBarsPadding(),
+                containerColor = androidx.compose.material3.MaterialTheme.colorScheme.surface,
+                tonalElevation = 0.dp
+            ) {
                 items.forEachIndexed { index, item ->
                     NavigationBarItem(
                         icon = { Icon(item.icon, contentDescription = item.title) },
-                        label = { Text(item.title) },
+                        label = {
+                            Text(
+                                text = item.title,
+                                textAlign = TextAlign.Center,
+                                fontSize = androidx.compose.material3.MaterialTheme.typography.labelMedium.fontSize
+                            )
+                        },
                         selected = selectedItem == index,
                         onClick = { selectedItem = index }
                     )
@@ -52,7 +66,7 @@ fun MainScreen() {
                 selectedServer = selectedServer,
                 modifier = Modifier.padding(innerPadding)
             )
-            1 -> TestWebSocketScreen(
+            1 -> ChatScreen(
                 selectedServer = selectedServer,
                 modifier = Modifier.padding(innerPadding)
             )

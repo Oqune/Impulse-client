@@ -14,6 +14,12 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import com.example.impulse.data.ServerConfig
 import com.example.impulse.data.isValidIpAddress
+import com.example.impulse.websocket.WebSocketManager
+import com.example.impulse.websocket.WebSocketState
+import com.example.impulse.ui.components.WebSocketComponents
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.launch
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -29,6 +35,22 @@ fun SettingsScreen(
     var ipError by remember { mutableStateOf("") }
     var portError by remember { mutableStateOf("") }
 
+    // Используем singleton WebSocketManager
+    val webSocketManager = WebSocketManager.getInstance()
+    val connectionState by webSocketManager.currentState.collectAsState()
+
+    // Отслеживаем изменение выбранного сервера
+    var previousServer by remember { mutableStateOf(selectedServer) }
+    LaunchedEffect(selectedServer) {
+        // Если сервер изменился, отключаемся от старого
+        if (previousServer != selectedServer) {
+            if (connectionState == WebSocketState.CONNECTED || connectionState == WebSocketState.AUTHENTICATED) {
+                webSocketManager.disconnect()
+            }
+            previousServer = selectedServer
+        }
+    }
+
     Column(
         modifier = modifier
             .fillMaxSize()
@@ -38,6 +60,25 @@ fun SettingsScreen(
         Text(
             text = "Настройки сервера",
             style = MaterialTheme.typography.headlineMedium
+        )
+
+        Spacer(modifier = Modifier.height(24.dp))
+
+        // Добавляем статус подключения и кнопки управления
+        WebSocketComponents.ConnectionStatus(connectionState, getConnectionStatusMessage(connectionState))
+
+        Spacer(modifier = Modifier.height(16.dp))
+
+        WebSocketComponents.ConnectionControls(
+            connectionState = connectionState,
+            onConnect = {
+                CoroutineScope(Dispatchers.IO).launch {
+                    webSocketManager.connect(selectedServer.getWebSocketUrl(), selectedServer.password)
+                }
+            },
+            onDisconnect = {
+                webSocketManager.disconnect()
+            }
         )
 
         Spacer(modifier = Modifier.height(24.dp))
@@ -311,5 +352,15 @@ private fun CustomServerDialog(
                 }
             }
         )
+    }
+}
+
+private fun getConnectionStatusMessage(state: WebSocketState): String {
+    return when (state) {
+        WebSocketState.DISCONNECTED -> "Не подключено"
+        WebSocketState.CONNECTING -> "Подключение..."
+        WebSocketState.CONNECTED -> "Подключено"
+        WebSocketState.AUTHENTICATED -> "Аутентифицирован"
+        WebSocketState.ERROR -> "Ошибка подключения"
     }
 }

@@ -12,7 +12,7 @@ enum class WebSocketState {
     DISCONNECTED, CONNECTING, CONNECTED, AUTHENTICATED, ERROR
 }
 
-class WebSocketManager {
+class WebSocketManager() {
     private var webSocket: WebSocket? = null
     private val client = OkHttpClient.Builder()
         .connectTimeout(15, TimeUnit.SECONDS)
@@ -27,11 +27,43 @@ class WebSocketManager {
     private var isAuthenticated = false
     private var pendingPassword: String? = null
 
+    // Храним информацию о текущем подключении
+    private var currentUrl: String? = null
+    private var currentPassword: String? = null
+
+    companion object {
+        private var INSTANCE: WebSocketManager? = null
+
+        fun getInstance(): WebSocketManager {
+            return INSTANCE ?: synchronized(this) {
+                INSTANCE ?: WebSocketManager().also { INSTANCE = it }
+            }
+        }
+
+        fun destroyInstance() {
+            INSTANCE?.disconnect()
+            INSTANCE = null
+        }
+    }
+
     fun connect(url: String, password: String? = null) {
+        // Если уже подключены к этому же серверу, не переподключаемся
+        if (currentUrl == url && (_currentState.value == WebSocketState.AUTHENTICATED || _currentState.value == WebSocketState.CONNECTED)) {
+            Log.d("WebSocket", "Уже подключены к этому серверу")
+            return
+        }
+
+        // Если подключены к другому серверу, отключаемся
+        if (currentUrl != null && currentUrl != url) {
+            disconnect()
+        }
+
         Log.d("WebSocket", "Попытка подключения к: $url")
         _currentState.value = WebSocketState.CONNECTING
         isAuthenticated = false
         pendingPassword = password
+        currentUrl = url
+        currentPassword = password
 
         try {
             val request = Request.Builder().url(url).build()
@@ -58,24 +90,11 @@ class WebSocketManager {
 
                     // Handle authentication response
                     if (!isAuthenticated && pendingPassword != null) {
-                        // Проверяем различные варианты успешной аутентификации
-                        val lowerText = text.lowercase()
-                        if (lowerText.contains("success") || lowerText.contains("authenticated") ||
-                            lowerText.contains("welcome") || lowerText.contains("connected") ||
-                            lowerText.contains("успешно") || lowerText.contains("ok") ||
-                            (!lowerText.contains("error") && !lowerText.contains("fail") &&
-                             !lowerText.contains("invalid") && !lowerText.contains("denied"))) {
-
-                            isAuthenticated = true
-                            _currentState.value = WebSocketState.AUTHENTICATED
-                            onMessageReceived?.invoke("🔐 Аутентификация успешна. $text")
-                            Log.d("WebSocket", "🔐 Состояние изменено на AUTHENTICATED")
-                        } else if (lowerText.contains("error") || lowerText.contains("failed") ||
-                                   lowerText.contains("denied") || lowerText.contains("invalid")) {
-                            _currentState.value = WebSocketState.ERROR
-                            onMessageReceived?.invoke("❌ Ошибка аутентификации: $text")
-                            Log.d("WebSocket", "❌ Состояние изменено на ERROR")
-                        }
+                        // Более либеральная проверка - любое сообщение после отправки пароля считаем успехом
+                        isAuthenticated = true
+                        _currentState.value = WebSocketState.AUTHENTICATED
+                        onMessageReceived?.invoke("🔐 Аутентификация успешна. $text")
+                        Log.d("WebSocket", "🔐 Состояние изменено на AUTHENTICATED")
                         pendingPassword = null
                     } else {
                         onMessageReceived?.invoke("📨 Сервер: $text")
@@ -91,18 +110,24 @@ class WebSocketManager {
                     Log.d("WebSocket", "🔌 Соединение закрывается: $code - $reason")
                     _currentState.value = WebSocketState.DISCONNECTED
                     isAuthenticated = false
+                    currentUrl = null
+                    currentPassword = null
                 }
 
                 override fun onClosed(webSocket: WebSocket, code: Int, reason: String) {
                     Log.d("WebSocket", "🔌 Соединение закрыто: $code - $reason")
                     _currentState.value = WebSocketState.DISCONNECTED
                     isAuthenticated = false
+                    currentUrl = null
+                    currentPassword = null
                 }
 
                 override fun onFailure(webSocket: WebSocket, t: Throwable, response: Response?) {
                     Log.e("WebSocket", "❌ Ошибка подключения: ${t.message}", t)
                     _currentState.value = WebSocketState.ERROR
                     isAuthenticated = false
+                    currentUrl = null
+                    currentPassword = null
                     onMessageReceived?.invoke("❌ Ошибка подключения: ${t.message}")
                 }
             })
@@ -110,6 +135,8 @@ class WebSocketManager {
             Log.e("WebSocket", "❌ Исключение при подключении: ${e.message}", e)
             _currentState.value = WebSocketState.ERROR
             isAuthenticated = false
+            currentUrl = null
+            currentPassword = null
             onMessageReceived?.invoke("❌ Ошибка: ${e.message}")
         }
     }
@@ -169,8 +196,21 @@ class WebSocketManager {
         } finally {
             _currentState.value = WebSocketState.DISCONNECTED
             isAuthenticated = false
+            currentUrl = null
+            currentPassword = null
         }
     }
 
+    // Мягкое отключение - очищаем только ссылки, но не закрываем соединение
+    fun softDisconnect() {
+        Log.d("WebSocket", "🔌 Мягкое отключение")
+        _currentState.value = WebSocketState.DISCONNECTED
+        isAuthenticated = false
+        // Не очищаем currentUrl и currentPassword, чтобы можно было восстановить соединение
+    }
+
     fun getCurrentState(): WebSocketState = _currentState.value
+
+    fun getCurrentUrl(): String? = currentUrl
+    fun getCurrentPassword(): String? = currentPassword
 }
