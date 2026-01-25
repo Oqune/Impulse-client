@@ -5,6 +5,9 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.selection.selectable
 import androidx.compose.foundation.selection.selectableGroup
 import androidx.compose.foundation.verticalScroll
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Clear
+import androidx.compose.material.icons.filled.Info
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
@@ -20,13 +23,31 @@ import com.example.impulse.ui.components.WebSocketComponents
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
+import com.example.impulse.util.LogStorage
+import org.json.JSONObject // Добавляем импорт для JSONObject
+
+// Глобальное хранилище логов
+object LogStorage {
+    private val logs = mutableStateListOf<String>()
+
+    fun addLog(message: String) {
+        // Добавляем временную метку
+        val timestamp = java.text.SimpleDateFormat("HH:mm:ss", java.util.Locale.getDefault())
+            .format(java.util.Date())
+        logs.add("[$timestamp] $message")
+    }
+
+    fun getLogs(): List<String> = logs.toList()
+    fun clearLogs() = logs.clear()
+}
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun SettingsScreen(
     selectedServer: ServerConfig,
     onServerSelected: (ServerConfig) -> Unit,
-    modifier: Modifier = Modifier
+    modifier: Modifier = Modifier,
+    clientName: String = "Клиент" // Исправлено: правильное объявление параметра
 ) {
     var showCustomServerDialog by remember { mutableStateOf(false) }
     var customIpAddress by remember { mutableStateOf("") }
@@ -34,6 +55,7 @@ fun SettingsScreen(
     var customPassword by remember { mutableStateOf("") }
     var ipError by remember { mutableStateOf("") }
     var portError by remember { mutableStateOf("") }
+    var showLogs by remember { mutableStateOf(false) }
 
     // Используем singleton WebSocketManager
     val webSocketManager = WebSocketManager.getInstance()
@@ -46,6 +68,7 @@ fun SettingsScreen(
         if (previousServer != selectedServer) {
             if (connectionState == WebSocketState.CONNECTED || connectionState == WebSocketState.AUTHENTICATED) {
                 webSocketManager.disconnect()
+                LogStorage.addLog("Отключение от предыдущего сервера при смене настройки")
             }
             previousServer = selectedServer
         }
@@ -73,13 +96,35 @@ fun SettingsScreen(
             connectionState = connectionState,
             onConnect = {
                 CoroutineScope(Dispatchers.IO).launch {
+                    LogStorage.addLog("Попытка подключения к ${selectedServer.getWebSocketUrl()}")
                     webSocketManager.connect(selectedServer.getWebSocketUrl(), selectedServer.password)
+
+                    // Отправляем имя пользователя сразу после подключения
+                    val authJson = JSONObject()
+                    authJson.put("password", selectedServer.password.ifEmpty { "default_password" })
+                    authJson.put("name", clientName) // Отправляем имя пользователя
+
+                    // Отправляем сообщение с именем
+                    webSocketManager.sendMessage(authJson.toString())
                 }
             },
             onDisconnect = {
+                LogStorage.addLog("Запрос на отключение")
                 webSocketManager.disconnect()
             }
         )
+
+        Spacer(modifier = Modifier.height(16.dp))
+
+        // Кнопка для просмотра логов
+        Button(
+            onClick = { showLogs = true },
+            modifier = Modifier.fillMaxWidth()
+        ) {
+            Icon(Icons.Default.Info, contentDescription = "Логи")
+            Spacer(Modifier.width(8.dp))
+            Text("Просмотр логов")
+        }
 
         Spacer(modifier = Modifier.height(24.dp))
 
@@ -275,6 +320,14 @@ fun SettingsScreen(
             }
         )
     }
+
+    // Диалог для просмотра логов
+    if (showLogs) {
+        LogDialog(
+            onDismiss = { showLogs = false },
+            onClearLogs = { LogStorage.clearLogs() }
+        )
+    }
 }
 
 @Composable
@@ -353,6 +406,54 @@ private fun CustomServerDialog(
             }
         )
     }
+}
+
+@Composable
+private fun LogDialog(
+    onDismiss: () -> Unit,
+    onClearLogs: () -> Unit
+) {
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Text("Системные логи")
+                IconButton(onClick = onClearLogs) {
+                    Icon(Icons.Default.Clear, contentDescription = "Очистить логи")
+                }
+            }
+        },
+        text = {
+            val logs = LogStorage.getLogs()
+            if (logs.isEmpty()) {
+                Text("Логи пусты")
+            } else {
+                Column(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .height(300.dp)
+                        .verticalScroll(rememberScrollState())
+                ) {
+                    logs.forEach { log ->
+                        Text(
+                            text = log,
+                            style = MaterialTheme.typography.bodySmall,
+                            modifier = Modifier.padding(vertical = 2.dp)
+                        )
+                    }
+                }
+            }
+        },
+        confirmButton = {
+            TextButton(onClick = onDismiss) {
+                Text("Закрыть")
+            }
+        }
+    )
 }
 
 private fun getConnectionStatusMessage(state: WebSocketState): String {

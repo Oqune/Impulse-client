@@ -22,6 +22,7 @@ import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import com.example.impulse.data.ServerConfig
+import java.util.*
 
 data class TabItem(val title: String, val icon: ImageVector)
 
@@ -29,6 +30,7 @@ data class TabItem(val title: String, val icon: ImageVector)
 fun MainScreen() {
     var selectedItem by remember { mutableIntStateOf(0) }
     var selectedServer by remember { mutableStateOf(ServerConfig.defaultServer) }
+    var clientName by remember { mutableStateOf(generateRandomName()) }
 
     val items = listOf(
         TabItem("Главная", Icons.Default.Home),
@@ -64,10 +66,13 @@ fun MainScreen() {
         when (selectedItem) {
             0 -> HomeScreen(
                 selectedServer = selectedServer,
+                clientName = clientName,
+                onClientNameChange = { newName -> clientName = newName },
                 modifier = Modifier.padding(innerPadding)
             )
             1 -> ChatScreen(
                 selectedServer = selectedServer,
+                clientName = clientName,
                 modifier = Modifier.padding(innerPadding)
             )
             2 -> SettingsScreen(
@@ -77,4 +82,23 @@ fun MainScreen() {
             )
         }
     }
+}
+
+// Генерация случайного имени
+private fun generateRandomName(): String {
+    val adjectives = arrayOf(
+        "Веселый", "Умный", "Быстрый", "Смелый", "Добрый",
+        "Ловкий", "Внимательный", "Энергичный", "Креативный", "Надежный"
+    )
+    val nouns = arrayOf(
+        "Пользователь", "Клиент", "Участник", "Чаттер", "Гость",
+        "Посетитель", "Собеседник", "Диалогист"
+    )
+    val random = Random()
+
+    val adjective = adjectives[random.nextInt(adjectives.size)]
+    val noun = nouns[random.nextInt(nouns.size)]
+    val number = random.nextInt(100)
+
+    return "$adjective$noun$number"
 }

@@ -1,23 +1,25 @@
 package com.example.impulse.websocket
 
 import android.util.Log
+import com.example.impulse.util.LogStorage
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import okhttp3.*
 import okio.ByteString
+import org.json.JSONObject
 import java.util.concurrent.TimeUnit
 
 enum class WebSocketState {
     DISCONNECTED, CONNECTING, CONNECTED, AUTHENTICATED, ERROR
 }
 
-class WebSocketManager() {
+class WebSocketManager private constructor() {
     private var webSocket: WebSocket? = null
     private val client = OkHttpClient.Builder()
-        .connectTimeout(15, TimeUnit.SECONDS)
-        .readTimeout(15, TimeUnit.SECONDS)
-        .writeTimeout(15, TimeUnit.SECONDS)
+        .connectTimeout(30, TimeUnit.SECONDS)
+        .readTimeout(30, TimeUnit.SECONDS)
+        .writeTimeout(30, TimeUnit.SECONDS)
         .build()
 
     private val _currentState = MutableStateFlow(WebSocketState.DISCONNECTED)
@@ -25,11 +27,11 @@ class WebSocketManager() {
 
     var onMessageReceived: ((String) -> Unit)? = null
     private var isAuthenticated = false
-    private var pendingPassword: String? = null
 
-    // Храним информацию о текущем подключении
-    private var currentUrl: String? = null
-    private var currentPassword: String? = null
+    // Данные для повторного подключения
+    private var lastUrl: String? = null
+    private var lastPassword: String? = null
+    private var lastName: String = "AndroidClient"
 
     companion object {
         private var INSTANCE: WebSocketManager? = null
@@ -39,31 +41,19 @@ class WebSocketManager() {
                 INSTANCE ?: WebSocketManager().also { INSTANCE = it }
             }
         }
-
-        fun destroyInstance() {
-            INSTANCE?.disconnect()
-            INSTANCE = null
-        }
     }
 
-    fun connect(url: String, password: String? = null) {
-        // Если уже подключены к этому же серверу, не переподключаемся
-        if (currentUrl == url && (_currentState.value == WebSocketState.AUTHENTICATED || _currentState.value == WebSocketState.CONNECTED)) {
-            Log.d("WebSocket", "Уже подключены к этому серверу")
-            return
-        }
-
-        // Если подключены к другому серверу, отключаемся
-        if (currentUrl != null && currentUrl != url) {
-            disconnect()
-        }
-
+    fun connect(url: String, password: String? = null, name: String = "AndroidClient") {
         Log.d("WebSocket", "Попытка подключения к: $url")
+        LogStorage.addLog("Попытка подключения к: $url")
+
+        // Сохраняем данные для возможного повторного подключения
+        lastUrl = url
+        lastPassword = password
+        lastName = name
+
         _currentState.value = WebSocketState.CONNECTING
         isAuthenticated = false
-        pendingPassword = password
-        currentUrl = url
-        currentPassword = password
 
         try {
             val request = Request.Builder().url(url).build()
@@ -71,146 +61,187 @@ class WebSocketManager() {
             webSocket = client.newWebSocket(request, object : WebSocketListener() {
                 override fun onOpen(webSocket: WebSocket, response: Response) {
                     Log.d("WebSocket", "✅ WebSocket подключен успешно")
+                    LogStorage.addLog("WebSocket подключен успешно")
                     _currentState.value = WebSocketState.CONNECTED
 
-                    // Send password immediately after connection if provided
+                    // Отправляем данные аутентификации в формате JSON
                     if (password != null && password.isNotEmpty()) {
-                        Log.d("WebSocket", "🔐 Отправка пароля для аутентификации")
-                        webSocket.send(password)
+                        val authJson = JSONObject().apply {
+                            put("password", password)
+                            put("name", name)
+                        }
+
+                        Log.d("WebSocket", "Отправка JSON: ${authJson.toString()}")
+                        LogStorage.addLog("Отправка данных аутентификации")
+                        webSocket.send(authJson.toString())
                     } else {
-                        // No password required, consider as authenticated
+                        // Без пароля считаем аутентификацию успешной
                         isAuthenticated = true
                         _currentState.value = WebSocketState.AUTHENTICATED
-                        onMessageReceived?.invoke("✅ WebSocket подключен успешно")
+                        // Не показываем системное сообщение в чате
+                        LogStorage.addLog("Подключено без пароля")
                     }
                 }
 
                 override fun onMessage(webSocket: WebSocket, text: String) {
-                    Log.d("WebSocket", "📨 Получено сообщение: $text")
+                    Log.d("WebSocket", "Получено: $text")
+                    LogStorage.addLog("Получено: $text")
 
-                    // Handle authentication response
-                    if (!isAuthenticated && pendingPassword != null) {
-                        // Более либеральная проверка - любое сообщение после отправки пароля считаем успехом
-                        isAuthenticated = true
-                        _currentState.value = WebSocketState.AUTHENTICATED
-                        onMessageReceived?.invoke("🔐 Аутентификация успешна. $text")
-                        Log.d("WebSocket", "🔐 Состояние изменено на AUTHENTICATED")
-                        pendingPassword = null
-                    } else {
-                        onMessageReceived?.invoke("📨 Сервер: $text")
+                    // Обработка аутентификации
+                    if (!isAuthenticated) {
+                        try {
+                            // Пытаемся распарсить как JSON
+                            val json = JSONObject(text)
+                            val msgType = json.optString("msg_type", "")
+                            val content = json.optString("content", "")
+
+                            if (msgType == "Auth" && content == "AUTH_SUCCESS") {
+                                isAuthenticated = true
+                                _currentState.value = WebSocketState.AUTHENTICATED
+                                // Не показываем системное сообщение в чате, только в логах
+                                LogStorage.addLog("Аутентификация успешна")
+                            } else {
+                                _currentState.value = WebSocketState.ERROR
+                                // Показываем ошибку в чате
+                                onMessageReceived?.invoke("❌ Ошибка аутентификации")
+                                LogStorage.addLog("Ошибка аутентификации: $text")
+                            }
+                        } catch (e: Exception) {
+                            // Если не JSON, проверяем текстовые ответы
+                            if (text.contains("успешно") || text.contains("authenticated") ||
+                                text.contains("welcome") || text.contains("Connected") ||
+                                text.contains("Success") || text.contains("OK")) {
+
+                                isAuthenticated = true
+                                _currentState.value = WebSocketState.AUTHENTICATED
+                                // Не показываем системное сообщение в чате, только в логах
+                                LogStorage.addLog("Аутентификация успешна (текст)")
+                            } else {
+                                _currentState.value = WebSocketState.ERROR
+                                // Показываем ошибку в чате
+                                onMessageReceived?.invoke("❌ Ошибка: $text")
+                                LogStorage.addLog("Ошибка аутентификации: $text")
+                            }
+                        }
+                        return
                     }
+
+                    // Обработка сообщений после аутентификации
+                    processMessage(text)
                 }
 
                 override fun onMessage(webSocket: WebSocket, bytes: ByteString) {
-                    Log.d("WebSocket", "📨 Получены бинарные данные")
-                    onMessageReceived?.invoke("📨 Сервер (бинарные данные)")
+                    Log.d("WebSocket", "Получены бинарные данные")
+                    LogStorage.addLog("Получены бинарные данные")
                 }
 
                 override fun onClosing(webSocket: WebSocket, code: Int, reason: String) {
-                    Log.d("WebSocket", "🔌 Соединение закрывается: $code - $reason")
+                    Log.d("WebSocket", "Соединение закрывается: $reason")
+                    LogStorage.addLog("Соединение закрывается: $reason")
                     _currentState.value = WebSocketState.DISCONNECTED
                     isAuthenticated = false
-                    currentUrl = null
-                    currentPassword = null
                 }
 
                 override fun onClosed(webSocket: WebSocket, code: Int, reason: String) {
-                    Log.d("WebSocket", "🔌 Соединение закрыто: $code - $reason")
+                    Log.d("WebSocket", "Соединение закрыто: $reason")
+                    LogStorage.addLog("Соединение закрыто: $reason")
                     _currentState.value = WebSocketState.DISCONNECTED
                     isAuthenticated = false
-                    currentUrl = null
-                    currentPassword = null
                 }
 
                 override fun onFailure(webSocket: WebSocket, t: Throwable, response: Response?) {
-                    Log.e("WebSocket", "❌ Ошибка подключения: ${t.message}", t)
+                    Log.e("WebSocket", "Ошибка подключения: ${t.message}", t)
+                    LogStorage.addLog("Ошибка подключения: ${t.message}")
                     _currentState.value = WebSocketState.ERROR
                     isAuthenticated = false
-                    currentUrl = null
-                    currentPassword = null
-                    onMessageReceived?.invoke("❌ Ошибка подключения: ${t.message}")
+                    onMessageReceived?.invoke("❌ Ошибка: ${t.message}")
                 }
             })
         } catch (e: Exception) {
-            Log.e("WebSocket", "❌ Исключение при подключении: ${e.message}", e)
+            Log.e("WebSocket", "Исключение при подключении: ${e.message}", e)
+            LogStorage.addLog("Исключение: ${e.message}")
             _currentState.value = WebSocketState.ERROR
             isAuthenticated = false
-            currentUrl = null
-            currentPassword = null
             onMessageReceived?.invoke("❌ Ошибка: ${e.message}")
         }
     }
 
-    fun sendMessage(message: String): Boolean {
-        Log.d("WebSocket", "📤 Попытка отправить сообщение: '$message'")
-        Log.d("WebSocket", "📤 Длина сообщения: ${message.length}")
-        Log.d("WebSocket", "📤 Текущее состояние: ${_currentState.value}")
+    private fun processMessage(text: String) {
+        try {
+            // Пытаемся распарсить как JSON
+            val json = JSONObject(text)
+            val msgType = json.optString("msg_type", "")
+            val senderName = json.optString("sender_name", "Система")
+            val content = json.optString("content", "")
 
-        // Проверяем, что WebSocket существует и состояние позволяет отправлять сообщения
+            when (msgType) {
+                "System" -> {
+                    // Системные сообщения показываем в чате
+                    onMessageReceived?.invoke("[$senderName] $content")
+                }
+                "Content" -> {
+                    // Контентные сообщения в чат
+                    onMessageReceived?.invoke("[$senderName] $content")
+                }
+                else -> {
+                    // Другие типы или не JSON - отправляем как есть
+                    onMessageReceived?.invoke(text)
+                }
+            }
+        } catch (e: Exception) {
+            // Не JSON - отправляем как есть
+            onMessageReceived?.invoke(text)
+        }
+    }
+
+    fun sendMessage(message: String): Boolean {
+        Log.d("WebSocket", "Отправка: $message")
+        LogStorage.addLog("Отправка: $message")
+
         val socket = webSocket
         if (socket == null) {
-            Log.w("WebSocket", "⚠️ WebSocket равен null")
-            onMessageReceived?.invoke("⚠️ Нет подключения к серверу")
+            Log.w("WebSocket", "Нет подключения")
+            LogStorage.addLog("Нет подключения")
             return false
         }
 
         return if (_currentState.value == WebSocketState.AUTHENTICATED && message.isNotEmpty()) {
             try {
-                Log.d("WebSocket", "📤 Состояние AUTHENTICATED, отправляем сообщение...")
                 val success = socket.send(message)
                 if (success) {
-                    Log.d("WebSocket", "✅ Сообщение отправлено: '$message'")
-                    onMessageReceived?.invoke("📤 Вы: $message")
-                    true
+                    Log.d("WebSocket", "Сообщение отправлено")
+                    LogStorage.addLog("Сообщение отправлено")
+                    return true
                 } else {
-                    Log.e("WebSocket", "❌ WebSocket.send() вернул false")
-                    onMessageReceived?.invoke("❌ Не удалось отправить сообщение")
-                    false
+                    Log.e("WebSocket", "Не удалось отправить")
+                    LogStorage.addLog("Не удалось отправить")
+                    return false
                 }
             } catch (e: Exception) {
-                Log.e("WebSocket", "❌ Ошибка при отправке: ${e.message}", e)
-                onMessageReceived?.invoke("❌ Ошибка отправки: ${e.message}")
-                false
+                Log.e("WebSocket", "Ошибка отправки: ${e.message}", e)
+                LogStorage.addLog("Ошибка отправки: ${e.message}")
+                return false
             }
         } else {
-            val stateMsg = when (_currentState.value) {
-                WebSocketState.DISCONNECTED -> "Нет подключения"
-                WebSocketState.CONNECTING -> "Подключение в процессе"
-                WebSocketState.CONNECTED -> "Ожидание аутентификации"
-                WebSocketState.AUTHENTICATED -> "Аутентифицирован"
-                WebSocketState.ERROR -> "Ошибка подключения"
-            }
-            Log.w("WebSocket", "⚠️ Невозможно отправить сообщение. Состояние: ${_currentState.value}, Сообщение пустое: ${message.isEmpty()}")
-            onMessageReceived?.invoke("⚠️ $stateMsg")
-            false
+            Log.w("WebSocket", "Невозможно отправить сообщение")
+            LogStorage.addLog("Невозможно отправить сообщение")
+            return false
         }
     }
 
     fun disconnect() {
-        Log.d("WebSocket", "🔌 Запрос на отключение")
+        Log.d("WebSocket", "Отключение")
+        LogStorage.addLog("Отключение")
         try {
-            // Проверяем, что WebSocket существует перед закрытием
-            webSocket?.close(1000, "Пользовательское отключение")
+            webSocket?.close(1000, "Отключение")
         } catch (e: Exception) {
-            Log.e("WebSocket", "❌ Ошибка при отключении: ${e.message}", e)
+            Log.e("WebSocket", "Ошибка отключения: ${e.message}", e)
+            LogStorage.addLog("Ошибка отключения: ${e.message}")
         } finally {
             _currentState.value = WebSocketState.DISCONNECTED
             isAuthenticated = false
-            currentUrl = null
-            currentPassword = null
         }
     }
 
-    // Мягкое отключение - очищаем только ссылки, но не закрываем соединение
-    fun softDisconnect() {
-        Log.d("WebSocket", "🔌 Мягкое отключение")
-        _currentState.value = WebSocketState.DISCONNECTED
-        isAuthenticated = false
-        // Не очищаем currentUrl и currentPassword, чтобы можно было восстановить соединение
-    }
-
     fun getCurrentState(): WebSocketState = _currentState.value
-
-    fun getCurrentUrl(): String? = currentUrl
-    fun getCurrentPassword(): String? = currentPassword
 }
