@@ -23,8 +23,6 @@ import com.example.impulse.ui.components.WebSocketComponents
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
-import com.example.impulse.util.LogStorage
-import org.json.JSONObject // Добавляем импорт для JSONObject
 
 // Глобальное хранилище логов
 object LogStorage {
@@ -47,7 +45,8 @@ fun SettingsScreen(
     selectedServer: ServerConfig,
     onServerSelected: (ServerConfig) -> Unit,
     modifier: Modifier = Modifier,
-    clientName: String = "Клиент" // Исправлено: правильное объявление параметра
+    clientName: String,
+    onClientNameChange: (String) -> Unit // Добавляем обработчик изменения имени
 ) {
     var showCustomServerDialog by remember { mutableStateOf(false) }
     var customIpAddress by remember { mutableStateOf("") }
@@ -97,15 +96,7 @@ fun SettingsScreen(
             onConnect = {
                 CoroutineScope(Dispatchers.IO).launch {
                     LogStorage.addLog("Попытка подключения к ${selectedServer.getWebSocketUrl()}")
-                    webSocketManager.connect(selectedServer.getWebSocketUrl(), selectedServer.password)
-
-                    // Отправляем имя пользователя сразу после подключения
-                    val authJson = JSONObject()
-                    authJson.put("password", selectedServer.password.ifEmpty { "default_password" })
-                    authJson.put("name", clientName) // Отправляем имя пользователя
-
-                    // Отправляем сообщение с именем
-                    webSocketManager.sendMessage(authJson.toString())
+                    webSocketManager.connect(selectedServer.getWebSocketUrl(), selectedServer.password, clientName)
                 }
             },
             onDisconnect = {
@@ -260,6 +251,24 @@ fun SettingsScreen(
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.primary
                     )
+                }
+
+                Spacer(modifier = Modifier.height(16.dp))
+
+                // Отображение текущего имени клиента
+                Text(
+                    text = "Имя клиента: $clientName",
+                    style = MaterialTheme.typography.bodyMedium,
+                    fontWeight = FontWeight.Medium
+                )
+
+                // Кнопка для изменения имени
+                Button(
+                    onClick = { /* Здесь можно добавить диалог для изменения имени */ },
+                    modifier = Modifier.fillMaxWidth(),
+                    enabled = false // Временно отключено, так как имя изменяется в HomeScreen
+                ) {
+                    Text("Изменить имя")
                 }
             }
         }

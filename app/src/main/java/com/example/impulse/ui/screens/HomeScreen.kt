@@ -56,11 +56,6 @@ fun HomeScreen(
             modifier = Modifier.padding(bottom = 32.dp)
         )
 
-        // Карточка информации о сервере
-        ServerInfoCard(selectedServer)
-
-        Spacer(modifier = Modifier.height(24.dp))
-
         // Карточка выбора имени
         NameSelectionCard(
             clientName = clientName,

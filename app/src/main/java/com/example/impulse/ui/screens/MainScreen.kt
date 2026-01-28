@@ -78,6 +78,8 @@ fun MainScreen() {
             2 -> SettingsScreen(
                 selectedServer = selectedServer,
                 onServerSelected = { newServer -> selectedServer = newServer },
+                clientName = clientName, // Передаем clientName в SettingsScreen
+                onClientNameChange = { newName -> clientName = newName }, // Добавляем обработчик изменения имени
                 modifier = Modifier.padding(innerPadding)
             )
         }
