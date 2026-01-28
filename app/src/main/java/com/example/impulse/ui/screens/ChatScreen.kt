@@ -17,8 +17,10 @@ import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.example.impulse.data.ServerConfig
@@ -52,12 +54,15 @@ fun ChatScreen(
     val connectionState by webSocketManager.currentState.collectAsState()
 
     LaunchedEffect(webSocketManager) {
-        webSocketManager.onMessageReceived = { message ->
+        webSocketManager.onMessageReceived = { message, isFullWidth ->
             Log.d("ChatScreen", "Обработка сообщения: $message")
 
             // Парсим сообщение
-            val chatMessage = parseMessage(message)
-            ChatHistory.addMessage(chatMessage)
+            val chatMessage = parseMessage(message, isFullWidth)
+            // Только информационные и контентные сообщения добавляем в чат
+            if (chatMessage.messageType == MessageType.INFO || chatMessage.messageType == MessageType.CONTENT) {
+                ChatHistory.addMessage(chatMessage)
+            }
         }
     }
 
@@ -97,7 +102,11 @@ fun ChatScreen(
             verticalArrangement = Arrangement.spacedBy(4.dp)
         ) {
             items(messages) { message ->
-                ChatMessageItem(message)
+                if (message.isFullWidth) {
+                    FullWidthInfoMessage(message)
+                } else {
+                    ChatMessageItem(message)
+                }
             }
 
             // Показываем индикатор подключения
@@ -141,7 +150,9 @@ fun ChatScreen(
                                     sender = "Вы",
                                     content = messageInput,
                                     timestamp = getCurrentTime(),
-                                    isOwn = true
+                                    isOwn = true,
+                                    isFullWidth = false,
+                                    messageType = MessageType.CONTENT
                                 )
                                 ChatHistory.addMessage(ownMessage)
 
@@ -177,6 +188,29 @@ fun ChatScreen(
 }
 
 @Composable
+private fun FullWidthInfoMessage(message: ChatMessage) {
+    // Все информационные сообщения выглядят в стиле ConnectionStatusIndicator, но серого цвета
+    Box(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(vertical = 8.dp), // Такой же padding как у ConnectionStatusIndicator
+        contentAlignment = Alignment.Center
+    ) {
+        Text(
+            text = message.content,
+            style = MaterialTheme.typography.labelMedium, // Такой же размер шрифта
+            color = MaterialTheme.colorScheme.onSurfaceVariant, // Серый цвет текста
+            modifier = Modifier
+                .background(
+                    color = MaterialTheme.colorScheme.surfaceVariant, // Серый фон
+                    shape = RoundedCornerShape(12.dp) // Такой же радиус скругления
+                )
+                .padding(horizontal = 12.dp, vertical = 4.dp) // Такой же внутренний padding
+        )
+    }
+}
+
+@Composable
 private fun ChatMessageItem(message: ChatMessage) {
     Row(
         modifier = Modifier
@@ -188,12 +222,12 @@ private fun ChatMessageItem(message: ChatMessage) {
             modifier = Modifier
                 .widthIn(max = 260.dp)
                 .background(
-                    color = if (message.isOwn)
-                        MaterialTheme.colorScheme.primaryContainer
-                    else if (message.sender == "Система" || message.sender == "Сервер")
-                        MaterialTheme.colorScheme.tertiaryContainer
-                    else
-                        MaterialTheme.colorScheme.secondaryContainer,
+                    color = when {
+                        message.isOwn -> MaterialTheme.colorScheme.primaryContainer
+                        message.messageType == MessageType.SYSTEM -> MaterialTheme.colorScheme.errorContainer
+                        message.sender == "Система" || message.sender == "Сервер" -> MaterialTheme.colorScheme.tertiaryContainer
+                        else -> MaterialTheme.colorScheme.secondaryContainer
+                    },
                     shape = RoundedCornerShape(
                         topStart = 12.dp,
                         topEnd = 12.dp,
@@ -210,35 +244,35 @@ private fun ChatMessageItem(message: ChatMessage) {
                         text = message.sender,
                         style = MaterialTheme.typography.labelMedium,
                         fontWeight = FontWeight.Bold,
-                        color = if (message.isOwn)
-                            MaterialTheme.colorScheme.onPrimaryContainer
-                        else if (message.sender == "Система" || message.sender == "Сервер")
-                            MaterialTheme.colorScheme.onTertiaryContainer
-                        else
-                            MaterialTheme.colorScheme.onSecondaryContainer
+                        color = when {
+                            message.isOwn -> MaterialTheme.colorScheme.onPrimaryContainer
+                            message.messageType == MessageType.SYSTEM -> MaterialTheme.colorScheme.onErrorContainer
+                            message.sender == "Система" || message.sender == "Сервер" -> MaterialTheme.colorScheme.onTertiaryContainer
+                            else -> MaterialTheme.colorScheme.onSecondaryContainer
+                        }
                     )
                 }
 
                 Text(
                     text = message.content,
                     style = MaterialTheme.typography.bodyMedium,
-                    color = if (message.isOwn)
-                        MaterialTheme.colorScheme.onPrimaryContainer
-                    else if (message.sender == "Система" || message.sender == "Сервер")
-                        MaterialTheme.colorScheme.onTertiaryContainer
-                    else
-                        MaterialTheme.colorScheme.onSecondaryContainer
+                    color = when {
+                        message.isOwn -> MaterialTheme.colorScheme.onPrimaryContainer
+                        message.messageType == MessageType.SYSTEM -> MaterialTheme.colorScheme.onErrorContainer
+                        message.sender == "Система" || message.sender == "Сервер" -> MaterialTheme.colorScheme.onTertiaryContainer
+                        else -> MaterialTheme.colorScheme.onSecondaryContainer
+                    }
                 )
 
                 Text(
                     text = message.timestamp,
                     style = MaterialTheme.typography.labelSmall,
-                    color = if (message.isOwn)
-                        MaterialTheme.colorScheme.onPrimaryContainer.copy(alpha = 0.7f)
-                    else if (message.sender == "Система" || message.sender == "Сервер")
-                        MaterialTheme.colorScheme.onTertiaryContainer.copy(alpha = 0.7f)
-                    else
-                        MaterialTheme.colorScheme.onSecondaryContainer.copy(alpha = 0.7f),
+                    color = when {
+                        message.isOwn -> MaterialTheme.colorScheme.onPrimaryContainer.copy(alpha = 0.7f)
+                        message.messageType == MessageType.SYSTEM -> MaterialTheme.colorScheme.onErrorContainer.copy(alpha = 0.7f)
+                        message.sender == "Система" || message.sender == "Сервер" -> MaterialTheme.colorScheme.onTertiaryContainer.copy(alpha = 0.7f)
+                        else -> MaterialTheme.colorScheme.onSecondaryContainer.copy(alpha = 0.7f)
+                    },
                     modifier = Modifier
                         .align(if (message.isOwn) Alignment.End else Alignment.Start)
                         .padding(top = 4.dp)
@@ -286,26 +320,126 @@ private fun ConnectionStatusIndicator(connectionState: WebSocketState) {
     }
 }
 
+// Типы сообщений для правильного отображения
+enum class MessageType {
+    INFO,      // Информационные сообщения (во всю ширину)
+    CONTENT,   // Сообщения от пользователей
+    SYSTEM,    // Системные сообщения (ошибки и т.д.)
+    TECHNICAL  // Технические сообщения (не отображаются в чате)
+}
+
 data class ChatMessage(
     val sender: String,
     val content: String,
     val timestamp: String,
-    val isOwn: Boolean = false
+    val isOwn: Boolean = false,
+    val isFullWidth: Boolean = false,
+    val messageType: MessageType = MessageType.CONTENT // По умолчанию контентное сообщение
 )
 
-private fun parseMessage(rawMessage: String): ChatMessage {
+private fun parseMessage(rawMessage: String, isFullWidth: Boolean = false): ChatMessage {
     try {
         // Пытаемся распарсить как JSON
         val json = JSONObject(rawMessage)
-        val senderName = json.optString("sender_name", "Система")
-        val content = json.optString("content", rawMessage)
+        val msgType = json.optString("type", "").lowercase()
+        val payload = json.optJSONObject("payload")
 
-        return ChatMessage(
-            sender = senderName,
-            content = content,
-            timestamp = getCurrentTime(),
-            isOwn = false
-        )
+        when (msgType) {
+            "informational", "info" -> {
+                // Информационные сообщения - отображаются во всю ширину
+                var content = ""
+
+                if (payload != null) {
+                    // Проверяем, есть ли уже сформированное сообщение
+                    content = payload.optString("content", "")
+
+                    // Если нет готового сообщения, формируем его из event и user_name
+                    if (content.isEmpty()) {
+                        val event = payload.optString("event", "")
+                        val userName = payload.optString("user_name", payload.optString("username", "Пользователь"))
+
+                        content = when (event) {
+                            "joined" -> "Пользователь $userName присоединился к чату"
+                            "left" -> "Пользователь $userName покинул чат"
+                            else -> "Пользователь $userName $event"
+                        }
+                    }
+                } else {
+                    content = rawMessage
+                }
+
+                return ChatMessage(
+                    sender = "",
+                    content = content,
+                    timestamp = getCurrentTime(),
+                    isOwn = false,
+                    isFullWidth = true,
+                    messageType = MessageType.INFO
+                )
+            }
+            "content" -> {
+                // Контентные сообщения от пользователей
+                val senderName = payload?.optString("sender_name", "Неизвестный")
+                    ?: payload?.optString("user_name", "Неизвестный")
+                    ?: "Неизвестный"
+                val content = payload?.optString("content", payload?.optString("message", rawMessage) ?: rawMessage)
+                    ?: rawMessage
+
+                return ChatMessage(
+                    sender = senderName,
+                    content = content,
+                    timestamp = getCurrentTime(),
+                    isOwn = false,
+                    isFullWidth = false,
+                    messageType = MessageType.CONTENT
+                )
+            }
+            "system" -> {
+                // Системные сообщения (ошибки и т.д.)
+                val content = if (payload != null) {
+                    payload.optString("content", rawMessage)
+                } else {
+                    rawMessage
+                }
+
+                return ChatMessage(
+                    sender = "Система",
+                    content = content,
+                    timestamp = getCurrentTime(),
+                    isOwn = false,
+                    isFullWidth = false,
+                    messageType = MessageType.SYSTEM
+                )
+            }
+            "technical" -> {
+                // Технические сообщения - не отображаются в чате
+                val content = if (payload != null) {
+                    payload.optString("content", rawMessage)
+                } else {
+                    rawMessage
+                }
+
+                return ChatMessage(
+                    sender = "Техническое",
+                    content = content,
+                    timestamp = getCurrentTime(),
+                    isOwn = false,
+                    isFullWidth = false,
+                    messageType = MessageType.TECHNICAL
+                )
+            }
+            else -> {
+                // Неизвестный тип сообщения - обрабатываем как текст
+                return ChatMessage(
+                    sender = if (isFullWidth) "" else "Система",
+                    content = rawMessage,
+                    timestamp = getCurrentTime(),
+                    isOwn = false,
+                    isFullWidth = isFullWidth,
+                    messageType = if (isFullWidth) MessageType.INFO else MessageType.SYSTEM
+                )
+            }
+        }
     } catch (e: Exception) {
         // Не JSON - обычное сообщение
         // Проверяем формат [имя] сообщение
@@ -319,15 +453,19 @@ private fun parseMessage(rawMessage: String): ChatMessage {
                 sender = sender,
                 content = content,
                 timestamp = getCurrentTime(),
-                isOwn = false
+                isOwn = false,
+                isFullWidth = isFullWidth,
+                messageType = MessageType.CONTENT
             )
         } else {
             // Простое сообщение
             ChatMessage(
-                sender = "Система",
+                sender = if (isFullWidth) "" else "Система",
                 content = rawMessage,
                 timestamp = getCurrentTime(),
-                isOwn = false
+                isOwn = false,
+                isFullWidth = isFullWidth,
+                messageType = if (isFullWidth) MessageType.INFO else MessageType.SYSTEM
             )
         }
     }
