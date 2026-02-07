@@ -31,6 +31,7 @@ fun MainScreen() {
     var selectedItem by remember { mutableIntStateOf(0) }
     var selectedServer by remember { mutableStateOf(ServerConfig.defaultServer) }
     var clientName by remember { mutableStateOf(generateRandomName()) }
+    var encryptionKey by remember { mutableStateOf("") } // Добавляем состояние для ключа шифрования
 
     val items = listOf(
         TabItem("Главная", Icons.Default.Home),
@@ -77,8 +78,10 @@ fun MainScreen() {
             2 -> SettingsScreen(
                 selectedServer = selectedServer,
                 onServerSelected = { newServer -> selectedServer = newServer },
-                clientName = clientName, // Передаем clientName в SettingsScreen
-                onClientNameChange = { newName -> clientName = newName }, // Добавляем обработчик изменения имени
+                clientName = clientName,
+                onClientNameChange = { newName -> clientName = newName },
+                encryptionKey = encryptionKey, // Передаем ключ шифрования
+                onEncryptionKeyChange = { newKey -> encryptionKey = newKey }, // Обработчик изменения ключа
                 modifier = Modifier.padding(innerPadding)
             )
         }

@@ -46,7 +46,9 @@ fun SettingsScreen(
     onServerSelected: (ServerConfig) -> Unit,
     modifier: Modifier = Modifier,
     clientName: String,
-    onClientNameChange: (String) -> Unit // Добавляем обработчик изменения имени
+    onClientNameChange: (String) -> Unit, // Добавляем обработчик изменения имени
+    encryptionKey: String,
+    onEncryptionKeyChange: (String) -> Unit // Обработчик изменения ключа шифрования
 ) {
     var showCustomServerDialog by remember { mutableStateOf(false) }
     var customIpAddress by remember { mutableStateOf("") }
@@ -96,13 +98,29 @@ fun SettingsScreen(
             onConnect = {
                 CoroutineScope(Dispatchers.IO).launch {
                     LogStorage.addLog("Попытка подключения к ${selectedServer.getWebSocketUrl()}")
-                    webSocketManager.connect(selectedServer.getWebSocketUrl(), selectedServer.password, clientName)
+                    webSocketManager.connect(selectedServer.getWebSocketUrl(), selectedServer.password, clientName, encryptionKey)
                 }
             },
             onDisconnect = {
                 LogStorage.addLog("Запрос на отключение")
                 webSocketManager.disconnect()
             }
+        )
+
+        Spacer(modifier = Modifier.height(16.dp))
+
+        // Поле для ввода ключа шифрования - неактивно во время подключения
+        OutlinedTextField(
+            value = encryptionKey,
+            onValueChange = onEncryptionKeyChange,
+            modifier = Modifier.fillMaxWidth(),
+            label = { Text("Ключ шифрования (необязательно)") },
+            placeholder = { Text("Введите ключ для E2E шифрования") },
+            supportingText = {
+                Text("Шифруются только текстовые сообщения")
+            },
+            enabled = connectionState != WebSocketState.CONNECTING && connectionState != WebSocketState.CONNECTED &&
+                     connectionState != WebSocketState.AUTHENTICATED // Неактивно при подключении или подключенном состоянии
         )
 
         Spacer(modifier = Modifier.height(16.dp))

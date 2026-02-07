@@ -1,6 +1,7 @@
 package com.example.impulse.websocket
 
 import android.util.Log
+import com.example.impulse.encryption.MassageEncryption
 import com.example.impulse.util.LogStorage
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -32,6 +33,7 @@ class WebSocketManager private constructor() {
     private var lastUrl: String? = null
     private var lastPassword: String? = null
     private var lastName: String = "AndroidClient"
+    private var encryptionKey: String = "" // Ключ шифрования
 
     companion object {
         private var INSTANCE: WebSocketManager? = null
@@ -43,7 +45,7 @@ class WebSocketManager private constructor() {
         }
     }
 
-    fun connect(url: String, password: String? = null, name: String = "AndroidClient") {
+    fun connect(url: String, password: String? = null, name: String = "AndroidClient", encryptionKey: String = "") {
         Log.d("WebSocket", "Попытка подключения к: $url")
         LogStorage.addLog("Попытка подключения к: $url")
 
@@ -51,6 +53,7 @@ class WebSocketManager private constructor() {
         lastUrl = url
         lastPassword = password
         lastName = name
+        this.encryptionKey = encryptionKey // Сохраняем ключ шифрования
 
         _currentState.value = WebSocketState.CONNECTING
         isAuthenticated = false
@@ -101,7 +104,7 @@ class WebSocketManager private constructor() {
                                     handleInformationalMessage(payload)
                                 }
                                 "content" -> {
-                                    // Обработка контентных сообщений
+                                    // Обработка контентных сообщений с дешифрованием
                                     val payload = json.optJSONObject("payload") ?: json
                                     handleContentMessage(payload)
                                 }
@@ -246,10 +249,16 @@ class WebSocketManager private constructor() {
         onMessageReceived?.invoke(infoMsg.toString(), true)
     }
 
-    // Обработка контентных сообщений (сообщения от пользователей)
+    // Обработка контентных сообщений (сообщения от пользователей) с дешифрованием
     private fun handleContentMessage(payload: JSONObject) {
         val senderName = payload.optString("sender_name", payload.optString("user_name", "Неизвестный"))
-        val content = payload.optString("content", payload.optString("message", ""))
+        var content = payload.optString("content", payload.optString("message", ""))
+
+        // Дешифруем содержимое сообщения, если задан ключ шифрования
+        if (encryptionKey.isNotEmpty()) {
+            content = MassageEncryption.decrypt(content, encryptionKey)
+        }
+
         val contentMsg = JSONObject().apply {
             put("type", "content")
             put("payload", JSONObject().apply {
@@ -287,12 +296,18 @@ class WebSocketManager private constructor() {
 
         if (_currentState.value == WebSocketState.AUTHENTICATED && message.isNotEmpty()) {
             try {
+                // Шифруем содержимое сообщения, если задан ключ шифрования
+                var encryptedMessage = message
+                if (encryptionKey.isNotEmpty()) {
+                    encryptedMessage = MassageEncryption.encrypt(message, encryptionKey)
+                }
+
                 // Создаем контентное сообщение в унифицированном формате
                 val contentMsg = JSONObject().apply {
                     put("type", "content")
                     put("payload", JSONObject().apply {
                         put("sender_name", lastName)
-                        put("content", message)
+                        put("content", encryptedMessage) // Отправляем зашифрованное содержимое
                     })
                     put("timestamp", System.currentTimeMillis() / 1000)
                 }
@@ -336,4 +351,9 @@ class WebSocketManager private constructor() {
     }
 
     fun getCurrentState(): WebSocketState = _currentState.value
+
+    // Метод для обновления ключа шифрования во время работы
+    fun updateEncryptionKey(newKey: String) {
+        this.encryptionKey = newKey
+    }
 }
