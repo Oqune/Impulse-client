@@ -65,7 +65,6 @@ fun MainScreen() {
     ) { innerPadding ->
         when (selectedItem) {
             0 -> HomeScreen(
-                selectedServer = selectedServer,
                 clientName = clientName,
                 onClientNameChange = { newName -> clientName = newName },
                 modifier = Modifier.padding(innerPadding)

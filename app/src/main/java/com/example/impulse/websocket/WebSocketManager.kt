@@ -14,14 +14,6 @@ enum class WebSocketState {
     DISCONNECTED, CONNECTING, CONNECTED, AUTHENTICATED, ERROR
 }
 
-// Типы сообщений для унификации передачи данных
-enum class MessageType {
-    TECHNICAL,     // Аутентификация, подключение, отключение
-    INFORMATIONAL, // Информация о подключении/отключении пользователей
-    CONTENT,       // Сообщения от пользователей (будет зашифровано)
-    SYSTEM         // Ошибки, служебная информация
-}
-
 class WebSocketManager private constructor() {
     private var webSocket: WebSocket? = null
     private val client = OkHttpClient.Builder()
@@ -84,7 +76,7 @@ class WebSocketManager private constructor() {
                         put("timestamp", System.currentTimeMillis() / 1000)
                     }
 
-                    Log.d("WebSocket", "Отправка JSON аутентификации: ${unifiedMessage.toString()}")
+                    Log.d("WebSocket", "Отправка JSON аутентификации: $unifiedMessage")
                     LogStorage.addLog("Отправка данных аутентификации")
                     webSocket.send(unifiedMessage.toString())
                 }
@@ -98,9 +90,7 @@ class WebSocketManager private constructor() {
 
                         // Проверяем, есть ли поле "type" (унифицированный формат)
                         if (json.has("type")) {
-                            val msgTypeStr = json.optString("type", "").lowercase()
-
-                            when (msgTypeStr) {
+                            when (val msgTypeStr = json.optString("type", "").lowercase()) {
                                 "technical", "auth_response" -> {
                                     // Обработка технических сообщений (включая ответ на аутентификацию)
                                     handleTechnicalMessage(json)
@@ -121,17 +111,16 @@ class WebSocketManager private constructor() {
                                     handleSystemMessage(payload)
                                 }
                                 else -> {
-                                    // Неизвестный тип сообщения - пробуем обработать как информационное
-                                    handleInformationalMessage(json)
+                                    // Неизвестный тип сообщения - игнорируем
+                                    Log.d("WebSocket", "Неизвестный тип сообщения: $msgTypeStr")
                                 }
                             }
                         } else {
-                            // Старый формат или специфичные сообщения сервера
-                            handleLegacyMessage(text)
+                            // Неверный формат - игнорируем
+                            Log.d("WebSocket", "Неверный формат сообщения (нет поля type)")
                         }
                     } catch (e: Exception) {
-                        // Если не удалось распарсить как JSON, обрабатываем как текст
-                        handlePlainTextMessage(text)
+                        Log.e("WebSocket", "Ошибка обработки сообщения: ${e.message}", e)
                     }
                 }
 
@@ -285,67 +274,6 @@ class WebSocketManager private constructor() {
         onMessageReceived?.invoke(systemMsg.toString(), false)
     }
 
-    // Обработка сообщений в старом формате или специфичных сообщений сервера
-    private fun handleLegacyMessage(text: String) {
-        if (!isAuthenticated) {
-            // Логика аутентификации для старого формата
-            if (text.contains("успешно") || text.contains("authenticated") ||
-                text.contains("welcome") || text.contains("Connected") ||
-                text.contains("Success") || text.contains("OK") ||
-                text.contains("\"success\":true")) {
-
-                isAuthenticated = true
-                _currentState.value = WebSocketState.AUTHENTICATED
-                LogStorage.addLog("Аутентификация успешна (текст)")
-
-                // Отправляем информационное сообщение о подключении
-                val infoMsg = JSONObject().apply {
-                    put("type", "informational")
-                    put("payload", JSONObject().apply {
-                        put("content", "Вы успешно подключились к серверу")
-                    })
-                    put("timestamp", System.currentTimeMillis() / 1000)
-                }
-                onMessageReceived?.invoke(infoMsg.toString(), true)
-            } else {
-                _currentState.value = WebSocketState.ERROR
-                val systemMsg = JSONObject().apply {
-                    put("type", "system")
-                    put("payload", JSONObject().apply {
-                        put("content", "Ошибка аутентификации: $text")
-                    })
-                    put("timestamp", System.currentTimeMillis() / 1000)
-                }
-                onMessageReceived?.invoke(systemMsg.toString(), false)
-                LogStorage.addLog("Ошибка аутентификации: $text")
-            }
-            return
-        }
-
-        // Обычные текстовые сообщения после аутентификации
-        val systemMsg = JSONObject().apply {
-            put("type", "system")
-            put("payload", JSONObject().apply {
-                put("content", text)
-            })
-            put("timestamp", System.currentTimeMillis() / 1000)
-        }
-        onMessageReceived?.invoke(systemMsg.toString(), false)
-    }
-
-    // Обработка простых текстовых сообщений
-    private fun handlePlainTextMessage(text: String) {
-        // Простые текстовые сообщения обрабатываем как системные
-        val systemMsg = JSONObject().apply {
-            put("type", "system")
-            put("payload", JSONObject().apply {
-                put("content", text)
-            })
-            put("timestamp", System.currentTimeMillis() / 1000)
-        }
-        onMessageReceived?.invoke(systemMsg.toString(), false)
-    }
-
     fun sendMessage(message: String): Boolean {
         Log.d("WebSocket", "Отправка: $message")
         LogStorage.addLog("Отправка: $message")
@@ -357,7 +285,7 @@ class WebSocketManager private constructor() {
             return false
         }
 
-        return if (_currentState.value == WebSocketState.AUTHENTICATED && message.isNotEmpty()) {
+        if (_currentState.value == WebSocketState.AUTHENTICATED && message.isNotEmpty()) {
             try {
                 // Создаем контентное сообщение в унифицированном формате
                 val contentMsg = JSONObject().apply {

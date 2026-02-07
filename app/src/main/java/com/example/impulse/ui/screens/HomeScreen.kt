@@ -12,11 +12,9 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
-import com.example.impulse.data.ServerConfig
 
 @Composable
 fun HomeScreen(
-    selectedServer: ServerConfig,
     clientName: String,
     onClientNameChange: (String) -> Unit,
     modifier: Modifier = Modifier
@@ -83,124 +81,7 @@ fun HomeScreen(
         NameInputDialog(
             currentName = clientName,
             onNameChange = onClientNameChange,
-            onDismiss = { showNameDialog = false }
-        )
-    }
-}
-
-@Composable
-private fun ServerInfoCard(server: ServerConfig) {
-    Card(
-        modifier = Modifier.fillMaxWidth(),
-        elevation = CardDefaults.cardElevation(defaultElevation = 4.dp),
-        colors = CardDefaults.cardColors(
-            containerColor = MaterialTheme.colorScheme.surfaceVariant
-        )
-    ) {
-        Column(
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(16.dp)
-        ) {
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                Icon(
-                    imageVector = Icons.Default.Build,
-                    contentDescription = null,
-                    tint = MaterialTheme.colorScheme.primary,
-                    modifier = Modifier.padding(end = 8.dp)
-                )
-                Text(
-                    text = "Информация о сервере",
-                    style = MaterialTheme.typography.titleLarge,
-                    fontWeight = FontWeight.Bold
-                )
-            }
-
-            Spacer(modifier = Modifier.height(16.dp))
-
-            // Название сервера
-            Text(
-                text = server.name,
-                style = MaterialTheme.typography.headlineSmall,
-                fontWeight = FontWeight.Medium,
-                color = MaterialTheme.colorScheme.primary
-            )
-
-            Spacer(modifier = Modifier.height(8.dp))
-
-            // Детали сервера
-            ServerDetailRow(
-                icon = Icons.Default.LocationOn,
-                label = "IP адрес",
-                value = server.ipAddress
-            )
-
-            ServerDetailRow(
-                icon = Icons.Default.Info,
-                label = "Порт",
-                value = server.port.toString()
-            )
-
-            ServerDetailRow(
-                icon = Icons.Default.Info,
-                label = "WebSocket URL",
-                value = server.getWebSocketUrl()
-            )
-
-            if (server.password.isNotEmpty()) {
-                ServerDetailRow(
-                    icon = Icons.Default.Lock,
-                    label = "Статус",
-                    value = "Защищено паролем"
-                )
-            } else {
-                ServerDetailRow(
-                    icon = Icons.Default.Lock,
-                    label = "Статус",
-                    value = "Без защиты"
-                )
-            }
-
-            Spacer(modifier = Modifier.height(8.dp))
-
-            Text(
-                text = server.description,
-                style = MaterialTheme.typography.bodyMedium,
-                color = MaterialTheme.colorScheme.onSurfaceVariant
-            )
-        }
-    }
-}
-
-@Composable
-private fun ServerDetailRow(icon: androidx.compose.ui.graphics.vector.ImageVector, label: String, value: String) {
-    Row(
-        modifier = Modifier
-            .fillMaxWidth()
-            .padding(vertical = 4.dp),
-        verticalAlignment = Alignment.CenterVertically
-    ) {
-        Icon(
-            imageVector = icon,
-            contentDescription = null,
-            tint = MaterialTheme.colorScheme.onSurfaceVariant,
-            modifier = Modifier.size(16.dp)
-        )
-        Spacer(Modifier.width(8.dp))
-        Text(
-            text = "$label:",
-            style = MaterialTheme.typography.bodyMedium,
-            fontWeight = FontWeight.Medium,
-            color = MaterialTheme.colorScheme.onSurface
-        )
-        Spacer(Modifier.width(8.dp))
-        Text(
-            text = value,
-            style = MaterialTheme.typography.bodyMedium,
-            color = MaterialTheme.colorScheme.onSurfaceVariant
+            onDismiss = {},
         )
     }
 }
