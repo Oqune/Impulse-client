@@ -12,14 +12,22 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
+import com.example.impulse.data.ServerConfig
+import com.example.impulse.websocket.WebSocketManager
+import com.example.impulse.websocket.WebSocketState
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import androidx.compose.foundation.background
+import kotlinx.coroutines.launch
 
 @Composable
 fun HomeScreen(
     clientName: String,
-    onClientNameChange: (String) -> Unit,
+    selectedServer: ServerConfig,
     modifier: Modifier = Modifier
 ) {
-    var showNameDialog by remember { mutableStateOf(false) }
+    val webSocketManager = WebSocketManager.getInstance()
+    val connectionState by webSocketManager.currentState.collectAsState()
 
     Column(
         modifier = modifier
@@ -54,273 +62,141 @@ fun HomeScreen(
             modifier = Modifier.padding(bottom = 32.dp)
         )
 
-        // Карточка выбора имени
-        NameSelectionCard(
-            clientName = clientName,
-            onEditName = { showNameDialog = true }
-        )
-
-        Spacer(modifier = Modifier.height(24.dp))
-
-        // Информационная секция
-        InfoSection()
-
-        Spacer(modifier = Modifier.height(16.dp))
-
-        Text(
-            text = "Готовы начать общение? Перейдите во вкладку 'Чат'",
-            style = MaterialTheme.typography.bodyMedium,
-            textAlign = TextAlign.Center,
-            color = MaterialTheme.colorScheme.primary,
-            modifier = Modifier.padding(top = 16.dp)
-        )
-    }
-
-    // Диалог для редактирования имени
-    if (showNameDialog) {
-        NameInputDialog(
-            currentName = clientName,
-            onNameChange = onClientNameChange,
-            onDismiss = {},
-        )
-    }
-}
-
-@Composable
-private fun NameSelectionCard(
-    clientName: String,
-    onEditName: () -> Unit
-) {
-    Card(
-        modifier = Modifier.fillMaxWidth(),
-        elevation = CardDefaults.cardElevation(defaultElevation = 4.dp)
-    ) {
-        Column(
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(16.dp)
+        // Статус подключения и кнопки управления
+        Card(
+            modifier = Modifier.fillMaxWidth(),
+            elevation = CardDefaults.cardElevation(defaultElevation = 4.dp)
         ) {
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                Icon(
-                    imageVector = Icons.Default.Person,
-                    contentDescription = null,
-                    tint = MaterialTheme.colorScheme.primary,
-                    modifier = Modifier.padding(end = 8.dp)
-                )
-                Text(
-                    text = "Ваше имя в чате",
-                    style = MaterialTheme.typography.titleLarge,
-                    fontWeight = FontWeight.Bold
-                )
-            }
-
-            Spacer(modifier = Modifier.height(16.dp))
-
-            // Отображение текущего имени
-            Card(
+            Column(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .padding(vertical = 8.dp),
-                colors = CardDefaults.cardColors(
-                    containerColor = MaterialTheme.colorScheme.primaryContainer
-                )
+                    .padding(16.dp)
             ) {
+                Text(
+                    text = "Статус подключения",
+                    style = MaterialTheme.typography.titleLarge,
+                    fontWeight = FontWeight.Bold,
+                    modifier = Modifier.padding(bottom = 8.dp)
+                )
+
+                // Индикатор состояния
                 Row(
                     modifier = Modifier
                         .fillMaxWidth()
-                        .padding(16.dp),
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.SpaceBetween
+                        .padding(vertical = 8.dp),
+                    verticalAlignment = Alignment.CenterVertically
                 ) {
-                    Text(
-                        text = clientName,
-                        style = MaterialTheme.typography.headlineSmall,
-                        color = MaterialTheme.colorScheme.onPrimaryContainer
+                    val statusColor = when (connectionState) {
+                        WebSocketState.AUTHENTICATED -> MaterialTheme.colorScheme.primary
+                        WebSocketState.CONNECTED -> MaterialTheme.colorScheme.secondary
+                        WebSocketState.CONNECTING -> MaterialTheme.colorScheme.secondary
+                        WebSocketState.DISCONNECTED -> MaterialTheme.colorScheme.error
+                        WebSocketState.ERROR -> MaterialTheme.colorScheme.error
+                    }
+
+                    Box(
+                        modifier = Modifier
+                            .size(12.dp)
+                            .background(statusColor, androidx.compose.foundation.shape.CircleShape)
                     )
 
-                    IconButton(
-                        onClick = onEditName,
-                        colors = IconButtonDefaults.iconButtonColors(
-                            containerColor = MaterialTheme.colorScheme.primary,
-                            contentColor = MaterialTheme.colorScheme.onPrimary
-                        )
-                    ) {
-                        Icon(
-                            imageVector = Icons.Default.Edit,
-                            contentDescription = "Редактировать имя"
-                        )
+                    Spacer(Modifier.width(8.dp))
+
+                    Text(
+                        text = when (connectionState) {
+                            WebSocketState.DISCONNECTED -> "Отключено"
+                            WebSocketState.CONNECTING -> "Подключение..."
+                            WebSocketState.CONNECTED -> "Подключено"
+                            WebSocketState.AUTHENTICATED -> "Аутентифицирован"
+                            WebSocketState.ERROR -> "Ошибка"
+                        },
+                        style = MaterialTheme.typography.bodyMedium
+                    )
+                }
+
+                // Информация о сервере
+                Text(
+                    text = "Сервер: ${selectedServer.name}",
+                    style = MaterialTheme.typography.bodyMedium,
+                    modifier = Modifier.padding(vertical = 4.dp)
+                )
+
+                Text(
+                    text = "IP: ${selectedServer.ipAddress}:${selectedServer.port}",
+                    style = MaterialTheme.typography.bodyMedium,
+                    modifier = Modifier.padding(vertical = 4.dp)
+                )
+
+                // Кнопки подключения/отключения
+                Button(
+                    onClick = {
+                        when (connectionState) {
+                            WebSocketState.DISCONNECTED, WebSocketState.ERROR -> {
+                                CoroutineScope(Dispatchers.IO).launch {
+                                    webSocketManager.connect(
+                                        selectedServer.getWebSocketUrl(),
+                                        selectedServer.password,
+                                        clientName,
+                                        "" // encryption key - пока пустой
+                                    )
+                                }
+                            }
+                            WebSocketState.CONNECTING, WebSocketState.CONNECTED, WebSocketState.AUTHENTICATED -> {
+                                webSocketManager.disconnect()
+                            }
+                            else -> {}
+                        }
+                    },
+                    enabled = connectionState != WebSocketState.CONNECTING,
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    when (connectionState) {
+                        WebSocketState.DISCONNECTED, WebSocketState.ERROR -> {
+                            Icon(Icons.Default.Check, contentDescription = null)
+                            Spacer(Modifier.width(8.dp))
+                            Text("Подключиться")
+                        }
+                        else -> {
+                            Icon(Icons.Default.Close, contentDescription = null)
+                            Spacer(Modifier.width(8.dp))
+                            Text("Отключиться")
+                        }
                     }
                 }
             }
-
-            Text(
-                text = "Это имя будет отображаться у других пользователей в чате",
-                style = MaterialTheme.typography.bodyMedium,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                textAlign = TextAlign.Center,
-                modifier = Modifier.padding(top = 8.dp)
-            )
         }
-    }
-}
 
-@Composable
-private fun InfoSection() {
-    Card(
-        modifier = Modifier.fillMaxWidth(),
-        elevation = CardDefaults.cardElevation(defaultElevation = 2.dp),
-        colors = CardDefaults.cardColors(
-            containerColor = MaterialTheme.colorScheme.secondaryContainer
-        )
-    ) {
-        Column(
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(16.dp)
-        ) {
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                Icon(
-                    imageVector = Icons.Default.Info,
-                    contentDescription = null,
-                    tint = MaterialTheme.colorScheme.onSecondaryContainer,
-                    modifier = Modifier.padding(end = 8.dp)
-                )
-                Text(
-                    text = "Как использовать",
-                    style = MaterialTheme.typography.titleMedium,
-                    fontWeight = FontWeight.Bold,
-                    color = MaterialTheme.colorScheme.onSecondaryContainer
-                )
-            }
+        Spacer(modifier = Modifier.height(24.dp))
 
-            Spacer(modifier = Modifier.height(12.dp))
-
-            InstructionStep(
-                number = "1",
-                text = "Выберите сервер во вкладке 'Настройки'"
-            )
-
-            InstructionStep(
-                number = "2",
-                text = "Настройте ваше имя для отображения в чате"
-            )
-
-            InstructionStep(
-                number = "3",
-                text = "Перейдите во вкладку 'Чат' и подключитесь"
-            )
-
-            InstructionStep(
-                number = "4",
-                text = "Начните общение с другими пользователями!"
-            )
-        }
-    }
-}
-
-@Composable
-private fun InstructionStep(number: String, text: String) {
-    Row(
-        modifier = Modifier
-            .fillMaxWidth()
-            .padding(vertical = 4.dp),
-        verticalAlignment = Alignment.Top
-    ) {
+        // Информация о пользователе
         Card(
-            modifier = Modifier.size(24.dp),
-            colors = CardDefaults.cardColors(
-                containerColor = MaterialTheme.colorScheme.primary
-            ),
-            shape = androidx.compose.foundation.shape.CircleShape
+            modifier = Modifier.fillMaxWidth(),
+            elevation = CardDefaults.cardElevation(defaultElevation = 2.dp)
         ) {
-            Box(
-                modifier = Modifier.fillMaxSize(),
-                contentAlignment = Alignment.Center
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(16.dp)
             ) {
                 Text(
-                    text = number,
-                    style = MaterialTheme.typography.labelMedium,
-                    color = MaterialTheme.colorScheme.onPrimary,
-                    fontWeight = FontWeight.Bold
+                    text = "Информация о пользователе",
+                    style = MaterialTheme.typography.titleLarge,
+                    fontWeight = FontWeight.Bold,
+                    modifier = Modifier.padding(bottom = 8.dp)
                 )
-            }
-        }
 
-        Spacer(Modifier.width(12.dp))
-
-        Text(
-            text = text,
-            style = MaterialTheme.typography.bodyMedium,
-            color = MaterialTheme.colorScheme.onSecondaryContainer,
-            modifier = Modifier.align(Alignment.CenterVertically)
-        )
-    }
-}
-
-@Composable
-private fun NameInputDialog(
-    currentName: String,
-    onNameChange: (String) -> Unit,
-    onDismiss: () -> Unit
-) {
-    var name by remember { mutableStateOf(currentName) }
-
-    AlertDialog(
-        onDismissRequest = onDismiss,
-        title = {
-            Text(
-                text = "Изменить имя",
-                style = MaterialTheme.typography.headlineSmall
-            )
-        },
-        text = {
-            Column {
                 Text(
-                    text = "Введите ваше имя для отображения в чате:",
+                    text = "Имя в чате: $clientName",
                     style = MaterialTheme.typography.bodyMedium,
-                    modifier = Modifier.padding(bottom = 16.dp)
+                    modifier = Modifier.padding(vertical = 4.dp)
                 )
 
-                OutlinedTextField(
-                    value = name,
-                    onValueChange = {
-                        if (it.length <= 20) { // Ограничение длины имени
-                            name = it
-                        }
-                    },
-                    modifier = Modifier.fillMaxWidth(),
-                    label = { Text("Имя") },
-                    placeholder = { Text("Введите имя") },
-                    singleLine = true,
-                    supportingText = {
-                        Text("${name.length}/20")
-                    }
+                Text(
+                    text = "Статус: ${if (connectionState == WebSocketState.AUTHENTICATED) "В сети" else "Не в сети"}",
+                    style = MaterialTheme.typography.bodyMedium,
+                    modifier = Modifier.padding(vertical = 4.dp)
                 )
             }
-        },
-        confirmButton = {
-            TextButton(
-                onClick = {
-                    if (name.isNotBlank() && name.length >= 2) {
-                        onNameChange(name.trim())
-                    }
-                    onDismiss()
-                },
-                enabled = name.isNotBlank() && name.length >= 2
-            ) {
-                Text("Сохранить")
-            }
-        },
-        dismissButton = {
-            TextButton(onClick = onDismiss) {
-                Text("Отмена")
-            }
         }
-    )
+    }
 }

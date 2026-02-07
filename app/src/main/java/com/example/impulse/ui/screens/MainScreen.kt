@@ -31,7 +31,7 @@ fun MainScreen() {
     var selectedItem by remember { mutableIntStateOf(0) }
     var selectedServer by remember { mutableStateOf(ServerConfig.defaultServer) }
     var clientName by remember { mutableStateOf(generateRandomName()) }
-    var encryptionKey by remember { mutableStateOf("") } // Добавляем состояние для ключа шифрования
+    var encryptionKey by remember { mutableStateOf("") }
 
     val items = listOf(
         TabItem("Главная", Icons.Default.Home),
@@ -41,7 +41,6 @@ fun MainScreen() {
 
     Scaffold(
         topBar = {
-            // Добавляем отступ для системной панели и делаем панель тоньше
             NavigationBar(
                 modifier = Modifier.statusBarsPadding(),
                 containerColor = androidx.compose.material3.MaterialTheme.colorScheme.surface,
@@ -67,7 +66,7 @@ fun MainScreen() {
         when (selectedItem) {
             0 -> HomeScreen(
                 clientName = clientName,
-                onClientNameChange = { newName -> clientName = newName },
+                selectedServer = selectedServer,
                 modifier = Modifier.padding(innerPadding)
             )
             1 -> ChatScreen(
@@ -80,15 +79,14 @@ fun MainScreen() {
                 onServerSelected = { newServer -> selectedServer = newServer },
                 clientName = clientName,
                 onClientNameChange = { newName -> clientName = newName },
-                encryptionKey = encryptionKey, // Передаем ключ шифрования
-                onEncryptionKeyChange = { newKey -> encryptionKey = newKey }, // Обработчик изменения ключа
+                encryptionKey = encryptionKey,
+                onEncryptionKeyChange = { newKey -> encryptionKey = newKey },
                 modifier = Modifier.padding(innerPadding)
             )
         }
     }
 }
 
-// Генерация случайного имени
 private fun generateRandomName(): String {
     val adjectives = arrayOf(
         "Веселый", "Умный", "Быстрый", "Смелый", "Добрый",
