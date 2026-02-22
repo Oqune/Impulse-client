@@ -160,7 +160,6 @@ private fun SettingCard(
         modifier = Modifier
             .fillMaxWidth()
             .clickable(onClick = onClick),
-        elevation = CardDefaults.cardElevation(defaultElevation = 7.dp), // Более выраженная тень
         shape = androidx.compose.foundation.shape.RoundedCornerShape(16.dp) // Более закругленные углы
     ) {
         Row(

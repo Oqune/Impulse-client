@@ -6,10 +6,7 @@ plugins {
 
 android {
     namespace = "com.example.impulse"
-    compileSdk {
-        version = release(36)
-    }
-
+    compileSdk = 36
     defaultConfig {
         applicationId = "com.example.impulse"
         minSdk = 28
@@ -19,7 +16,6 @@ android {
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
     }
-
     buildTypes {
         release {
             isMinifyEnabled = false
@@ -40,7 +36,6 @@ android {
         compose = true
     }
 }
-
 dependencies {
     implementation(libs.okhttp)
     implementation(libs.androidx.core.ktx)

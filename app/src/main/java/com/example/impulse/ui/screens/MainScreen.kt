@@ -44,7 +44,7 @@ fun MainScreen() {
             NavigationBar(
                 modifier = Modifier.statusBarsPadding(),
                 containerColor = androidx.compose.material3.MaterialTheme.colorScheme.surface,
-                tonalElevation = 0.dp
+                tonalElevation = 0.1.dp
             ) {
                 items.forEachIndexed { index, item ->
                     NavigationBarItem(

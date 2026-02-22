@@ -8,7 +8,6 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.ArrowBack
 import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material3.*
@@ -26,6 +25,7 @@ import androidx.compose.ui.unit.dp
 import com.example.impulse.ui.theme.AccentColor
 import com.example.impulse.ui.theme.ThemeMode
 import com.example.impulse.ui.theme.ThemeSettings
+import androidx.compose.material.icons.automirrored.filled.ArrowBack
 
 @Composable
 fun AppSettingsScreen(
@@ -54,7 +54,7 @@ fun AppSettingsScreen(
                 verticalAlignment = Alignment.CenterVertically
             ) {
                 IconButton(onClick = onBack) {
-                    Icon(Icons.Default.ArrowBack, contentDescription = "Назад")
+                    Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Назад")
                 }
 
                 Spacer(Modifier.width(8.dp))
@@ -78,7 +78,7 @@ fun AppSettingsScreen(
             // Карточка выбора темы
             Card(
                 modifier = Modifier.fillMaxWidth(),
-                elevation = CardDefaults.cardElevation(defaultElevation = 2.dp)
+                elevation = CardDefaults.cardElevation()
             ) {
                 Column(
                     modifier = Modifier
@@ -99,7 +99,7 @@ fun AppSettingsScreen(
                                 .fillMaxWidth()
                                 .clickable {
                                     selectedTheme = mode
-                                    ThemeSettings.themeMode = mode
+                                    ThemeSettings.setThemeMode(mode)
                                 }
                                 .padding(vertical = 8.dp),
                             verticalAlignment = Alignment.CenterVertically
@@ -108,7 +108,7 @@ fun AppSettingsScreen(
                                 selected = selectedTheme == mode,
                                 onClick = {
                                     selectedTheme = mode
-                                    ThemeSettings.themeMode = mode
+                                    ThemeSettings.setThemeMode(mode)
                                 }
                             )
                             Spacer(Modifier.width(8.dp))
@@ -128,7 +128,7 @@ fun AppSettingsScreen(
             // Карточка выбора акцентного цвета
             Card(
                 modifier = Modifier.fillMaxWidth(),
-                elevation = CardDefaults.cardElevation(defaultElevation = 2.dp)
+                elevation = CardDefaults.cardElevation()
             ) {
                 Column(
                     modifier = Modifier
@@ -159,7 +159,7 @@ fun AppSettingsScreen(
                                         isSelected = selectedAccent == color,
                                         onClick = {
                                             selectedAccent = color
-                                            ThemeSettings.accentColor = color
+                                            ThemeSettings.setAccentColor(color)
                                         },
                                         modifier = Modifier.weight(1f)
                                     )
@@ -180,34 +180,6 @@ fun AppSettingsScreen(
                         style = MaterialTheme.typography.bodyMedium,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                         modifier = Modifier.padding(top = 8.dp)
-                    )
-                }
-            }
-
-            // Информационная карточка
-            Card(
-                modifier = Modifier.fillMaxWidth(),
-                elevation = CardDefaults.cardElevation(defaultElevation = 2.dp),
-                colors = CardDefaults.cardColors(
-                    containerColor = MaterialTheme.colorScheme.primaryContainer
-                )
-            ) {
-                Column(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .padding(16.dp)
-                ) {
-                    Text(
-                        text = "ℹ️ Информация",
-                        style = MaterialTheme.typography.titleSmall,
-                        fontWeight = FontWeight.Bold,
-                        color = MaterialTheme.colorScheme.onPrimaryContainer,
-                        modifier = Modifier.padding(bottom = 8.dp)
-                    )
-                    Text(
-                        text = "Изменения темы применяются мгновенно. Выбранные настройки сохраняются только на время сеанса.",
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onPrimaryContainer
                     )
                 }
             }

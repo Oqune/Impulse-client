@@ -68,7 +68,7 @@ fun UserSettingsScreen(
 
             Card(
                 modifier = Modifier.fillMaxWidth(),
-                elevation = CardDefaults.cardElevation(defaultElevation = 2.dp)
+                elevation = CardDefaults.cardElevation()
             ) {
                 Column(
                     modifier = Modifier

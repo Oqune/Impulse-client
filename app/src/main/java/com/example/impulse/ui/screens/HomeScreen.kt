@@ -66,7 +66,7 @@ fun HomeScreen(
         // Статус подключения и кнопки управления
         Card(
             modifier = Modifier.fillMaxWidth(),
-            elevation = CardDefaults.cardElevation(defaultElevation = 4.dp)
+            elevation = CardDefaults.cardElevation()
         ) {
             Column(
                 modifier = Modifier
@@ -172,7 +172,7 @@ fun HomeScreen(
         // Информация о пользователе
         Card(
             modifier = Modifier.fillMaxWidth(),
-            elevation = CardDefaults.cardElevation(defaultElevation = 2.dp)
+            elevation = CardDefaults.cardElevation()
         ) {
             Column(
                 modifier = Modifier
