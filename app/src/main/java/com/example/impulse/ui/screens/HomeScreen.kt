@@ -24,6 +24,7 @@ import kotlinx.coroutines.launch
 fun HomeScreen(
     clientName: String,
     selectedServer: ServerConfig,
+    encryptionKey: String,
     modifier: Modifier = Modifier
 ) {
     val webSocketManager = WebSocketManager.getInstance()
@@ -137,7 +138,7 @@ fun HomeScreen(
                                         selectedServer.getWebSocketUrl(),
                                         selectedServer.password,
                                         clientName,
-                                        "" // encryption key - пока пустой
+                                        encryptionKey // используем переданный ключ шифрования
                                     )
                                 }
                             }

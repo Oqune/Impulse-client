@@ -67,6 +67,7 @@ fun MainScreen() {
             0 -> HomeScreen(
                 clientName = clientName,
                 selectedServer = selectedServer,
+                encryptionKey = encryptionKey,
                 modifier = Modifier.padding(innerPadding)
             )
             1 -> ChatScreen(
