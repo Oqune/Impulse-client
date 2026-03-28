@@ -30,7 +30,7 @@ class MassageEncryption {
                 return Base64.encodeToString(encryptedBytes, Base64.NO_WRAP)
             } catch (e: Exception) {
                 e.printStackTrace()
-                return message // Возвращаем оригинальное сообщение в случае ошибки
+                return message
             }
         }
 
