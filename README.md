@@ -1,11 +1,11 @@
 <div align="center">
 
-[🇬🇧 **English**](README.md) | [🇷🇺 Русский](README.ru.md) | [🇨🇳 中文](README.zh.md)
+[🇺🇸 **English**](README.md) | [🇷🇺 Русский](README.ru.md) | [🇨🇳 中文](README.zh.md)
 
 ![logo](logo.png)
 
 [![Kotlin](https://img.shields.io/badge/Kotlin-2.0%2B-purple?logo=kotlin)](https://kotlinlang.org)
-[![Android](https://img.shields.io/badge/Platform-Android%20%7C%20Wear%20OS-lightgrey)](https://www.android.com)
+[![Android](https://img.shields.io/badge/Platform-Android-lightgrey)](https://www.android.com)
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 [![WebSocket](https://img.shields.io/badge/WebSocket-OkHttp-green)](https://square.github.io/okhttp/)
 

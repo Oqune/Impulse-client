@@ -15,6 +15,9 @@ local.properties
 .idea/navEditor.xml
 .idea/assetWizardSettings.xml
 
+# Unused sample data
+app/sampledata/
+
 # OS
 .DS_Store
 
