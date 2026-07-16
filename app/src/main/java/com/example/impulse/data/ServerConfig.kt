@@ -1,35 +1,45 @@
 package com.example.impulse.data
 
 import java.util.regex.Pattern
+import java.util.UUID
 
 data class ServerConfig(
+    val id: String = UUID.randomUUID().toString(),
     val name: String,
     val ipAddress: String,
-    val port: Int = 8080,
+    val port: Int = 8087,
     val description: String,
-    val password: String = "" // Default empty password
+    val password: String = ""
 ) {
-    fun getWebSocketUrl(): String = "ws://$ipAddress:$port"
-
+    /**
+     * All client<->server traffic uses the WSS (WebSocket Secure / TLS)
+     * standard exclusively. The plain WS scheme was removed entirely.
+     */
+    fun getWebSocketUrl(): String {
+        return "wss://$ipAddress:$port"
+    }
+    
     companion object {
         val production = ServerConfig(
+            id = "prod_001",
             name = "Production",
             ipAddress = "192.168.1.50",
-            port = 8080,
+            port = 8087,
             description = "Основной продакшн сервер",
-            password = "your_secure_password_here"
+            password = ""
         )
 
         val local = ServerConfig(
+            id = "local_001",
             name = "Local",
             ipAddress = "127.0.0.1",
-            port = 8080,
+            port = 8087,
             description = "Локальный сервер разработки",
-            password = "your_secure_password_here"
+            password = ""
         )
-
+        
         val defaultServer = production
-        val availableServers = listOf(production, local)
+        val builtInServers = listOf(production, local)
     }
 }
 

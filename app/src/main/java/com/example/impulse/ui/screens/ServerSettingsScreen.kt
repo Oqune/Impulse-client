@@ -1,21 +1,29 @@
 package com.example.impulse.ui.screens
 
+import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.selection.selectable
 import androidx.compose.foundation.selection.selectableGroup
 import androidx.compose.foundation.verticalScroll
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.*
 import androidx.compose.material3.*
+import androidx.compose.material3.RadioButtonDefaults
+import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.runtime.*
-import androidx.compose.foundation.rememberScrollState
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import com.example.impulse.data.ServerConfig
+import com.example.impulse.data.ServerPreferences
 import com.example.impulse.data.isValidIpAddress
+import com.example.impulse.util.LogStorage
 import com.example.impulse.websocket.WebSocketManager
 import com.example.impulse.websocket.WebSocketState
 
@@ -26,23 +34,37 @@ fun ServerSettingsScreen(
     onServerSelected: (ServerConfig) -> Unit,
     onBack: () -> Unit,
     encryptionKey: String,
-    onEncryptionKeyChange: (String) -> Unit
+    onEncryptionKeyChange: (String) -> Unit,
+    availableServers: List<ServerConfig> = ServerConfig.builtInServers,
+    onServerDeleted: (ServerConfig) -> Unit = {},
+    onServerUpdated: (ServerConfig) -> Unit = {}
 ) {
+    val context = androidx.compose.ui.platform.LocalContext.current
     var showCustomServerDialog by remember { mutableStateOf(false) }
+    var customName by remember { mutableStateOf("") }
     var customIpAddress by remember { mutableStateOf("") }
     var customPort by remember { mutableStateOf("8080") }
     var customPassword by remember { mutableStateOf("") }
     var ipError by remember { mutableStateOf("") }
     var portError by remember { mutableStateOf("") }
+    var nameError by remember { mutableStateOf("") }
+    var serverToDelete by remember { mutableStateOf<ServerConfig?>(null) }
+    var serverToEdit by remember { mutableStateOf<ServerConfig?>(null) }
+    var isEditMode by remember { mutableStateOf(false) }
 
-    // Используем singleton WebSocketManager
+    // Helper function to load server data for editing
+    fun loadServerForEdit(server: ServerConfig) {
+        customName = server.name
+        customIpAddress = server.ipAddress
+        customPort = server.port.toString()
+        customPassword = server.password
+    }
+
     val webSocketManager = WebSocketManager.getInstance()
     val connectionState by webSocketManager.currentState.collectAsState()
 
-    // Отслеживаем изменение выбранного сервера
     var previousServer by remember { mutableStateOf(selectedServer) }
     LaunchedEffect(selectedServer) {
-        // Если сервер изменился, отключаемся от старого
         if (previousServer != selectedServer) {
             if (connectionState == WebSocketState.CONNECTED || connectionState == WebSocketState.AUTHENTICATED) {
                 webSocketManager.disconnect()
@@ -52,47 +74,35 @@ fun ServerSettingsScreen(
         }
     }
 
-    Box(
-        modifier = Modifier
-            .fillMaxSize()
-            .padding(16.dp),
-        contentAlignment = Alignment.Center
-    ) {
+    val customServers = availableServers.filter {
+        it !in ServerConfig.builtInServers
+    }
+
+    Scaffold(
+        topBar = {
+            TopAppBar(
+                title = { Text("Настройки сервера") },
+                navigationIcon = {
+                    IconButton(onClick = onBack) {
+                        Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Назад")
+                    }
+                },
+                colors = TopAppBarDefaults.topAppBarColors(
+                    containerColor = MaterialTheme.colorScheme.surface
+                )
+            )
+        }
+    ) { innerPadding ->
         Column(
             modifier = Modifier
-                .fillMaxWidth()
+                .fillMaxSize()
+                .padding(innerPadding)
+                .navigationBarsPadding() // keep content clear of the outer bottom nav bar
+                .imePadding()
                 .verticalScroll(rememberScrollState())
-                .padding(top = 56.dp), // Компенсация высоты AppBar
-            horizontalAlignment = Alignment.CenterHorizontally,
+                .padding(16.dp),
             verticalArrangement = Arrangement.spacedBy(16.dp)
         ) {
-            // Заголовок с кнопкой назад
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                IconButton(onClick = onBack) {
-                    Icon(Icons.Default.ArrowBack, contentDescription = "Назад")
-                }
-
-                Spacer(Modifier.width(8.dp))
-
-                Icon(
-                    imageVector = Icons.Default.Place,
-                    contentDescription = null,
-                    tint = MaterialTheme.colorScheme.primary,
-                    modifier = Modifier.size(24.dp)
-                )
-
-                Spacer(Modifier.width(8.dp))
-
-                Text(
-                    text = "Настройки сервера",
-                    style = MaterialTheme.typography.headlineSmall,
-                    fontWeight = FontWeight.Bold
-                )
-            }
-
             Card(
                 modifier = Modifier.fillMaxWidth(),
                 elevation = CardDefaults.cardElevation()
@@ -102,7 +112,6 @@ fun ServerSettingsScreen(
                         .fillMaxWidth()
                         .padding(16.dp)
                 ) {
-                    // Выбор сервера
                     Text(
                         text = "Выберите сервер",
                         style = MaterialTheme.typography.titleMedium,
@@ -113,46 +122,116 @@ fun ServerSettingsScreen(
 
                     Column(
                         modifier = Modifier.selectableGroup(),
-                        verticalArrangement = Arrangement.spacedBy(8.dp)
+                        verticalArrangement = Arrangement.spacedBy(10.dp)
                     ) {
-                        ServerConfig.availableServers.forEach { server ->
-                            Row(
+                        availableServers.forEach { server ->
+                            val isCustom = server !in ServerConfig.builtInServers
+                            val isSelectedServer = server == selectedServer
+                            val serverConnectionState = if (isSelectedServer) connectionState else WebSocketState.DISCONNECTED
+
+                            Surface(
                                 modifier = Modifier
                                     .fillMaxWidth()
                                     .selectable(
-                                        selected = (server == selectedServer),
+                                        selected = isSelectedServer,
                                         onClick = { onServerSelected(server) },
                                         role = Role.RadioButton
-                                    )
-                                    .padding(8.dp),
-                                verticalAlignment = Alignment.CenterVertically
+                                    ),
+                                shape = RoundedCornerShape(16.dp),
+                                color = if (isSelectedServer)
+                                    MaterialTheme.colorScheme.primaryContainer
+                                else
+                                    MaterialTheme.colorScheme.surfaceContainerHigh,
+                                tonalElevation = if (isSelectedServer) 2.dp else 0.dp
                             ) {
-                                RadioButton(
-                                    selected = (server == selectedServer),
-                                    onClick = null
-                                )
-
-                                Spacer(Modifier.width(8.dp))
-
-                                Column {
-                                    Text(
-                                        text = server.name,
-                                        style = MaterialTheme.typography.bodyLarge,
-                                        fontWeight = FontWeight.Medium
-                                    )
-
-                                    Text(
-                                        text = "IP: ${server.ipAddress}:${server.port}",
-                                        style = MaterialTheme.typography.bodyMedium,
-                                        color = MaterialTheme.colorScheme.onSurfaceVariant
-                                    )
-
-                                    if (server.password.isNotEmpty()) {
-                                        Text(
-                                            text = "Пароль установлен",
-                                            style = MaterialTheme.typography.bodySmall,
-                                            color = MaterialTheme.colorScheme.primary
+                                Row(
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .padding(14.dp),
+                                    verticalAlignment = Alignment.CenterVertically
+                                ) {
+                                    RadioButton(
+                                        selected = isSelectedServer,
+                                        onClick = null,
+                                        colors = RadioButtonDefaults.colors(
+                                            selectedColor = MaterialTheme.colorScheme.primary
                                         )
+                                    )
+
+                                    Spacer(Modifier.width(10.dp))
+
+                                    Column(
+                                        modifier = Modifier.weight(1f)
+                                    ) {
+                                        Text(
+                                            text = server.name,
+                                            style = MaterialTheme.typography.bodyLarge,
+                                            fontWeight = FontWeight.SemiBold,
+                                            color = if (isSelectedServer)
+                                                MaterialTheme.colorScheme.onPrimaryContainer
+                                            else
+                                                MaterialTheme.colorScheme.onSurface
+                                        )
+
+                                        Text(
+                                            text = "IP: ${server.ipAddress}:${server.port} (WSS)",
+                                            style = MaterialTheme.typography.bodyMedium,
+                                            color = if (isSelectedServer)
+                                                MaterialTheme.colorScheme.onPrimaryContainer.copy(alpha = 0.8f)
+                                            else
+                                                MaterialTheme.colorScheme.onSurfaceVariant
+                                        )
+
+                                        if (server.password.isNotEmpty()) {
+                                            Text(
+                                                text = "Пароль установлен",
+                                                style = MaterialTheme.typography.bodySmall,
+                                                color = if (isSelectedServer)
+                                                    MaterialTheme.colorScheme.onPrimaryContainer
+                                                else
+                                                    MaterialTheme.colorScheme.primary
+                                            )
+                                        }
+
+                                        // Connection status for selected server
+                                        if (isSelectedServer) {
+                                            ServerConnectionStatusIndicator(serverConnectionState)
+                                        }
+                                    }
+
+                                    if (isCustom) {
+                                        Row(
+                                            modifier = Modifier,
+                                            horizontalArrangement = Arrangement.End
+                                        ) {
+                                            IconButton(
+                                                onClick = {
+                                                    serverToEdit = server
+                                                    isEditMode = true
+                                                    loadServerForEdit(server)
+                                                    showCustomServerDialog = true
+                                                }
+                                            ) {
+                                                Icon(
+                                                    Icons.Default.Edit,
+                                                    contentDescription = "Редактировать сервер",
+                                                    tint = if (isSelectedServer)
+                                                        MaterialTheme.colorScheme.onPrimaryContainer
+                                                    else
+                                                        MaterialTheme.colorScheme.primary
+                                                )
+                                            }
+                                            Spacer(Modifier.width(4.dp))
+                                            IconButton(
+                                                onClick = { serverToDelete = server }
+                                            ) {
+                                                Icon(
+                                                    Icons.Default.Delete,
+                                                    contentDescription = "Удалить сервер",
+                                                    tint = MaterialTheme.colorScheme.error
+                                                )
+                                            }
+                                        }
                                     }
                                 }
                             }
@@ -179,21 +258,21 @@ fun ServerSettingsScreen(
                         leadingIcon = { Icon(Icons.Default.Build, contentDescription = null) },
                         supportingText = {
                             Text("Шифруются только текстовые сообщения")
-                        },
-                        enabled = connectionState != WebSocketState.CONNECTING &&
-                             connectionState != WebSocketState.CONNECTED &&
-                             connectionState != WebSocketState.AUTHENTICATED
+                        }
                     )
 
                     Spacer(modifier = Modifier.height(16.dp))
 
                     Button(
                         onClick = {
+                            customName = ""
                             customIpAddress = ""
                             customPort = "8080"
                             customPassword = ""
                             ipError = ""
                             portError = ""
+                            nameError = ""
+                            isEditMode = false
                             showCustomServerDialog = true
                         },
                         modifier = Modifier.fillMaxWidth()
@@ -210,11 +289,18 @@ fun ServerSettingsScreen(
     if (showCustomServerDialog) {
         CustomServerDialog(
             showCustomServerDialog = showCustomServerDialog,
+            customName = customName,
             customIpAddress = customIpAddress,
             customPort = customPort,
             customPassword = customPassword,
+            nameError = nameError,
             ipError = ipError,
             portError = portError,
+            isEditMode = isEditMode,
+            onNameChange = { newName ->
+                customName = newName
+                nameError = if (newName.isBlank()) "Введите название сервера" else ""
+            },
             onIpAddressChange = { newIp ->
                 customIpAddress = newIp
                 ipError = if (newIp.isNotBlank() && !isValidIpAddress(newIp)) "Неверный формат IP-адреса" else ""
@@ -231,8 +317,9 @@ fun ServerSettingsScreen(
                 }
             },
             onPasswordChange = { customPassword = it },
-            onDismiss = { showCustomServerDialog = false },
+            onDismiss = { showCustomServerDialog = false; isEditMode = false },
             onConfirm = {
+                val isNameValid = customName.isNotBlank()
                 val isIpValid = customIpAddress.isNotBlank() && isValidIpAddress(customIpAddress)
                 val isPortValid = try {
                     val port = customPort.toInt()
@@ -241,17 +328,29 @@ fun ServerSettingsScreen(
                     false
                 }
 
-                if (isIpValid && isPortValid) {
+                if (isNameValid && isIpValid && isPortValid) {
                     val customServer = ServerConfig(
-                        name = "Custom",
+                        id = if (isEditMode) serverToEdit!!.id else java.util.UUID.randomUUID().toString(),
+                        name = customName,
                         ipAddress = customIpAddress,
                         port = customPort.toInt(),
                         description = "Пользовательский сервер",
                         password = customPassword
                     )
-                    onServerSelected(customServer)
+                    val serverPreferences = ServerPreferences(context)
+                    if (isEditMode) {
+                        serverPreferences.updateCustomServer(customServer)
+                        onServerUpdated(customServer)
+                    } else {
+                        serverPreferences.addCustomServer(customServer)
+                        onServerSelected(customServer)
+                    }
                     showCustomServerDialog = false
+                    isEditMode = false
                 } else {
+                    if (!isNameValid) {
+                        nameError = if (customName.isBlank()) "Введите название сервера" else ""
+                    }
                     if (!isIpValid) {
                         ipError = if (customIpAddress.isBlank()) "Введите IP-адрес" else "Неверный формат IP-адреса"
                     }
@@ -262,16 +361,48 @@ fun ServerSettingsScreen(
             }
         )
     }
+
+    serverToDelete?.let { server ->
+        AlertDialog(
+            onDismissRequest = { serverToDelete = null },
+            containerColor = MaterialTheme.colorScheme.surface,
+            tonalElevation = 8.dp,
+            title = { Text("Удалить сервер?") },
+            text = { Text("Вы уверены, что хотите удалить сервер \"${server.name}\"?") },
+            confirmButton = {
+                TextButton(
+                    onClick = {
+                        val serverPreferences = ServerPreferences(context)
+                        serverPreferences.removeCustomServer(server)
+                        onServerDeleted(server)
+                        serverToDelete = null
+                    }
+                ) {
+                    Text("Удалить", color = MaterialTheme.colorScheme.error)
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { serverToDelete = null }) {
+                    Text("Отмена")
+                }
+            }
+        )
+    }
 }
+
 
 @Composable
 private fun CustomServerDialog(
     showCustomServerDialog: Boolean,
+    customName: String,
     customIpAddress: String,
     customPort: String,
     customPassword: String,
+    nameError: String,
     ipError: String,
     portError: String,
+    isEditMode: Boolean,
+    onNameChange: (String) -> Unit,
     onIpAddressChange: (String) -> Unit,
     onPortChange: (String) -> Unit,
     onPasswordChange: (String) -> Unit,
@@ -281,11 +412,35 @@ private fun CustomServerDialog(
     if (showCustomServerDialog) {
         AlertDialog(
             onDismissRequest = onDismiss,
-            title = { Text("Кастомный сервер") },
+            containerColor = MaterialTheme.colorScheme.surface,
+            tonalElevation = 8.dp,
+            title = { Text(if (isEditMode) "Редактировать сервер" else "Кастомный сервер") },
             text = {
                 Column {
-                    Text("Введите IP-адрес, порт и пароль сервера:")
+                    Text(
+                        "Введите данные для подключения к серверу:",
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
                     Spacer(modifier = Modifier.height(16.dp))
+
+                    OutlinedTextField(
+                        value = customName,
+                        onValueChange = onNameChange,
+                        modifier = Modifier.fillMaxWidth(),
+                        label = { Text("Название сервера") },
+                        placeholder = { Text("Мой сервер") },
+                        isError = nameError.isNotBlank(),
+                        supportingText = {
+                            if (nameError.isNotBlank()) {
+                                Text(nameError)
+                            }
+                        },
+                        singleLine = true,
+                        shape = RoundedCornerShape(12.dp)
+                    )
+
+                    Spacer(modifier = Modifier.height(10.dp))
 
                     OutlinedTextField(
                         value = customIpAddress,
@@ -298,10 +453,12 @@ private fun CustomServerDialog(
                             if (ipError.isNotBlank()) {
                                 Text(ipError)
                             }
-                        }
+                        },
+                        singleLine = true,
+                        shape = RoundedCornerShape(12.dp)
                     )
 
-                    Spacer(modifier = Modifier.height(8.dp))
+                    Spacer(modifier = Modifier.height(10.dp))
 
                     OutlinedTextField(
                         value = customPort,
@@ -314,23 +471,29 @@ private fun CustomServerDialog(
                             if (portError.isNotBlank()) {
                                 Text(portError)
                             }
-                        }
+                        },
+                        singleLine = true,
+                        shape = RoundedCornerShape(12.dp)
                     )
 
-                    Spacer(modifier = Modifier.height(8.dp))
+                    Spacer(modifier = Modifier.height(10.dp))
 
                     OutlinedTextField(
                         value = customPassword,
                         onValueChange = onPasswordChange,
                         modifier = Modifier.fillMaxWidth(),
                         label = { Text("Пароль (необязательно)") },
-                        placeholder = { Text("Введите пароль, если требуется") }
+                        placeholder = { Text("Введите пароль, если требуется") },
+                        singleLine = true,
+                        shape = RoundedCornerShape(12.dp)
                     )
+
+                    Spacer(modifier = Modifier.height(10.dp))
                 }
             },
             confirmButton = {
                 TextButton(onClick = onConfirm) {
-                    Text("Сохранить")
+                    Text(if (isEditMode) "Сохранить" else "Сохранить")
                 }
             },
             dismissButton = {
@@ -338,6 +501,43 @@ private fun CustomServerDialog(
                     Text("Отмена")
                 }
             }
+        )
+    }
+}
+
+@Composable
+private fun ServerConnectionStatusIndicator(connectionState: WebSocketState) {
+    val statusData = when (connectionState) {
+        WebSocketState.DISCONNECTED ->
+            Triple("Отключено", MaterialTheme.colorScheme.outline, MaterialTheme.colorScheme.surfaceContainerHighest)
+        WebSocketState.CONNECTING ->
+            Triple("Подключение...", MaterialTheme.colorScheme.tertiary, MaterialTheme.colorScheme.tertiaryContainer)
+        WebSocketState.CONNECTED ->
+            Triple("Аутентификация...", MaterialTheme.colorScheme.tertiary, MaterialTheme.colorScheme.tertiaryContainer)
+        WebSocketState.AUTHENTICATED ->
+            Triple("Подключено", MaterialTheme.colorScheme.primary, MaterialTheme.colorScheme.primaryContainer)
+        WebSocketState.ERROR ->
+            Triple("Ошибка", MaterialTheme.colorScheme.error, MaterialTheme.colorScheme.errorContainer)
+    }
+    val (statusText, statusColor, backgroundColor) = statusData
+
+    Box(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(top = 4.dp, bottom = 4.dp),
+        contentAlignment = Alignment.CenterStart
+    ) {
+        Text(
+            text = statusText,
+            style = MaterialTheme.typography.labelSmall,
+            color = statusColor,
+            fontWeight = FontWeight.Medium,
+            modifier = Modifier
+                .background(
+                    color = backgroundColor.copy(alpha = 0.2f),
+                    shape = RoundedCornerShape(8.dp)
+                )
+                .padding(horizontal = 10.dp, vertical = 3.dp)
         )
     }
 }

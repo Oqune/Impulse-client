@@ -1,7 +1,10 @@
 package com.example.impulse.ui.screens
 
+import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.*
@@ -17,7 +20,6 @@ import com.example.impulse.websocket.WebSocketManager
 import com.example.impulse.websocket.WebSocketState
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
-import androidx.compose.foundation.background
 import kotlinx.coroutines.launch
 
 @Composable
@@ -30,105 +32,88 @@ fun HomeScreen(
     val webSocketManager = WebSocketManager.getInstance()
     val connectionState by webSocketManager.currentState.collectAsState()
 
-    Column(
-        modifier = modifier
-            .fillMaxSize()
-            .padding(16.dp)
-            .verticalScroll(rememberScrollState()),
-        horizontalAlignment = Alignment.CenterHorizontally
-    ) {
-        // Заголовок
-        Icon(
-            imageVector = Icons.Default.Home,
-            contentDescription = null,
-            tint = MaterialTheme.colorScheme.primary,
+    DecorativeBackground(modifier = modifier.fillMaxSize()) {
+        Column(
             modifier = Modifier
-                .size(64.dp)
-                .padding(16.dp)
-        )
+                .fillMaxSize()
+                .padding(horizontal = 20.dp, vertical = 16.dp)
+                .verticalScroll(rememberScrollState()),
+            horizontalAlignment = Alignment.CenterHorizontally
+        ) {
+        Spacer(modifier = Modifier.height(24.dp))
 
         Text(
-            text = "Добро пожаловать в Impulse Chat",
+            text = "Impulse Chat",
             style = MaterialTheme.typography.headlineMedium,
-            textAlign = TextAlign.Center,
             fontWeight = FontWeight.Bold,
-            modifier = Modifier.padding(bottom = 8.dp)
+            color = MaterialTheme.colorScheme.primary,
+            modifier = Modifier.padding(bottom = 24.dp)
         )
 
-        Text(
-            text = "Быстрый и безопасный чат через WebSocket",
-            style = MaterialTheme.typography.bodyLarge,
-            textAlign = TextAlign.Center,
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
-            modifier = Modifier.padding(bottom = 32.dp)
-        )
-
-        // Статус подключения и кнопки управления
         Card(
             modifier = Modifier.fillMaxWidth(),
-            elevation = CardDefaults.cardElevation()
+            shape = RoundedCornerShape(24.dp),
+            colors = CardDefaults.cardColors(
+                containerColor = when (connectionState) {
+                    WebSocketState.AUTHENTICATED -> MaterialTheme.colorScheme.primaryContainer
+                    WebSocketState.CONNECTED -> MaterialTheme.colorScheme.secondaryContainer
+                    WebSocketState.CONNECTING -> MaterialTheme.colorScheme.secondaryContainer
+                    WebSocketState.DISCONNECTED -> MaterialTheme.colorScheme.surfaceContainerHigh
+                    WebSocketState.ERROR -> MaterialTheme.colorScheme.errorContainer
+                },
+                contentColor = when (connectionState) {
+                    WebSocketState.AUTHENTICATED -> MaterialTheme.colorScheme.onPrimaryContainer
+                    WebSocketState.CONNECTED -> MaterialTheme.colorScheme.onSecondaryContainer
+                    WebSocketState.CONNECTING -> MaterialTheme.colorScheme.onSecondaryContainer
+                    WebSocketState.DISCONNECTED -> MaterialTheme.colorScheme.onSurface
+                    WebSocketState.ERROR -> MaterialTheme.colorScheme.onErrorContainer
+                }
+            ),
+            elevation = CardDefaults.cardElevation(defaultElevation = 2.dp)
         ) {
             Column(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .padding(16.dp)
+                    .padding(24.dp),
+                horizontalAlignment = Alignment.CenterHorizontally
             ) {
-                Text(
-                    text = "Статус подключения",
-                    style = MaterialTheme.typography.titleLarge,
-                    fontWeight = FontWeight.Bold,
-                    modifier = Modifier.padding(bottom = 8.dp)
-                )
-
-                // Индикатор состояния
-                Row(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .padding(vertical = 8.dp),
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    val statusColor = when (connectionState) {
-                        WebSocketState.AUTHENTICATED -> MaterialTheme.colorScheme.primary
-                        WebSocketState.CONNECTED -> MaterialTheme.colorScheme.secondary
-                        WebSocketState.CONNECTING -> MaterialTheme.colorScheme.secondary
-                        WebSocketState.DISCONNECTED -> MaterialTheme.colorScheme.error
-                        WebSocketState.ERROR -> MaterialTheme.colorScheme.error
-                    }
-
-                    Box(
-                        modifier = Modifier
-                            .size(12.dp)
-                            .background(statusColor, androidx.compose.foundation.shape.CircleShape)
-                    )
-
-                    Spacer(Modifier.width(8.dp))
-
-                    Text(
-                        text = when (connectionState) {
-                            WebSocketState.DISCONNECTED -> "Отключено"
-                            WebSocketState.CONNECTING -> "Подключение..."
-                            WebSocketState.CONNECTED -> "Подключено"
-                            WebSocketState.AUTHENTICATED -> "Аутентифицирован"
-                            WebSocketState.ERROR -> "Ошибка"
-                        },
-                        style = MaterialTheme.typography.bodyMedium
-                    )
+                val statusColor = when (connectionState) {
+                    WebSocketState.AUTHENTICATED -> MaterialTheme.colorScheme.primary
+                    WebSocketState.CONNECTED -> MaterialTheme.colorScheme.secondary
+                    WebSocketState.CONNECTING -> MaterialTheme.colorScheme.secondary
+                    WebSocketState.DISCONNECTED -> MaterialTheme.colorScheme.outline
+                    WebSocketState.ERROR -> MaterialTheme.colorScheme.error
                 }
 
-                // Информация о сервере
-                Text(
-                    text = "Сервер: ${selectedServer.name}",
-                    style = MaterialTheme.typography.bodyMedium,
-                    modifier = Modifier.padding(vertical = 4.dp)
+                Box(
+                    modifier = Modifier
+                        .size(14.dp)
+                        .background(statusColor, CircleShape)
                 )
 
+                Spacer(modifier = Modifier.height(16.dp))
+
                 Text(
-                    text = "IP: ${selectedServer.ipAddress}:${selectedServer.port}",
-                    style = MaterialTheme.typography.bodyMedium,
-                    modifier = Modifier.padding(vertical = 4.dp)
+                    text = when (connectionState) {
+                        WebSocketState.DISCONNECTED -> "Отключено"
+                        WebSocketState.CONNECTING -> "Подключение..."
+                        WebSocketState.CONNECTED -> "Аутентификация..."
+                        WebSocketState.AUTHENTICATED -> "Подключено"
+                        WebSocketState.ERROR -> "Ошибка"
+                    },
+                    style = MaterialTheme.typography.titleLarge,
+                    fontWeight = FontWeight.SemiBold
                 )
 
-                // Кнопки подключения/отключения
+                Spacer(modifier = Modifier.height(4.dp))
+
+                Text(
+                    text = "${selectedServer.name} · ${selectedServer.ipAddress}:${selectedServer.port}",
+                    style = MaterialTheme.typography.bodyMedium
+                )
+
+                Spacer(modifier = Modifier.height(24.dp))
+
                 Button(
                     onClick = {
                         when (connectionState) {
@@ -138,7 +123,7 @@ fun HomeScreen(
                                         selectedServer.getWebSocketUrl(),
                                         selectedServer.password,
                                         clientName,
-                                        encryptionKey // используем переданный ключ шифрования
+                                        encryptionKey
                                     )
                                 }
                             }
@@ -149,18 +134,27 @@ fun HomeScreen(
                         }
                     },
                     enabled = connectionState != WebSocketState.CONNECTING,
-                    modifier = Modifier.fillMaxWidth()
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .height(52.dp),
+                    shape = RoundedCornerShape(16.dp),
+                    colors = ButtonDefaults.buttonColors(
+                        containerColor = when (connectionState) {
+                            WebSocketState.DISCONNECTED, WebSocketState.ERROR -> MaterialTheme.colorScheme.primary
+                            else -> MaterialTheme.colorScheme.secondary
+                        }
+                    )
                 ) {
                     when (connectionState) {
                         WebSocketState.DISCONNECTED, WebSocketState.ERROR -> {
-                            Icon(Icons.Default.Check, contentDescription = null)
+                            Icon(Icons.Default.PlayArrow, contentDescription = null)
                             Spacer(Modifier.width(8.dp))
-                            Text("Подключиться")
+                            Text("Подключиться", style = MaterialTheme.typography.titleSmall)
                         }
                         else -> {
                             Icon(Icons.Default.Close, contentDescription = null)
                             Spacer(Modifier.width(8.dp))
-                            Text("Отключиться")
+                            Text("Отключиться", style = MaterialTheme.typography.titleSmall)
                         }
                     }
                 }
@@ -169,35 +163,60 @@ fun HomeScreen(
 
         Spacer(modifier = Modifier.height(24.dp))
 
-        // Информация о пользователе
         Card(
             modifier = Modifier.fillMaxWidth(),
-            elevation = CardDefaults.cardElevation()
+            shape = RoundedCornerShape(16.dp),
+            colors = CardDefaults.cardColors(
+                containerColor = MaterialTheme.colorScheme.surfaceVariant
+            ),
+            elevation = CardDefaults.cardElevation(defaultElevation = 1.dp)
         ) {
-            Column(
+            Row(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .padding(16.dp)
+                    .padding(16.dp),
+                verticalAlignment = Alignment.CenterVertically
             ) {
-                Text(
-                    text = "Информация о пользователе",
-                    style = MaterialTheme.typography.titleLarge,
-                    fontWeight = FontWeight.Bold,
-                    modifier = Modifier.padding(bottom = 8.dp)
+                Icon(
+                    imageVector = Icons.Default.Person,
+                    contentDescription = null,
+                    tint = MaterialTheme.colorScheme.primary,
+                    modifier = Modifier.size(24.dp)
                 )
-
-                Text(
-                    text = "Имя в чате: $clientName",
-                    style = MaterialTheme.typography.bodyMedium,
-                    modifier = Modifier.padding(vertical = 4.dp)
-                )
-
-                Text(
-                    text = "Статус: ${if (connectionState == WebSocketState.AUTHENTICATED) "В сети" else "Не в сети"}",
-                    style = MaterialTheme.typography.bodyMedium,
-                    modifier = Modifier.padding(vertical = 4.dp)
-                )
+                Spacer(modifier = Modifier.width(12.dp))
+                Column(modifier = Modifier.weight(1f)) {
+                    Text(
+                        text = "Пользователь",
+                        style = MaterialTheme.typography.labelMedium,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                    Text(
+                        text = clientName,
+                        style = MaterialTheme.typography.bodyLarge,
+                        fontWeight = FontWeight.Medium
+                    )
+                }
+                Surface(
+                    modifier = Modifier,
+                    shape = RoundedCornerShape(12.dp),
+                    color = if (connectionState == WebSocketState.AUTHENTICATED)
+                        MaterialTheme.colorScheme.primaryContainer
+                    else
+                        MaterialTheme.colorScheme.surfaceContainerHigh,
+                    tonalElevation = 1.dp
+                ) {
+                    Text(
+                        text = if (connectionState == WebSocketState.AUTHENTICATED) "Подключено" else "Не подключено",
+                        style = MaterialTheme.typography.labelMedium,
+                        color = if (connectionState == WebSocketState.AUTHENTICATED)
+                            MaterialTheme.colorScheme.onPrimaryContainer
+                        else
+                            MaterialTheme.colorScheme.onSurfaceVariant,
+                        modifier = Modifier.padding(horizontal = 12.dp, vertical = 6.dp)
+                    )
+                }
             }
+        }
         }
     }
 }

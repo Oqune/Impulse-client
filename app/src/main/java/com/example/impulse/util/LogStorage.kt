@@ -1,20 +1,23 @@
 package com.example.impulse.util
 
+import java.text.SimpleDateFormat
+import java.util.Date
+import java.util.Locale
+import java.util.concurrent.CopyOnWriteArrayList
+
 object LogStorage {
-    private val logs = mutableListOf<String>()
-    
+    private val logs = CopyOnWriteArrayList<String>()
+    private val dateFormat = SimpleDateFormat("HH:mm:ss", Locale.getDefault())
+
     fun addLog(message: String) {
-        // Добавляем временную метку
-        val timestamp = java.text.SimpleDateFormat("HH:mm:ss", java.util.Locale.getDefault())
-            .format(java.util.Date())
+        val timestamp = dateFormat.format(Date())
         logs.add("[$timestamp] $message")
-        
-        // Ограничиваем размер логов для предотвращения переполнения памяти
+
         if (logs.size > 1000) {
             logs.removeAt(0)
         }
     }
-    
+
     fun getLogs(): List<String> = logs.toList()
     fun clearLogs() = logs.clear()
 }

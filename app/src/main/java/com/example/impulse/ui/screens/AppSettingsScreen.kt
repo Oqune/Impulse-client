@@ -6,9 +6,10 @@ import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.Check
+import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material3.*
 import androidx.compose.runtime.Composable
@@ -19,63 +20,117 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
-import com.example.impulse.ui.theme.AccentColor
+import com.example.impulse.data.ServerPreferences
+import com.example.impulse.ui.theme.DynamicColor
 import com.example.impulse.ui.theme.ThemeMode
 import com.example.impulse.ui.theme.ThemeSettings
-import androidx.compose.material.icons.automirrored.filled.ArrowBack
 
+/**
+ * Minimalist app settings:
+ *  - theme mode (radio)
+ *  - accent color via 3 sliders (hue / saturation / lightness) with
+ *    theme-aware constraints so the resulting primary stays readable
+ *  - font scale via a single slider
+ *  - auto-connect & biometric switches
+ *
+ * Base/preset colors and the 2D picker were removed to keep the menu simple.
+ */
+
+// Readability constraints per theme.
+// Light theme: lightness kept in a mid band so primary isn't too pale on white.
+// Dark theme: lightness kept higher so primary is visible on near-black.
+private val LIGHT_L_RANGE = 0.35f..0.62f
+private val DARK_L_RANGE = 0.50f..0.78f
+private val SAT_RANGE = 0.35f..1.0f
+
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun AppSettingsScreen(
     onBack: () -> Unit
 ) {
-    var selectedTheme by remember { mutableStateOf(ThemeSettings.themeMode) }
-    var selectedAccent by remember { mutableStateOf(ThemeSettings.accentColor) }
+    val context = LocalContext.current
+    val serverPreferences = remember { ServerPreferences(context) }
 
-    Box(
-        modifier = Modifier
-            .fillMaxSize()
-            .padding(16.dp),
-        contentAlignment = Alignment.Center
-    ) {
+    var selectedTheme by remember { mutableStateOf(ThemeSettings.themeMode) }
+    val isDark = selectedTheme == ThemeMode.DARK || selectedTheme == ThemeMode.OLED
+
+    // Accent sliders (full range; constraints applied on commit).
+    var hue by remember { mutableStateOf(ThemeSettings.accentColor.hue) }
+    var saturation by remember { mutableStateOf(ThemeSettings.accentColor.saturation) }
+    var lightness by remember { mutableStateOf(ThemeSettings.accentColor.lightness) }
+
+    var fontScale by remember { mutableStateOf(ThemeSettings.fontScale) }
+
+    var autoConnect by remember { mutableStateOf(serverPreferences.getAutoConnect()) }
+    var biometricEnabled by remember { mutableStateOf(serverPreferences.getBiometricEnabled()) }
+
+    // Current accent preview (opaque).
+    val currentColor = remember(hue, saturation, lightness) {
+        DynamicColor(hue, saturation, lightness, 1f).toColor()
+    }
+
+    // Hue gradient brush for the hue slider track.
+    val hueTrackBrush = remember {
+        Brush.horizontalGradient(
+            colors = listOf(
+                Color(0xFFFF0000), Color(0xFFFFFF00), Color(0xFF00FF00),
+                Color(0xFF00FFFF), Color(0xFF0000FF), Color(0xFFFF00FF), Color(0xFFFF0000)
+            )
+        )
+    }
+
+    // Saturation gradient (gray -> full hue).
+    val satTrackBrush = remember(hue, lightness) {
+        val base = DynamicColor(hue, 0f, lightness, 1f).toColor()
+        val full = DynamicColor(hue, 1f, lightness, 1f).toColor()
+        Brush.horizontalGradient(colors = listOf(base, full))
+    }
+
+    // Lightness gradient (black -> hue -> white).
+    val lightTrackBrush = remember(hue, saturation) {
+        val black = DynamicColor(hue, saturation, 0f, 1f).toColor()
+        val mid = DynamicColor(hue, saturation, 0.5f, 1f).toColor()
+        val white = DynamicColor(hue, saturation, 1f, 1f).toColor()
+        Brush.horizontalGradient(colors = listOf(black, mid, white))
+    }
+
+    fun commitColor() {
+        val lRange = if (isDark) DARK_L_RANGE else LIGHT_L_RANGE
+        val safeL = lightness.coerceIn(lRange.start, lRange.endInclusive)
+        val safeS = saturation.coerceIn(SAT_RANGE.start, SAT_RANGE.endInclusive)
+        ThemeSettings.setAccentColor(DynamicColor(hue, safeS, safeL, 1f))
+    }
+
+    Scaffold(
+        topBar = {
+            TopAppBar(
+                title = { Text("Настройки приложения") },
+                navigationIcon = {
+                    IconButton(onClick = onBack) {
+                        Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Назад")
+                    }
+                },
+                colors = TopAppBarDefaults.topAppBarColors(
+                    containerColor = MaterialTheme.colorScheme.surface
+                )
+            )
+        }
+    ) { padding ->
         Column(
             modifier = Modifier
-                .fillMaxWidth()
+                .fillMaxSize()
+                .padding(padding)
                 .verticalScroll(rememberScrollState())
-                .padding(top = 56.dp),
-            horizontalAlignment = Alignment.CenterHorizontally,
+                .padding(16.dp)
+                .navigationBarsPadding(),
             verticalArrangement = Arrangement.spacedBy(16.dp)
         ) {
-            // Заголовок с кнопкой назад
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                IconButton(onClick = onBack) {
-                    Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Назад")
-                }
-
-                Spacer(Modifier.width(8.dp))
-
-                Icon(
-                    imageVector = Icons.Default.Settings,
-                    contentDescription = null,
-                    tint = MaterialTheme.colorScheme.primary,
-                    modifier = Modifier.size(24.dp)
-                )
-
-                Spacer(Modifier.width(8.dp))
-
-                Text(
-                    text = "Настройки приложения",
-                    style = MaterialTheme.typography.headlineSmall,
-                    fontWeight = FontWeight.Bold
-                )
-            }
-
-            // Карточка выбора темы
+            // ---- Theme ----
             Card(
                 modifier = Modifier.fillMaxWidth(),
                 elevation = CardDefaults.cardElevation()
@@ -89,10 +144,8 @@ fun AppSettingsScreen(
                         text = "Тема оформления",
                         style = MaterialTheme.typography.titleMedium,
                         fontWeight = FontWeight.Bold,
-                        modifier = Modifier.padding(bottom = 12.dp)
+                        modifier = Modifier.padding(bottom = 8.dp)
                     )
-
-                    // Выбор режима темы
                     ThemeMode.entries.forEach { mode ->
                         Row(
                             modifier = Modifier
@@ -117,6 +170,7 @@ fun AppSettingsScreen(
                                     ThemeMode.LIGHT -> "Светлая"
                                     ThemeMode.DARK -> "Тёмная"
                                     ThemeMode.SYSTEM -> "Системная"
+                                    ThemeMode.OLED -> "OLED (чёрная)"
                                 },
                                 style = MaterialTheme.typography.bodyLarge
                             )
@@ -125,7 +179,7 @@ fun AppSettingsScreen(
                 }
             }
 
-            // Карточка выбора акцентного цвета
+            // ---- Accent color ----
             Card(
                 modifier = Modifier.fillMaxWidth(),
                 elevation = CardDefaults.cardElevation()
@@ -142,78 +196,215 @@ fun AppSettingsScreen(
                         modifier = Modifier.padding(bottom = 12.dp)
                     )
 
-                    // Сетка цветов
-                    Column(
-                        verticalArrangement = Arrangement.spacedBy(12.dp)
+                    // Live preview swatch.
+                    Box(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .height(56.dp)
+                            .clip(RoundedCornerShape(14.dp))
+                            .background(currentColor)
+                            .border(
+                                1.5.dp,
+                                MaterialTheme.colorScheme.outlineVariant,
+                                RoundedCornerShape(14.dp)
+                            ),
+                        contentAlignment = Alignment.Center
                     ) {
-                        // Разбиваем цвета на строки по 4 элемента
-                        val colors = AccentColor.entries
-                        colors.chunked(4).forEach { rowColors ->
-                            Row(
-                                modifier = Modifier.fillMaxWidth(),
-                                horizontalArrangement = Arrangement.spacedBy(12.dp)
-                            ) {
-                                rowColors.forEach { color ->
-                                    ColorOption(
-                                        color = color,
-                                        isSelected = selectedAccent == color,
-                                        onClick = {
-                                            selectedAccent = color
-                                            ThemeSettings.setAccentColor(color)
-                                        },
-                                        modifier = Modifier.weight(1f)
-                                    )
-                                }
-                                // Заполнение пустых ячеек для выравнивания
-                                repeat(4 - rowColors.size) {
-                                    Spacer(modifier = Modifier.weight(1f))
-                                }
-                            }
-                        }
+                        Text(
+                            text = "Предпросмотр",
+                            style = MaterialTheme.typography.titleMedium,
+                            color = if (lightness > 0.6f) Color(0xFF1A1A1A) else Color.White,
+                            fontWeight = FontWeight.Bold
+                        )
                     }
 
-                    Spacer(Modifier.height(8.dp))
+                    Spacer(Modifier.height(16.dp))
 
-                    // Название выбранного цвета
+                    // Hue
                     Text(
-                        text = "Выбран: ${selectedAccent.displayName}",
-                        style = MaterialTheme.typography.bodyMedium,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        modifier = Modifier.padding(top = 8.dp)
+                        text = "Оттенок: ${"%.0f".format(hue)}°",
+                        style = MaterialTheme.typography.bodyMedium
                     )
+                    Slider(
+                        value = hue,
+                        onValueChange = {
+                            hue = it
+                            commitColor()
+                        },
+                        valueRange = 0f..360f,
+                        colors = SliderDefaults.colors(thumbColor = currentColor),
+                        track = { GradientTrack(hueTrackBrush) }
+                    )
+
+                    // Saturation
+                    Text(
+                        text = "Насыщенность: ${"%.0f".format(saturation * 100)}%",
+                        style = MaterialTheme.typography.bodyMedium
+                    )
+                    Slider(
+                        value = saturation,
+                        onValueChange = {
+                            saturation = it
+                            commitColor()
+                        },
+                        valueRange = SAT_RANGE,
+                        colors = SliderDefaults.colors(thumbColor = currentColor),
+                        track = { GradientTrack(satTrackBrush) }
+                    )
+
+                    // Lightness
+                    val lRange = if (isDark) DARK_L_RANGE else LIGHT_L_RANGE
+                    Text(
+                        text = "Яркость: ${"%.0f".format(lightness * 100)}%",
+                        style = MaterialTheme.typography.bodyMedium
+                    )
+                    Slider(
+                        value = lightness.coerceIn(lRange.start, lRange.endInclusive),
+                        onValueChange = {
+                            lightness = it
+                            commitColor()
+                        },
+                        valueRange = lRange,
+                        colors = SliderDefaults.colors(thumbColor = currentColor),
+                        track = { GradientTrack(lightTrackBrush) }
+                    )
+                    Text(
+                        text = "Диапазон ограничен для читаемости в выбранной теме",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                }
+            }
+
+            // ---- Font scale ----
+            Card(
+                modifier = Modifier.fillMaxWidth(),
+                elevation = CardDefaults.cardElevation()
+            ) {
+                Column(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(16.dp)
+                ) {
+                    Text(
+                        text = "Размер шрифта",
+                        style = MaterialTheme.typography.titleMedium,
+                        fontWeight = FontWeight.Bold,
+                        modifier = Modifier.padding(bottom = 8.dp)
+                    )
+
+                    // Preview text that scales live with the slider.
+                    Box(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clip(RoundedCornerShape(12.dp))
+                            .background(MaterialTheme.colorScheme.surfaceContainerHighest)
+                            .padding(16.dp)
+                    ) {
+                        Text(
+                            text = "Пример текста для предпросмотра",
+                            style = MaterialTheme.typography.bodyLarge,
+                            fontSize = (MaterialTheme.typography.bodyLarge.fontSize * fontScale)
+                        )
+                    }
+
+                    Spacer(Modifier.height(12.dp))
+
+                    Text(
+                        text = "Масштаб: ${"%.2f".format(fontScale)}x",
+                        style = MaterialTheme.typography.bodyMedium
+                    )
+                    Slider(
+                        value = fontScale,
+                        onValueChange = {
+                            fontScale = it
+                            ThemeSettings.setFontScale(it)
+                        },
+                        valueRange = 0.8f..1.4f
+                    )
+                }
+            }
+
+            // ---- Additional ----
+            Card(
+                modifier = Modifier.fillMaxWidth(),
+                elevation = CardDefaults.cardElevation()
+            ) {
+                Column(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(16.dp)
+                ) {
+                    Text(
+                        text = "Дополнительно",
+                        style = MaterialTheme.typography.titleMedium,
+                        fontWeight = FontWeight.Bold,
+                        modifier = Modifier.padding(bottom = 8.dp)
+                    )
+
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(vertical = 8.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.SpaceBetween
+                    ) {
+                        Column(modifier = Modifier.weight(1f)) {
+                            Text(text = "Автоподключение", style = MaterialTheme.typography.bodyLarge)
+                            Text(
+                                text = "Подключаться при запуске",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                        }
+                        Switch(
+                            checked = autoConnect,
+                            onCheckedChange = {
+                                autoConnect = it
+                                serverPreferences.saveAutoConnect(it)
+                            }
+                        )
+                    }
+
+                    HorizontalDivider(modifier = Modifier.padding(vertical = 8.dp))
+
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(vertical = 8.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.SpaceBetween
+                    ) {
+                        Column(modifier = Modifier.weight(1f)) {
+                            Text(text = "Биометрическая защита", style = MaterialTheme.typography.bodyLarge)
+                            Text(
+                                text = "Отпечаток/лицо при запуске",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                        }
+                        Switch(
+                            checked = biometricEnabled,
+                            onCheckedChange = {
+                                biometricEnabled = it
+                                serverPreferences.saveBiometricEnabled(it)
+                            }
+                        )
+                    }
                 }
             }
         }
     }
 }
 
+/** Draws a full-width gradient as the Slider track (Material3 1.2 compatible). */
 @Composable
-private fun ColorOption(
-    color: AccentColor,
-    isSelected: Boolean,
-    onClick: () -> Unit,
-    modifier: Modifier = Modifier
-) {
+private fun GradientTrack(brush: Brush) {
     Box(
-        modifier = modifier
-            .aspectRatio(1f)
-            .clip(CircleShape)
-            .background(color.lightColor)
-            .border(
-                width = if (isSelected) 3.dp else 1.dp,
-                color = if (isSelected) MaterialTheme.colorScheme.primary else Color.Gray.copy(alpha = 0.3f),
-                shape = CircleShape
-            )
-            .clickable(onClick = onClick),
-        contentAlignment = Alignment.Center
-    ) {
-        if (isSelected) {
-            Icon(
-                imageVector = Icons.Default.Check,
-                contentDescription = "Выбрано",
-                tint = Color.White,
-                modifier = Modifier.size(24.dp)
-            )
-        }
-    }
+        modifier = Modifier
+            .fillMaxWidth()
+            .height(8.dp)
+            .clip(RoundedCornerShape(4.dp))
+            .background(brush)
+    )
 }

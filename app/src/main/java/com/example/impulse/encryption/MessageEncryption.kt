@@ -1,20 +1,18 @@
 package com.example.impulse.encryption
 
 import android.util.Base64
+import java.security.MessageDigest
 import javax.crypto.Cipher
 import javax.crypto.spec.SecretKeySpec
-import java.security.MessageDigest
 
-class MassageEncryption {
+class MessageEncryption {
     companion object {
         private const val ALGORITHM = "AES"
         private const val TRANSFORMATION = "AES/ECB/PKCS5Padding"
 
-        // Хэшируем ключ для получения 128-битного AES ключа
         private fun generateKey(key: String): SecretKeySpec {
             val sha = MessageDigest.getInstance("SHA-256")
             val keyBytes = sha.digest(key.toByteArray(Charsets.UTF_8))
-            // Используем только первые 16 байтов для AES-128
             val secretKey = keyBytes.copyOf(16)
             return SecretKeySpec(secretKey, ALGORITHM)
         }
@@ -46,7 +44,7 @@ class MassageEncryption {
                 return String(decryptedBytes, Charsets.UTF_8)
             } catch (e: Exception) {
                 e.printStackTrace()
-                return encryptedMessage // Возвращаем зашифрованное сообщение в случае ошибки
+                return encryptedMessage
             }
         }
     }

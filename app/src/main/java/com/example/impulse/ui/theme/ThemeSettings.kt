@@ -1,4 +1,4 @@
-package com.example.impulse.ui.theme
+﻿package com.example.impulse.ui.theme
 
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -7,66 +7,79 @@ import androidx.compose.ui.graphics.Color
 import com.example.impulse.data.ThemePreferences
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.launch
+import kotlinx.serialization.Serializable
 
-// Enum для выбора темы
 enum class ThemeMode {
-    LIGHT, DARK, SYSTEM
+    LIGHT, DARK, SYSTEM, OLED
 }
 
-// Enum для акцентных цветов
-// Enum для акцентных цветов
-enum class AccentColor(val displayName: String, val lightColor: Color, val darkColor: Color) {
-    BLUE("Синий", Color(0xFF2196F3), Color(0xFF64B5F6)),
-    GREEN("Зеленый", Color(0xFF4CAF50), Color(0xFF81C784)),
-    PURPLE("Фиолетовый", Color(0xFF9C27B0), Color(0xFFCE93D8)),
-    RED("Красный", Color(0xFFE53935), Color(0xFFEF5350)),
-    TEAL("Бирюзовый", Color(0xFF009688), Color(0xFF4DB6AC)),
-    PINK("Розовый", Color(0xFFE91E63), Color(0xFFF48FB1)),
-    AMBER("Желтый", Color(0xFFFFC107), Color(0xFFFFD54F)),
-    LIME("Лаймовый", Color(0xFFCDDC39), Color(0xFFDCE775))
+@Serializable
+data class DynamicColor(
+    val hue: Float = 210f,
+    val saturation: Float = 0.85f,
+    val lightness: Float = 0.5f,
+    val alpha: Float = 1.0f
+) {
+    fun toColor(isDark: Boolean = false): Color {
+        val c = (1 - kotlin.math.abs(2 * lightness - 1)) * saturation
+        val x = c * (1 - kotlin.math.abs((hue / 60f) % 2 - 1))
+        val m = lightness - c / 2
+
+        val (r, g, b) = when {
+            hue < 60f -> Triple(c, x, 0f)
+            hue < 120f -> Triple(x, c, 0f)
+            hue < 180f -> Triple(0f, c, x)
+            hue < 240f -> Triple(0f, x, c)
+            hue < 300f -> Triple(x, 0f, c)
+            else -> Triple(c, 0f, x)
+        }
+
+        val red = ((r + m) * 255).toInt()
+        val green = ((g + m) * 255).toInt()
+        val blue = ((b + m) * 255).toInt()
+
+        return Color(android.graphics.Color.argb(
+            (alpha * 255).toInt(),
+            red,
+            green,
+            blue
+        ))
+    }
+
+    fun lightColor(isDark: Boolean = false): Color = toColor(isDark)
+    fun darkColor(isDark: Boolean = false): Color = toColor(isDark)
 }
 
-// Singleton для хранения настроек темы
 object ThemeSettings {
     private var preferences: ThemePreferences? = null
-    private val scope = CoroutineScope(Dispatchers.Main)
+    private val scope = CoroutineScope(Dispatchers.Main + SupervisorJob())
 
     private var _themeMode by mutableStateOf(ThemeMode.SYSTEM)
-    val themeMode: ThemeMode
-        get() = _themeMode
+    val themeMode: ThemeMode get() = _themeMode
 
-    private var _accentColor by mutableStateOf(AccentColor.BLUE)
-    val accentColor: AccentColor
-        get() = _accentColor
+    private var _accentColor by mutableStateOf(DynamicColor(210f, 0.85f, 0.5f))
+    val accentColor: DynamicColor get() = _accentColor
 
-    // Инициализация с загрузкой сохранённых настроек
+    private var _fontSize by mutableStateOf(FontSize.MEDIUM)
+    val fontSize: FontSize get() = _fontSize
+
+    private var _fontScale by mutableStateOf(1.0f)
+    val fontScale: Float get() = _fontScale
+
+    val isOLEDMode: Boolean get() = _themeMode == ThemeMode.OLED
+
     fun initialize(themePreferences: ThemePreferences) {
         preferences = themePreferences
-
-        // Загружаем сохранённые настройки
-        scope.launch {
-            themePreferences.themeModeFlow.collect { mode ->
-                _themeMode = mode
-            }
-        }
-
-        scope.launch {
-            themePreferences.accentColorFlow.collect { color ->
-                _accentColor = color
-            }
-        }
+        scope.launch { themePreferences.themeModeFlow.collect { _themeMode = it } }
+        scope.launch { themePreferences.accentColorFlow.collect { _accentColor = it } }
+        scope.launch { themePreferences.fontSizeFlow.collect { _fontSize = it } }
+        scope.launch { themePreferences.fontScaleFlow.collect { _fontScale = it } }
     }
 
-    // Установка режима темы с сохранением
-    fun setThemeMode(mode: ThemeMode) {
-        _themeMode = mode
-        preferences?.saveThemeMode(mode)
-    }
-
-    // Установка акцентного цвета с сохранением
-    fun setAccentColor(color: AccentColor) {
-        _accentColor = color
-        preferences?.saveAccentColor(color)
-    }
+    fun setThemeMode(mode: ThemeMode) { _themeMode = mode; preferences?.saveThemeMode(mode) }
+    fun setAccentColor(color: DynamicColor) { _accentColor = color; preferences?.saveAccentColor(color) }
+    fun setFontSize(size: FontSize) { _fontSize = size; preferences?.saveFontSize(size) }
+    fun setFontScale(scale: Float) { _fontScale = scale.coerceIn(0.8f, 1.4f); preferences?.saveFontScale(_fontScale) }
 }
