@@ -29,6 +29,7 @@ import com.example.impulse.data.ServerPreferences
 import com.example.impulse.ui.theme.DynamicColor
 import com.example.impulse.ui.theme.ThemeMode
 import com.example.impulse.ui.theme.ThemeSettings
+import com.example.impulse.util.LogManager
 
 /**
  * Minimalist app settings:
@@ -68,6 +69,7 @@ fun AppSettingsScreen(
 
     var autoConnect by remember { mutableStateOf(serverPreferences.getAutoConnect()) }
     var biometricEnabled by remember { mutableStateOf(serverPreferences.getBiometricEnabled()) }
+    var loggingEnabled by remember { mutableStateOf(serverPreferences.getLoggingEnabled()) }
 
     // Current accent preview (opaque).
     val currentColor = remember(hue, saturation, lightness) {
@@ -388,6 +390,34 @@ fun AppSettingsScreen(
                             onCheckedChange = {
                                 biometricEnabled = it
                                 serverPreferences.saveBiometricEnabled(it)
+                            }
+                        )
+                    }
+
+                    HorizontalDivider(modifier = Modifier.padding(vertical = 8.dp))
+
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(vertical = 8.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.SpaceBetween
+                    ) {
+                        Column(modifier = Modifier.weight(1f)) {
+                            Text(text = "Вести логи (файл)", style = MaterialTheme.typography.bodyLarge)
+                            Text(
+                                text = "Сохранять последние записи на диск для экспорта",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                        }
+                        Switch(
+                            checked = loggingEnabled,
+                            onCheckedChange = {
+                                loggingEnabled = it
+                                serverPreferences.saveLoggingEnabled(it)
+                                // Enable/disable the on-disk rotating log tree live.
+                                LogManager.setLoggingEnabled(it)
                             }
                         )
                     }

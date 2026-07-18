@@ -1,21 +1,26 @@
 package com.example.impulse.ui.screens
 
+import android.widget.Toast
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.automirrored.filled.ArrowForward
 import androidx.compose.material.icons.filled.*
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.unit.dp
 import com.example.impulse.data.ServerConfig
 import com.example.impulse.data.ServerPreferences
-import com.example.impulse.util.LogStorage
-import com.example.impulse.websocket.WebSocketManager
+import com.example.impulse.util.LogManager
 
 enum class SettingsSection {
     MAIN, SERVER, USER, APP
@@ -29,16 +34,11 @@ fun SettingsScreen(
     modifier: Modifier = Modifier,
     clientName: String,
     onClientNameChange: (String) -> Unit,
-    encryptionKey: String,
-    onEncryptionKeyChange: (String) -> Unit,
     availableServers: List<ServerConfig> = ServerConfig.builtInServers,
     onServerDeleted: (ServerConfig) -> Unit = {}
 ) {
     var currentSection by remember { mutableStateOf(SettingsSection.MAIN) }
     var showLogs by remember { mutableStateOf(false) }
-
-    val webSocketManager = WebSocketManager.getInstance()
-    val connectionState by webSocketManager.currentState.collectAsState()
 
     when (currentSection) {
         SettingsSection.MAIN -> {
@@ -55,8 +55,6 @@ fun SettingsScreen(
                 selectedServer = selectedServer,
                 onServerSelected = onServerSelected,
                 onBack = { currentSection = SettingsSection.MAIN },
-                encryptionKey = encryptionKey,
-                onEncryptionKeyChange = onEncryptionKeyChange,
                 availableServers = availableServers,
                 onServerDeleted = onServerDeleted,
                 onServerUpdated = onServerUpdated
@@ -78,10 +76,7 @@ fun SettingsScreen(
     }
 
     if (showLogs) {
-        LogDialog(
-            onDismiss = { showLogs = false },
-            onClearLogs = { LogStorage.clearLogs() }
-        )
+        LogsScreen(onBack = { showLogs = false })
     }
 }
 
@@ -195,52 +190,107 @@ private fun SettingCard(
     }
 }
 
+/**
+ * Full-screen logs viewer backed by [LogManager].
+ * Features: level filter chips (ALL / ERROR / WARN / INFO), export to a file in
+ * the app-specific Documents directory, and clear.
+ */
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
-private fun LogDialog(
-    onDismiss: () -> Unit,
-    onClearLogs: () -> Unit
-) {
-    AlertDialog(
-        onDismissRequest = onDismiss,
-        containerColor = MaterialTheme.colorScheme.surface,
-        tonalElevation = 8.dp,
-        title = {
+private fun LogsScreen(onBack: () -> Unit) {
+    val context = LocalContext.current
+    var filter by remember { mutableStateOf("ALL") }
+    val allLogs = remember { LogManager.readLast(1000) }
+    val filtered = remember(filter) {
+        if (filter == "ALL") allLogs else allLogs.filter { it.contains("[$filter]") }
+    }
+
+    Scaffold(
+        topBar = {
+            TopAppBar(
+                title = { Text("Системные логи") },
+                navigationIcon = {
+                    IconButton(onClick = onBack) {
+                        Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Назад")
+                    }
+                },
+                actions = {
+                    IconButton(onClick = {
+                        val target = LogManager.exportRecent(context.getExternalFilesDir(null) ?: context.filesDir)
+                        Toast.makeText(
+                            context,
+                            if (target != null) "Экспортировано: ${target.name}" else "Нет записей для экспорта",
+                            Toast.LENGTH_SHORT
+                        ).show()
+                    }) {
+                        Icon(Icons.Default.Share, contentDescription = "Экспорт")
+                    }
+                    IconButton(onClick = {
+                        LogManager.clear()
+                        Toast.makeText(context, "Логи очищены", Toast.LENGTH_SHORT).show()
+                    }) {
+                        Icon(Icons.Default.Delete, contentDescription = "Очистить")
+                    }
+                }
+            )
+        }
+    ) { padding ->
+        Column(
+            modifier = Modifier
+                .fillMaxSize()
+                .padding(padding)
+        ) {
+            // Level filter chips
             Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.SpaceBetween,
-                verticalAlignment = Alignment.CenterVertically
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 16.dp, vertical = 8.dp),
+                horizontalArrangement = Arrangement.spacedBy(8.dp)
             ) {
-                Text("Системные логи")
-                IconButton(onClick = onClearLogs) {
-                    Icon(Icons.Default.Clear, contentDescription = "Очистить логи")
+                listOf("ALL", "ERROR", "WARN", "INFO").forEach { level ->
+                    FilterChip(
+                        selected = filter == level,
+                        onClick = { filter = level },
+                        label = { Text(level) }
+                    )
                 }
             }
-        },
-        text = {
-            val logs = LogStorage.getLogs()
-            if (logs.isEmpty()) {
-                Text("Логи пусты")
-            } else {
-                Column(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .height(300.dp)
-                        .verticalScroll(rememberScrollState())
+
+            if (filtered.isEmpty()) {
+                Box(
+                    modifier = Modifier.fillMaxSize(),
+                    contentAlignment = Alignment.Center
                 ) {
-                    logs.forEach { log ->
+                    Text(
+                        "Нет записей",
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                }
+            } else {
+                LazyColumn(
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .padding(horizontal = 12.dp),
+                    contentPadding = PaddingValues(vertical = 8.dp)
+                ) {
+                    items(filtered) { line ->
+                        val color = when {
+                            line.contains("[ERROR]") -> MaterialTheme.colorScheme.error
+                            line.contains("[WARN]") -> MaterialTheme.colorScheme.tertiary
+                            line.contains("[INFO]") -> MaterialTheme.colorScheme.primary
+                            else -> MaterialTheme.colorScheme.onSurface
+                        }
                         Text(
-                            text = log,
+                            text = line,
                             style = MaterialTheme.typography.bodySmall,
+                            fontFamily = FontFamily.Monospace,
+                            color = color,
                             modifier = Modifier.padding(vertical = 2.dp)
                         )
                     }
                 }
             }
-        },
-        confirmButton = {
-            TextButton(onClick = onDismiss) {
-                Text("Закрыть")
-            }
         }
-    )
+    }
 }

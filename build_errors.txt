@@ -1,0 +1,3 @@
+27:w: file:///D:/Data/Projects/ImpulseProject/client/app/src/main/java/com/example/impulse/service/WebTransportForegroundService.kt:179:9 'fun stopForeground(p0: Boolean): Unit' is deprecated. Deprecated in Java.
+28:w: file:///D:/Data/Projects/ImpulseProject/client/app/src/main/java/com/example/impulse/ui/screens/QrScanScreen.kt:686:16 'fun createCaptureSession(p0: (MutableList<Surface!>..List<Surface!>), p1: CameraCaptureSession.StateCallback, p2: Handler?): Unit' is deprecated. Deprecated in Java.
+29:e: file:///D:/Data/Projects/ImpulseProject/client/app/src/main/java/com/example/impulse/ui/screens/ServerSettingsScreen.kt:531:22 'when' expression must be exhaustive. Add the 'AUTHENTICATING', 'READY' branches or an 'else' branch.

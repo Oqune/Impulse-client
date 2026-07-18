@@ -1,16 +1,26 @@
 package com.example.impulse.ui.screens
 
+import androidx.compose.foundation.background
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.navigationBarsPadding
+import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Email
 import androidx.compose.material.icons.filled.Home
+import androidx.compose.material.icons.filled.QrCode
 import androidx.compose.material.icons.filled.Settings
+import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
+import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.NavigationBar
 import androidx.compose.material3.NavigationBarItem
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
+import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
@@ -18,110 +28,95 @@ import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
+import com.example.impulse.ChatController
 import com.example.impulse.data.ServerConfig
 import com.example.impulse.data.ServerPreferences
+import com.example.impulse.security.TrustedCertManager
+import com.example.impulse.transport.ConnectionState
 import com.example.impulse.util.NameGenerator
-import com.example.impulse.websocket.WebSocketManager
-import com.example.impulse.websocket.WebSocketState
-import kotlinx.coroutines.CoroutineScope
-import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.launch
+import androidx.compose.ui.platform.LocalContext
 
 data class TabItem(val title: String, val icon: ImageVector)
 
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun MainScreen() {
-    val context = androidx.compose.ui.platform.LocalContext.current
+    val context = LocalContext.current
     var selectedItem by remember { mutableIntStateOf(0) }
     var selectedServer by remember { mutableStateOf(ServerConfig.defaultServer) }
     var clientName by remember { mutableStateOf("") }
-    var encryptionKey by remember { mutableStateOf("") }
     var availableServers by remember { mutableStateOf(ServerConfig.builtInServers) }
+    var showQrScan by remember { mutableStateOf(false) }
 
     val items = listOf(
         TabItem("Главная", Icons.Default.Home),
         TabItem("Чат", Icons.Default.Email),
+        TabItem("QR", Icons.Default.QrCode),
         TabItem("Настройки", Icons.Default.Settings)
     )
 
-    val webSocketManager = WebSocketManager.getInstance()
-    val connectionState by webSocketManager.currentState.collectAsState()
+    val chatController = remember { ChatController.getInstance(context) }
+    val connectionState by chatController.state.collectAsState()
 
-    // Initialize preferences and load saved data
     androidx.compose.runtime.LaunchedEffect(Unit) {
         val serverPreferences = ServerPreferences(context)
         val customServers = serverPreferences.getCustomServers()
         val savedServer = serverPreferences.getSelectedServer()
         val savedClientName = serverPreferences.getClientName()
-        val autoConnect = serverPreferences.getAutoConnect()
 
         availableServers = ServerConfig.builtInServers + customServers
-
-        if (savedServer != null) {
-            selectedServer = savedServer
-        }
-
-        if (savedClientName.isNotBlank()) {
-            clientName = savedClientName
-        } else {
-            clientName = NameGenerator.generate()
-        }
-
-        // Load the encryption key bound to the (selected) server.
-        encryptionKey = serverPreferences.getEncryptionKey(selectedServer.id)
-
-        if (autoConnect && savedServer != null && connectionState == WebSocketState.DISCONNECTED) {
-            CoroutineScope(Dispatchers.IO).launch {
-                webSocketManager.connect(
-                    savedServer.getWebSocketUrl(),
-                    savedServer.password,
-                    clientName,
-                    encryptionKey,
-                    savedServer.id
-                )
-            }
-        }
+        if (savedServer != null) selectedServer = savedServer
+        clientName = savedClientName.ifBlank { NameGenerator.generate() }
     }
 
-    // Reconnect when selected server changes (or its data is edited)
-    androidx.compose.runtime.LaunchedEffect(selectedServer) {
-        val serverPreferences = ServerPreferences(context)
-        val autoConnect = serverPreferences.getAutoConnect()
-
-        // Load the encryption key bound to THIS server (per-server, optional).
-        encryptionKey = serverPreferences.getEncryptionKey(selectedServer.id)
-
-        // Disconnect from current server if connected
-        if (connectionState != WebSocketState.DISCONNECTED && connectionState != WebSocketState.ERROR) {
-            webSocketManager.disconnect()
-        }
-
-        // Save the new server selection
-        serverPreferences.saveSelectedServer(selectedServer)
-
-        // Auto-connect to new server if enabled
-        // Note: we always try to connect after disconnect since disconnect() now
-        // immediately updates the state to DISCONNECTED
-        if (autoConnect) {
-            CoroutineScope(Dispatchers.IO).launch {
-                webSocketManager.connect(
-                    selectedServer.getWebSocketUrl(),
-                    selectedServer.password,
-                    clientName,
-                    encryptionKey,
-                    selectedServer.id
-                )
-            }
-        }
+    if (showQrScan) {
+        QrScanScreen(
+            serverId = selectedServer.id,
+            onHashScanned = { hash ->
+                TrustedCertManager(context).trustHash(selectedServer.id, hash)
+                showQrScan = false
+                // Attempt to connect now that we have a trusted hash.
+                chatController.connect(selectedServer, clientName)
+            },
+            onBack = { showQrScan = false }
+        )
+        return
     }
-
-    // Remove the now-unused local generator to avoid dead code.
 
     Scaffold(
+        topBar = {
+            TopAppBar(
+                title = { Text("Impulse") },
+                actions = {
+                    val (label, color) = when (connectionState) {
+                        ConnectionState.DISCONNECTED -> "Отключено" to MaterialTheme.colorScheme.outline
+                        ConnectionState.CONNECTING -> "Подключение…" to MaterialTheme.colorScheme.tertiary
+                        ConnectionState.CONNECTED -> "Аутентификация…" to MaterialTheme.colorScheme.tertiary
+                        ConnectionState.AUTHENTICATING -> "Аутентификация…" to MaterialTheme.colorScheme.tertiary
+                        ConnectionState.AUTHENTICATED -> "Канал…" to MaterialTheme.colorScheme.tertiary
+                        ConnectionState.READY -> "PQ-E2EE" to MaterialTheme.colorScheme.primary
+                        ConnectionState.ERROR -> "Ошибка" to MaterialTheme.colorScheme.error
+                    }
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        modifier = Modifier.padding(end = 16.dp)
+                    ) {
+                        Box(
+                            modifier = Modifier
+                                .size(10.dp)
+                                .background(color, CircleShape)
+                        )
+                        Spacer(Modifier.size(8.dp))
+                        Text(label, style = MaterialTheme.typography.labelMedium, color = color)
+                    }
+                }
+            )
+        },
         bottomBar = {
             NavigationBar(
                 modifier = Modifier.navigationBarsPadding(),
@@ -149,7 +144,6 @@ fun MainScreen() {
             0 -> HomeScreen(
                 clientName = clientName,
                 selectedServer = selectedServer,
-                encryptionKey = encryptionKey,
                 modifier = Modifier.padding(innerPadding)
             )
             1 -> ChatScreen(
@@ -157,45 +151,39 @@ fun MainScreen() {
                 clientName = clientName,
                 modifier = Modifier.padding(innerPadding)
             )
-            2 -> SettingsScreen(
+            2 -> QrScanScreen(
+                serverId = selectedServer.id,
+                onHashScanned = { hash ->
+                    TrustedCertManager(context).trustHash(selectedServer.id, hash)
+                    chatController.connect(selectedServer, clientName)
+                },
+                onBack = { selectedItem = 0 }
+            )
+            3 -> SettingsScreen(
                 selectedServer = selectedServer,
                 onServerSelected = { newServer ->
                     selectedServer = newServer
-                    val serverPreferences = ServerPreferences(context)
-                    serverPreferences.saveSelectedServer(newServer)
-                    val customServers = serverPreferences.getCustomServers()
+                    ServerPreferences(context).saveSelectedServer(newServer)
+                    val customServers = ServerPreferences(context).getCustomServers()
                     availableServers = ServerConfig.builtInServers + customServers
                 },
                 onServerUpdated = { updatedServer ->
-                    val serverPreferences = ServerPreferences(context)
-                    val customServers = serverPreferences.getCustomServers()
+                    val customServers = ServerPreferences(context).getCustomServers()
                     availableServers = ServerConfig.builtInServers + customServers
-                    if (selectedServer.id == updatedServer.id) {
-                        selectedServer = updatedServer
-                    }
+                    if (selectedServer.id == updatedServer.id) selectedServer = updatedServer
                 },
                 clientName = clientName,
                 onClientNameChange = { newName ->
                     clientName = newName
-                    val serverPreferences = ServerPreferences(context)
-                    serverPreferences.saveClientName(newName)
-                },
-                encryptionKey = encryptionKey,
-                onEncryptionKeyChange = { newKey ->
-                    encryptionKey = newKey
-                    // Persist the key bound to the currently selected server
-                    // (per-server, optional). Empty string = no encryption.
-                    ServerPreferences(context).saveEncryptionKey(selectedServer.id, newKey)
+                    ServerPreferences(context).saveClientName(newName)
                 },
                 availableServers = availableServers,
                 onServerDeleted = { deletedServer ->
-                    val serverPreferences = ServerPreferences(context)
-                    val customServers = serverPreferences.getCustomServers()
+                    val customServers = ServerPreferences(context).getCustomServers()
                     availableServers = ServerConfig.builtInServers + customServers
-
                     if (selectedServer == deletedServer) {
                         selectedServer = availableServers.firstOrNull() ?: ServerConfig.defaultServer
-                        serverPreferences.saveSelectedServer(selectedServer)
+                        ServerPreferences(context).saveSelectedServer(selectedServer)
                     }
                 },
                 modifier = Modifier.padding(innerPadding)

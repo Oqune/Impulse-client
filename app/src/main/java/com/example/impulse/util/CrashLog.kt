@@ -1,0 +1,70 @@
+package com.example.impulse.util
+
+import android.content.Context
+import java.io.File
+import java.text.SimpleDateFormat
+import java.util.Date
+import java.util.Locale
+
+/**
+ * Durable crash/diagnostic log storage.
+ *
+ * Crashes are written to `impulse_crash.log` in the app's internal files
+ * directory (not accessible to other apps). The most recent crash is kept, plus
+ * a rolling history of the last few, so a developer can retrieve the trace even
+ * when logcat is unavailable (e.g. a crash on a field device).
+ *
+ * Companion to [LogManager] (live diagnostics) and the global
+ * [android.os.Process] uncaught-exception handler installed in the Application.
+ */
+object CrashLog {
+
+    private const val CRASH_FILE = "impulse_crash.log"
+    private const val MAX_HISTORY = 5
+    private const val HISTORY_DIR = "crashes"
+
+    private val dateFormat = SimpleDateFormat("yyyy-MM-dd HH:mm:ss", Locale.US)
+
+    /** Appends a crash report to disk. Safe to call from any thread. */
+    @Synchronized
+    fun writeCrash(report: String) {
+        try {
+            val ctx = lastContext ?: return
+            val dir = File(ctx.filesDir, HISTORY_DIR)
+            if (!dir.exists()) dir.mkdirs()
+            // Keep a rolling history of recent crashes.
+            val stamp = dateFormat.format(Date()).replace(' ', '_').replace(':', '-')
+            val file = File(dir, "crash_$stamp.log")
+            file.writeText(report)
+            // Trim old history.
+            dir.listFiles()
+                ?.sortedByDescending { it.lastModified() }
+                ?.drop(MAX_HISTORY)
+                ?.forEach { it.delete() }
+            // Also overwrite the single "latest" file for easy retrieval.
+            File(ctx.filesDir, CRASH_FILE).writeText(report)
+        } catch (_: Exception) {
+            // Best-effort only.
+        }
+    }
+
+    /** Returns the text of the most recent crash, or null if none. */
+    fun lastCrash(context: Context): String? {
+        val f = File(context.filesDir, CRASH_FILE)
+        return if (f.exists()) f.readText() else null
+    }
+
+    /** Returns the list of stored crash reports (newest first). */
+    fun history(context: Context): List<File> {
+        val dir = File(context.filesDir, HISTORY_DIR)
+        return dir.listFiles()?.sortedByDescending { it.lastModified() } ?: emptyList()
+    }
+
+    /** Call once at startup (Application.onCreate) so we know where to write. */
+    fun init(context: Context) {
+        lastContext = context.applicationContext
+    }
+
+    @Volatile
+    private var lastContext: Context? = null
+}

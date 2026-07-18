@@ -7,24 +7,26 @@ data class ServerConfig(
     val id: String = UUID.randomUUID().toString(),
     val name: String,
     val ipAddress: String,
-    val port: Int = 8087,
+    val port: Int = 11000,
     val description: String,
     val password: String = ""
 ) {
     /**
-     * All client<->server traffic uses the WSS (WebSocket Secure / TLS)
-     * standard exclusively. The plain WS scheme was removed entirely.
+     * WebTransport endpoint. The client uses the Android [android.net.http]
+     * WebTransport API (API 33+), which always runs over HTTPS/QUIC, so the
+     * scheme is `https://` (not `wss://`). The server must serve the
+     * WebTransport handshake on this host:port.
      */
-    fun getWebSocketUrl(): String {
-        return "wss://$ipAddress:$port"
+    fun getWebTransportUrl(): String {
+        return "https://$ipAddress:$port"
     }
-    
+
     companion object {
         val production = ServerConfig(
             id = "prod_001",
             name = "Production",
             ipAddress = "192.168.1.50",
-            port = 8087,
+            port = 11000,
             description = "Основной продакшн сервер",
             password = ""
         )
@@ -33,11 +35,11 @@ data class ServerConfig(
             id = "local_001",
             name = "Local",
             ipAddress = "127.0.0.1",
-            port = 8087,
+            port = 11000,
             description = "Локальный сервер разработки",
             password = ""
         )
-        
+
         val defaultServer = production
         val builtInServers = listOf(production, local)
     }

@@ -9,7 +9,8 @@ import androidx.core.content.ContextCompat
 import androidx.fragment.app.FragmentActivity
 import com.example.impulse.data.ServerPreferences
 import com.example.impulse.data.ThemePreferences
-import com.example.impulse.service.WebSocketForegroundService
+import com.example.impulse.service.TtlPurgeWorker
+import com.example.impulse.service.WebTransportForegroundService
 import com.example.impulse.ui.screens.BiometricLockScreen
 import com.example.impulse.ui.screens.MainScreen
 import com.example.impulse.ui.theme.ImpulseTheme
@@ -21,6 +22,9 @@ class MainActivity : FragmentActivity() {
 
         val themePreferences = ThemePreferences(applicationContext)
         ThemeSettings.initialize(themePreferences)
+
+        // Schedule the periodic 72h TTL purge of the local message store.
+        TtlPurgeWorker.schedule(applicationContext)
 
         val serverPreferences = ServerPreferences(applicationContext)
 
@@ -43,9 +47,9 @@ class MainActivity : FragmentActivity() {
 
     override fun onStart() {
         super.onStart()
-        // Always keep the WebSocket connection alive in the foreground service,
+        // Keep the WebTransport connection alive in the foreground service,
         // even while the app is in the background.
-        val serviceIntent = Intent(this, WebSocketForegroundService::class.java).apply {
+        val serviceIntent = Intent(this, WebTransportForegroundService::class.java).apply {
             action = "START"
         }
         ContextCompat.startForegroundService(this, serviceIntent)
@@ -54,8 +58,8 @@ class MainActivity : FragmentActivity() {
     override fun onStop() {
         super.onStop()
         // The connection must stay alive after minimizing the app. Always (re)start
-        // the foreground service so the socket is never dropped.
-        val serviceIntent = Intent(this, WebSocketForegroundService::class.java).apply {
+        // the foreground service so the transport is never dropped.
+        val serviceIntent = Intent(this, WebTransportForegroundService::class.java).apply {
             action = "START"
         }
         ContextCompat.startForegroundService(this, serviceIntent)

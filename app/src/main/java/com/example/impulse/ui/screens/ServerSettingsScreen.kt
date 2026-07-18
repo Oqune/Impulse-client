@@ -20,12 +20,13 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
+import com.example.impulse.ChatController
 import com.example.impulse.data.ServerConfig
 import com.example.impulse.data.ServerPreferences
 import com.example.impulse.data.isValidIpAddress
-import com.example.impulse.util.LogStorage
-import com.example.impulse.websocket.WebSocketManager
-import com.example.impulse.websocket.WebSocketState
+import com.example.impulse.security.TrustedCertManager
+import com.example.impulse.transport.ConnectionState
+import com.example.impulse.util.LogManager
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -33,8 +34,6 @@ fun ServerSettingsScreen(
     selectedServer: ServerConfig,
     onServerSelected: (ServerConfig) -> Unit,
     onBack: () -> Unit,
-    encryptionKey: String,
-    onEncryptionKeyChange: (String) -> Unit,
     availableServers: List<ServerConfig> = ServerConfig.builtInServers,
     onServerDeleted: (ServerConfig) -> Unit = {},
     onServerUpdated: (ServerConfig) -> Unit = {}
@@ -51,6 +50,10 @@ fun ServerSettingsScreen(
     var serverToDelete by remember { mutableStateOf<ServerConfig?>(null) }
     var serverToEdit by remember { mutableStateOf<ServerConfig?>(null) }
     var isEditMode by remember { mutableStateOf(false) }
+    // Manual certificate (TOFU) removal for the selected server.
+    var showForgetCert by remember { mutableStateOf(false) }
+    val certManager = remember { TrustedCertManager(context) }
+    val isCertTrusted = remember(selectedServer) { certManager.isTrusted(selectedServer.id) }
 
     // Helper function to load server data for editing
     fun loadServerForEdit(server: ServerConfig) {
@@ -60,15 +63,18 @@ fun ServerSettingsScreen(
         customPassword = server.password
     }
 
-    val webSocketManager = WebSocketManager.getInstance()
-    val connectionState by webSocketManager.currentState.collectAsState()
+    val chatController = remember { ChatController.getInstance(context) }
+    val connectionState by chatController.state.collectAsState()
+
+    val serverPrefs = remember { ServerPreferences(context) }
+    var devSkipPinning by remember { mutableStateOf(serverPrefs.getDevSkipPinning()) }
 
     var previousServer by remember { mutableStateOf(selectedServer) }
     LaunchedEffect(selectedServer) {
         if (previousServer != selectedServer) {
-            if (connectionState == WebSocketState.CONNECTED || connectionState == WebSocketState.AUTHENTICATED) {
-                webSocketManager.disconnect()
-                LogStorage.addLog("Отключение от предыдущего сервера при смене настройки")
+            if (connectionState == ConnectionState.CONNECTED || connectionState == ConnectionState.AUTHENTICATED) {
+                chatController.disconnect()
+                LogManager.i("ServerSettings", "disconnect from previous server on settings change")
             }
             previousServer = selectedServer
         }
@@ -127,7 +133,7 @@ fun ServerSettingsScreen(
                         availableServers.forEach { server ->
                             val isCustom = server !in ServerConfig.builtInServers
                             val isSelectedServer = server == selectedServer
-                            val serverConnectionState = if (isSelectedServer) connectionState else WebSocketState.DISCONNECTED
+                            val serverConnectionState = if (isSelectedServer) connectionState else ConnectionState.DISCONNECTED
 
                             Surface(
                                 modifier = Modifier
@@ -174,7 +180,7 @@ fun ServerSettingsScreen(
                                         )
 
                                         Text(
-                                            text = "IP: ${server.ipAddress}:${server.port} (WSS)",
+                                            text = "IP: ${server.ipAddress}:${server.port} (WebTransport)",
                                             style = MaterialTheme.typography.bodyMedium,
                                             color = if (isSelectedServer)
                                                 MaterialTheme.colorScheme.onPrimaryContainer.copy(alpha = 0.8f)
@@ -196,6 +202,26 @@ fun ServerSettingsScreen(
                                         // Connection status for selected server
                                         if (isSelectedServer) {
                                             ServerConnectionStatusIndicator(serverConnectionState)
+                                        }
+
+                                        // Manual TOFU certificate removal for the selected server.
+                                        if (isSelectedServer) {
+                                            Spacer(Modifier.height(10.dp))
+                                            OutlinedButton(
+                                                onClick = { showForgetCert = true },
+                                                enabled = isCertTrusted,
+                                                modifier = Modifier.fillMaxWidth(),
+                                                colors = ButtonDefaults.outlinedButtonColors(
+                                                    contentColor = MaterialTheme.colorScheme.error
+                                                )
+                                            ) {
+                                                Icon(Icons.Default.Delete, contentDescription = null)
+                                                Spacer(Modifier.width(8.dp))
+                                                Text(
+                                                    if (isCertTrusted) "Удалить сертификат"
+                                                    else "Сертификат не сохранён"
+                                                )
+                                            }
                                         }
                                     }
 
@@ -240,29 +266,6 @@ fun ServerSettingsScreen(
 
                     Spacer(modifier = Modifier.height(16.dp))
 
-                    Text(
-                        text = "Ключ шифрования",
-                        style = MaterialTheme.typography.titleMedium,
-                        fontWeight = FontWeight.Bold,
-                        modifier = Modifier.padding(top = 16.dp)
-                    )
-
-                    Spacer(Modifier.height(8.dp))
-
-                    OutlinedTextField(
-                        value = encryptionKey,
-                        onValueChange = onEncryptionKeyChange,
-                        modifier = Modifier.fillMaxWidth(),
-                        label = { Text("Ключ шифрования") },
-                        placeholder = { Text("Введите ключ для E2E шифрования") },
-                        leadingIcon = { Icon(Icons.Default.Build, contentDescription = null) },
-                        supportingText = {
-                            Text("Шифруются только текстовые сообщения")
-                        }
-                    )
-
-                    Spacer(modifier = Modifier.height(16.dp))
-
                     Button(
                         onClick = {
                             customName = ""
@@ -280,6 +283,49 @@ fun ServerSettingsScreen(
                         Icon(Icons.Default.Add, contentDescription = null)
                         Spacer(Modifier.width(8.dp))
                         Text("Добавить кастомный сервер")
+                    }
+
+                    Spacer(modifier = Modifier.height(16.dp))
+
+                    // DEV ONLY: skip TLS certificate pinning so a self-signed /
+                    // mismatched server cert is accepted for local testing.
+                    // NEVER enable in a production build.
+                    Card(
+                        modifier = Modifier.fillMaxWidth(),
+                        colors = CardDefaults.cardColors(
+                            containerColor = MaterialTheme.colorScheme.errorContainer.copy(alpha = 0.25f)
+                        )
+                    ) {
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(16.dp),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Column(modifier = Modifier.weight(1f)) {
+                                Text(
+                                    text = "DEV: отключить привязку сертификата",
+                                    style = MaterialTheme.typography.bodyLarge,
+                                    fontWeight = FontWeight.SemiBold,
+                                    color = MaterialTheme.colorScheme.onErrorContainer
+                                )
+                                Text(
+                                    text = "Позволяет подключиться без QR-хэша (только для тестов!)",
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = MaterialTheme.colorScheme.onErrorContainer.copy(alpha = 0.8f)
+                                )
+                            }
+                            Switch(
+                                checked = devSkipPinning,
+                                onCheckedChange = {
+                                    devSkipPinning = it
+                                    serverPrefs.saveDevSkipPinning(it)
+                                },
+                                colors = SwitchDefaults.colors(
+                                    checkedTrackColor = MaterialTheme.colorScheme.error
+                                )
+                            )
+                        }
                     }
                 }
             }
@@ -383,6 +429,41 @@ fun ServerSettingsScreen(
             },
             dismissButton = {
                 TextButton(onClick = { serverToDelete = null }) {
+                    Text("Отмена")
+                }
+            }
+        )
+    }
+
+    // Confirmation dialog for manual TOFU certificate removal.
+    if (showForgetCert) {
+        AlertDialog(
+            onDismissRequest = { showForgetCert = false },
+            title = { Text("Удалить сертификат?") },
+            text = {
+                Text(
+                    "Сервер «${selectedServer.name}» будет отвязан (TOFU-хеш удалён). " +
+                        "Следующее подключение снова потребует сканирования QR-кода. " +
+                        "Активное соединение будет разорвано."
+                )
+            },
+            confirmButton = {
+                TextButton(
+                    onClick = {
+                        showForgetCert = false
+                        try {
+                            chatController.disconnect()
+                        } catch (_: Exception) {
+                        }
+                        certManager.forget(selectedServer.id)
+                        LogManager.i("ServerSettings", "certificate forgotten for ${selectedServer.id}")
+                    }
+                ) {
+                    Text("Удалить", color = MaterialTheme.colorScheme.error)
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { showForgetCert = false }) {
                     Text("Отмена")
                 }
             }
@@ -506,18 +587,22 @@ private fun CustomServerDialog(
 }
 
 @Composable
-private fun ServerConnectionStatusIndicator(connectionState: WebSocketState) {
+private fun ServerConnectionStatusIndicator(connectionState: ConnectionState) {
     val statusData = when (connectionState) {
-        WebSocketState.DISCONNECTED ->
+        ConnectionState.DISCONNECTED ->
             Triple("Отключено", MaterialTheme.colorScheme.outline, MaterialTheme.colorScheme.surfaceContainerHighest)
-        WebSocketState.CONNECTING ->
+        ConnectionState.CONNECTING ->
             Triple("Подключение...", MaterialTheme.colorScheme.tertiary, MaterialTheme.colorScheme.tertiaryContainer)
-        WebSocketState.CONNECTED ->
+        ConnectionState.CONNECTED ->
             Triple("Аутентификация...", MaterialTheme.colorScheme.tertiary, MaterialTheme.colorScheme.tertiaryContainer)
-        WebSocketState.AUTHENTICATED ->
-            Triple("Подключено", MaterialTheme.colorScheme.primary, MaterialTheme.colorScheme.primaryContainer)
-        WebSocketState.ERROR ->
-            Triple("Ошибка", MaterialTheme.colorScheme.error, MaterialTheme.colorScheme.errorContainer)
+        ConnectionState.AUTHENTICATING ->
+            Triple("Аутентификация...", MaterialTheme.colorScheme.tertiary, MaterialTheme.colorScheme.tertiaryContainer)
+        ConnectionState.AUTHENTICATED ->
+            Triple("Подключено (PQ-E2EE)", MaterialTheme.colorScheme.primary, MaterialTheme.colorScheme.primaryContainer)
+        ConnectionState.READY ->
+            Triple("Подключено (PQ-E2EE)", MaterialTheme.colorScheme.primary, MaterialTheme.colorScheme.primaryContainer)
+        ConnectionState.ERROR ->
+            Triple("Ошибка / нужен QR", MaterialTheme.colorScheme.error, MaterialTheme.colorScheme.errorContainer)
     }
     val (statusText, statusColor, backgroundColor) = statusData
 

@@ -18,10 +18,8 @@ class ServerPreferences(context: Context) {
         private const val AUTO_CONNECT_KEY = "auto_connect"
         private const val BIOMETRIC_ENABLED_KEY = "biometric_enabled"
         private const val CLIENT_NAME_KEY = "client_name"
-        // Per-server encryption keys, stored as a JSON map keyed by server id.
-        // This keeps the E2E key bound to each server instead of a single
-        // global value, and makes it optional (empty string = no encryption).
-        private const val ENCRYPTION_KEYS_KEY = "encryption_keys"
+        private const val DEV_SKIP_PINNING_KEY = "dev_skip_cert_pinning"
+        private const val LOGGING_ENABLED_KEY = "logging_enabled"
     }
 
     fun getCustomServers(): List<ServerConfig> {
@@ -134,32 +132,26 @@ class ServerPreferences(context: Context) {
         prefs.edit().putString(CLIENT_NAME_KEY, name).apply()
     }
 
-    /**
-     * Returns the encryption key bound to a specific server id.
-     * Empty string means "no encryption" (the key is optional).
-     */
-    fun getEncryptionKey(serverId: String): String {
-        val json = prefs.getString(ENCRYPTION_KEYS_KEY, null) ?: return ""
-        return try {
-            val obj = JSONObject(json)
-            obj.optString(serverId, "")
-        } catch (e: Exception) {
-            ""
-        }
+    /** DEV ONLY: when true, the client skips TLS certificate pinning. */
+    fun getDevSkipPinning(): Boolean {
+        return prefs.getBoolean(DEV_SKIP_PINNING_KEY, false)
+    }
+
+    fun saveDevSkipPinning(enabled: Boolean) {
+        prefs.edit().putBoolean(DEV_SKIP_PINNING_KEY, enabled).apply()
     }
 
     /**
-     * Persists the encryption key for a specific server id. An empty key is
-     * stored as well (so a cleared key is remembered as "no encryption").
+     * User-controlled master switch for on-disk file logging. When disabled,
+     * [LogManager] will not write (or will stop writing) the rotating log files.
+     * Logcat output in debug builds is unaffected. Defaults to true so the
+     * existing debug behaviour is preserved.
      */
-    fun saveEncryptionKey(serverId: String, key: String) {
-        val obj = try {
-            val existing = prefs.getString(ENCRYPTION_KEYS_KEY, null)
-            if (existing != null) JSONObject(existing) else JSONObject()
-        } catch (e: Exception) {
-            JSONObject()
-        }
-        obj.put(serverId, key)
-        prefs.edit().putString(ENCRYPTION_KEYS_KEY, obj.toString()).apply()
+    fun getLoggingEnabled(): Boolean {
+        return prefs.getBoolean(LOGGING_ENABLED_KEY, true)
+    }
+
+    fun saveLoggingEnabled(enabled: Boolean) {
+        prefs.edit().putBoolean(LOGGING_ENABLED_KEY, enabled).apply()
     }
 }
