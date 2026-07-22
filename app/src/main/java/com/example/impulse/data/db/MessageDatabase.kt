@@ -42,7 +42,7 @@ abstract class MessageDatabase : RoomDatabase() {
                 context.applicationContext,
                 MessageDatabase::class.java,
                 DB_NAME
-            ).build()
+            ).fallbackToDestructiveMigration(false).build()
         }
     }
 }

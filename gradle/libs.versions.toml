@@ -1,6 +1,6 @@
 [versions]
 agp = "8.13.0"
-kotlin = "2.0.21"
+kotlin = "2.4.0"
 composeBom = "2024.09.00"
 coreKtx = "1.12.0"
 lifecycleRuntimeKtx = "2.9.4"
@@ -24,9 +24,9 @@ bouncycastle = "1.79"
 # is identical, so no code changes are needed in QrScanScreen.kt.
 mlkitBarcode = "17.3.0"
 # Room (local DB)
-room = "2.6.1"
+room = "2.8.4"
 # Coroutines
-coroutines = "1.8.1"
+coroutines = "1.11.0"
     # WorkManager (expedited boot-time start of the foreground service on Android 14+)
     workmanager = "2.10.0"
     # Structured logging (Timber) with custom trees (debug/file/release).

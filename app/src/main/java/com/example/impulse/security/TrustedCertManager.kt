@@ -1,90 +1,109 @@
 package com.example.impulse.security
 
 import android.content.Context
+import com.example.impulse.util.LogManager
 import org.json.JSONArray
 import org.json.JSONObject
 
 /**
- * Trust-On-First-Use (TOFU) manager for server certificate hashes.
- *
- * Behaviour required by the target architecture:
- *  - On first connection to a server there is no trusted hash. The caller must
- *    obtain the hash out-of-band (QR scan) and call [trustHash].
- *  - When connecting, the transport layer asks [getHashes] and pins them via
- *    WebTransport's `serverCertificateHashes`.
- *  - After a successful connection the server may push a *new* hash (a
- *    "rollover" / next-certificate). We store at most two hashes: the current
- *    one and the next one, so a seamless certificate rotation is possible
- *    without breaking existing clients.
- *
- * Hashes are stored as hex-encoded SHA-256 of the raw certificate (the same
- * format WebTransport expects). They live in [SecureStorage] (encrypted).
+ * TOFU trust store for server certificate fingerprints (SHA-256 of the DER
+ * leaf certificate, hex-encoded). Up to [MAX_HASHES] hashes are kept per
+ * server so a just-rotated cert and its predecessor are both accepted during
+ * the overlap window.
  */
+data class CertInfo(
+    val sha256Hex: String,
+    val issuedAt: Long
+)
+
 class TrustedCertManager(context: Context) {
 
     private val storage = SecureStorage(context)
 
-    /** Returns the list of trusted hashes (current + next) for a server. */
     fun getHashes(serverId: String): List<String> {
+        return getCertInfos(serverId).map { it.sha256Hex }
+    }
+
+    fun getCertInfos(serverId: String): List<CertInfo> {
         val raw = storage.getString(keyFor(serverId))
-        if (raw.isEmpty()) return emptyList()
+        if (raw.isEmpty()) {
+            LogManager.d(TAG, "getCertInfos: no stored data for server=$serverId")
+            return emptyList()
+        }
         return try {
             val arr = JSONArray(raw)
-            (0 until arr.length()).map { arr.getString(it) }
+            val result = mutableListOf<CertInfo>()
+            for (i in 0 until arr.length()) {
+                when (val item = arr.get(i)) {
+                    is String -> result.add(
+                        CertInfo(sha256Hex = item.lowercase(), issuedAt = System.currentTimeMillis())
+                    )
+                    is JSONObject -> result.add(
+                        CertInfo(
+                            sha256Hex = item.getString("h").lowercase(),
+                            issuedAt = item.optLong("t", System.currentTimeMillis())
+                        )
+                    )
+                }
+            }
+            result.filter { it.sha256Hex.matches(Regex("^[0-9a-f]{64}$")) }
         } catch (e: Exception) {
+            LogManager.w(TAG, "getCertInfos: failed to parse for server=$serverId: ${e.message}")
             emptyList()
         }
     }
 
-    /** True when at least one hash is already trusted for this server. */
-    fun isTrusted(serverId: String): Boolean = getHashes(serverId).isNotEmpty()
+    fun isTrusted(serverId: String): Boolean = getCertInfos(serverId).isNotEmpty()
 
-    /**
-     * Trusts [hash] for [serverId]. Implements the "max 2 hashes" rule:
-     *  - If the hash is already present, nothing changes.
-     *  - Otherwise it is appended. If we already had 2, the oldest is dropped.
-     */
+    /** Trust a fingerprint obtained out-of-band (QR scan / manual entry). */
     fun trustHash(serverId: String, hash: String) {
         val normalized = hash.lowercase().trim()
-        val current = getHashes(serverId).toMutableList()
-        if (current.contains(normalized)) return
-        current.add(normalized)
+        val current = getCertInfos(serverId).toMutableList()
+        if (current.any { it.sha256Hex == normalized }) {
+            LogManager.i(TAG, "trustHash: hash already trusted for server=$serverId")
+            return
+        }
+        current.add(CertInfo(sha256Hex = normalized, issuedAt = System.currentTimeMillis()))
         while (current.size > MAX_HASHES) current.removeAt(0)
         persist(serverId, current)
+        LogManager.i(TAG, "trustHash: stored hash for server=$serverId (total=${current.size})")
     }
 
-    /**
-     * Called when the server advertises a *next* certificate hash. Keeps the
-     * existing current hash and stores the new one as the second slot.
-     */
+    /** Trust the next fingerprint announced by the server (rotation push, 0x07). */
     fun rotateHash(serverId: String, nextHash: String) {
         val normalized = nextHash.lowercase().trim()
-        val current = getHashes(serverId).toMutableList()
-        if (current.contains(normalized)) return
-        // current stays first, next becomes second
-        val updated = mutableListOf<String>()
-        updated.add(current.firstOrNull() ?: normalized)
-        if (current.firstOrNull() != null && current.firstOrNull() != normalized) {
-            updated.add(normalized)
-        }
-        while (updated.size > MAX_HASHES) updated.removeAt(0)
-        persist(serverId, updated)
+        val current = getCertInfos(serverId).toMutableList()
+        if (current.any { it.sha256Hex == normalized }) return
+        current.add(CertInfo(sha256Hex = normalized, issuedAt = System.currentTimeMillis()))
+        while (current.size > MAX_HASHES) current.removeAt(0)
+        persist(serverId, current)
+        LogManager.i(TAG, "rotateHash: stored rotated hash for server=$serverId (total=${current.size})")
     }
 
-    /** Removes all trusted hashes for a server (e.g. "forget server"). */
     fun forget(serverId: String) {
+        LogManager.i(TAG, "forget: removing cert for server=$serverId")
         storage.remove(keyFor(serverId))
     }
 
-    private fun persist(serverId: String, hashes: List<String>) {
+    fun getIssuedAt(serverId: String): Long? {
+        return getCertInfos(serverId).firstOrNull()?.issuedAt
+    }
+
+    private fun persist(serverId: String, infos: List<CertInfo>) {
         val arr = JSONArray()
-        hashes.forEach { arr.put(it) }
+        infos.forEach { info ->
+            val obj = JSONObject()
+            obj.put("h", info.sha256Hex)
+            obj.put("t", info.issuedAt)
+            arr.put(obj)
+        }
         storage.putString(keyFor(serverId), arr.toString())
     }
 
     private fun keyFor(serverId: String) = "cert_hashes::$serverId"
 
     companion object {
+        private const val TAG = "TrustedCertManager"
         const val MAX_HASHES = 2
     }
 }

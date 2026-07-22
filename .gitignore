@@ -29,3 +29,8 @@ app/sampledata/
 
 # Logs / temp
 *.log
+diag*.log
+build_*.log
+build_errors.txt
+qr_test.log
+scan_test.log

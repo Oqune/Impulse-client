@@ -17,7 +17,10 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontFamily
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import androidx.compose.runtime.rememberCoroutineScope
+import kotlinx.coroutines.launch
 import com.example.impulse.data.ServerConfig
 import com.example.impulse.data.ServerPreferences
 import com.example.impulse.util.LogManager
@@ -39,44 +42,61 @@ fun SettingsScreen(
 ) {
     var currentSection by remember { mutableStateOf(SettingsSection.MAIN) }
     var showLogs by remember { mutableStateOf(false) }
-
-    when (currentSection) {
-        SettingsSection.MAIN -> {
-            SettingsMainScreen(
-                modifier = modifier,
-                onNavigateToServer = { currentSection = SettingsSection.SERVER },
-                onNavigateToUser = { currentSection = SettingsSection.USER },
-                onNavigateToApp = { currentSection = SettingsSection.APP },
-                onShowLogs = { showLogs = true }
-            )
-        }
-        SettingsSection.SERVER -> {
-            ServerSettingsScreen(
-                selectedServer = selectedServer,
-                onServerSelected = onServerSelected,
-                onBack = { currentSection = SettingsSection.MAIN },
-                availableServers = availableServers,
-                onServerDeleted = onServerDeleted,
-                onServerUpdated = onServerUpdated
-            )
-        }
-        SettingsSection.USER -> {
-            UserSettingsScreen(
-                clientName = clientName,
-                onClientNameChange = onClientNameChange,
-                onBack = { currentSection = SettingsSection.MAIN },
-
-            )
-        }
-        SettingsSection.APP -> {
-            AppSettingsScreen(
-                onBack = { currentSection = SettingsSection.MAIN }
-            )
-        }
-    }
+    val context = LocalContext.current
 
     if (showLogs) {
         LogsScreen(onBack = { showLogs = false })
+    } else {
+        when (currentSection) {
+            SettingsSection.MAIN -> {
+                SettingsMainScreen(
+                    modifier = modifier,
+                    onNavigateToServer = { currentSection = SettingsSection.SERVER },
+                    onNavigateToUser = { currentSection = SettingsSection.USER },
+                    onNavigateToApp = { currentSection = SettingsSection.APP },
+                    onShowLogs = { showLogs = true },
+                    onExportLogs = {
+                        val fileName = LogManager.exportToDownloads(context)
+                        if (fileName != null) {
+                            Toast.makeText(
+                                context,
+                                "Логи экспортированы: $fileName",
+                                Toast.LENGTH_LONG
+                            ).show()
+                        } else {
+                            Toast.makeText(
+                                context,
+                                "Нет записей для экспорта",
+                                Toast.LENGTH_SHORT
+                            ).show()
+                        }
+                    }
+                )
+            }
+            SettingsSection.SERVER -> {
+                ServerSettingsScreen(
+                    selectedServer = selectedServer,
+                    onServerSelected = onServerSelected,
+                    onBack = { currentSection = SettingsSection.MAIN },
+                    availableServers = availableServers,
+                    onServerDeleted = onServerDeleted,
+                    onServerUpdated = onServerUpdated
+                )
+            }
+            SettingsSection.USER -> {
+                UserSettingsScreen(
+                    clientName = clientName,
+                    onClientNameChange = onClientNameChange,
+                    onBack = { currentSection = SettingsSection.MAIN },
+
+                )
+            }
+            SettingsSection.APP -> {
+                AppSettingsScreen(
+                    onBack = { currentSection = SettingsSection.MAIN }
+                )
+            }
+        }
     }
 }
 
@@ -86,11 +106,13 @@ private fun SettingsMainScreen(
     onNavigateToServer: () -> Unit,
     onNavigateToUser: () -> Unit,
     onNavigateToApp: () -> Unit,
-    onShowLogs: () -> Unit
+    onShowLogs: () -> Unit,
+    onExportLogs: () -> Unit
 ) {
     DecorativeBackground(
         modifier = modifier
             .fillMaxSize()
+            .navigationBarsPadding()
             .padding(16.dp),
         contentAlignment = Alignment.Center
     ) {
@@ -131,6 +153,15 @@ private fun SettingsMainScreen(
                 Icon(Icons.Default.Info, contentDescription = null)
                 Spacer(Modifier.width(8.dp))
                 Text("Логи приложения")
+            }
+
+            Button(
+                onClick = onExportLogs,
+                modifier = Modifier.fillMaxWidth()
+            ) {
+                Icon(Icons.Default.Share, contentDescription = null)
+                Spacer(Modifier.width(8.dp))
+                Text("Экспорт логов")
             }
         }
     }
@@ -192,8 +223,8 @@ private fun SettingCard(
 
 /**
  * Full-screen logs viewer backed by [LogManager].
- * Features: level filter chips (ALL / ERROR / WARN / INFO), export to a file in
- * the app-specific Documents directory, and clear.
+ * Features: level filter chips (ALL / ERROR / WARN / INFO), export to Downloads
+ * via MediaStore, and clear.
  */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -204,6 +235,8 @@ private fun LogsScreen(onBack: () -> Unit) {
     val filtered = remember(filter) {
         if (filter == "ALL") allLogs else allLogs.filter { it.contains("[$filter]") }
     }
+    val snackbarHostState = remember { SnackbarHostState() }
+    val scope = rememberCoroutineScope()
 
     Scaffold(
         topBar = {
@@ -216,14 +249,72 @@ private fun LogsScreen(onBack: () -> Unit) {
                 },
                 actions = {
                     IconButton(onClick = {
-                        val target = LogManager.exportRecent(context.getExternalFilesDir(null) ?: context.filesDir)
-                        Toast.makeText(
-                            context,
-                            if (target != null) "Экспортировано: ${target.name}" else "Нет записей для экспорта",
-                            Toast.LENGTH_SHORT
-                        ).show()
+                        val fileName = LogManager.exportToDownloads(context)
+                        if (fileName != null) {
+                            val msg = "Логи сохранены в Downloads: $fileName"
+                            Toast.makeText(context, msg, Toast.LENGTH_LONG).show()
+                            scope.launch {
+                                val result = snackbarHostState.showSnackbar(
+                                    SnackbarVisualsWithAction(
+                                        message = msg,
+                                        actionLabel = "Копировать"
+                                    )
+                                )
+                                if (result == SnackbarResult.ActionPerformed) {
+                                    val cm = context.getSystemService(
+                                        android.content.Context.CLIPBOARD_SERVICE
+                                    ) as android.content.ClipboardManager
+                                    cm.setPrimaryClip(
+                                        android.content.ClipData.newPlainText(
+                                            "Log path", fileName
+                                        )
+                                    )
+                                }
+                            }
+                        } else {
+                            Toast.makeText(
+                                context,
+                                "Нет записей для экспорта",
+                                Toast.LENGTH_SHORT
+                            ).show()
+                        }
                     }) {
                         Icon(Icons.Default.Share, contentDescription = "Экспорт")
+                    }
+                    IconButton(onClick = {
+                        // Open the logs folder in a file manager via a safe
+                        // content:// URI (FileProvider) — works on API 24+.
+                        val dir = LogManager.logsDir()
+                        if (dir != null && dir.exists()) {
+                            try {
+                                val uri = androidx.core.content.FileProvider.getUriForFile(
+                                    context,
+                                    "${context.packageName}.fileprovider",
+                                    dir
+                                )
+                                val intent = android.content.Intent(
+                                    android.content.Intent.ACTION_VIEW
+                                ).apply {
+                                    setDataAndType(uri, "resource/folder")
+                                    addFlags(android.content.Intent.FLAG_GRANT_READ_URI_PERMISSION)
+                                }
+                                context.startActivity(intent)
+                            } catch (e: Exception) {
+                                Toast.makeText(
+                                    context,
+                                    "Не удалось открыть папку: ${e.message}",
+                                    Toast.LENGTH_LONG
+                                ).show()
+                            }
+                        } else {
+                            Toast.makeText(
+                                context,
+                                "Папка с логами недоступна",
+                                Toast.LENGTH_SHORT
+                            ).show()
+                        }
+                    }) {
+                        Icon(Icons.Default.FolderOpen, contentDescription = "Открыть папку")
                     }
                     IconButton(onClick = {
                         LogManager.clear()
@@ -233,7 +324,8 @@ private fun LogsScreen(onBack: () -> Unit) {
                     }
                 }
             )
-        }
+        },
+        snackbarHost = { SnackbarHost(snackbarHostState) }
     ) { padding ->
         Column(
             modifier = Modifier
@@ -256,41 +348,74 @@ private fun LogsScreen(onBack: () -> Unit) {
                 }
             }
 
-            if (filtered.isEmpty()) {
-                Box(
-                    modifier = Modifier.fillMaxSize(),
-                    contentAlignment = Alignment.Center
-                ) {
-                    Text(
-                        "Нет записей",
-                        style = MaterialTheme.typography.bodyMedium,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant
-                    )
-                }
-            } else {
-                LazyColumn(
-                    modifier = Modifier
-                        .fillMaxSize()
-                        .padding(horizontal = 12.dp),
-                    contentPadding = PaddingValues(vertical = 8.dp)
-                ) {
-                    items(filtered) { line ->
-                        val color = when {
-                            line.contains("[ERROR]") -> MaterialTheme.colorScheme.error
-                            line.contains("[WARN]") -> MaterialTheme.colorScheme.tertiary
-                            line.contains("[INFO]") -> MaterialTheme.colorScheme.primary
-                            else -> MaterialTheme.colorScheme.onSurface
-                        }
+            Box(modifier = Modifier.weight(1f)) {
+                if (filtered.isEmpty()) {
+                    Box(
+                        modifier = Modifier.fillMaxSize(),
+                        contentAlignment = Alignment.Center
+                    ) {
                         Text(
-                            text = line,
-                            style = MaterialTheme.typography.bodySmall,
-                            fontFamily = FontFamily.Monospace,
-                            color = color,
-                            modifier = Modifier.padding(vertical = 2.dp)
+                            "Нет записей",
+                            style = MaterialTheme.typography.bodyMedium,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
                         )
+                    }
+                } else {
+                    LazyColumn(
+                        modifier = Modifier
+                            .fillMaxSize()
+                            .padding(horizontal = 12.dp),
+                        contentPadding = PaddingValues(vertical = 8.dp)
+                    ) {
+                        items(filtered) { line ->
+                            val color = when {
+                                line.contains("[ERROR]") -> MaterialTheme.colorScheme.error
+                                line.contains("[WARN]") -> MaterialTheme.colorScheme.tertiary
+                                line.contains("[INFO]") -> MaterialTheme.colorScheme.primary
+                                else -> MaterialTheme.colorScheme.onSurface
+                            }
+                            Text(
+                                text = line,
+                                style = MaterialTheme.typography.bodySmall,
+                                fontFamily = FontFamily.Monospace,
+                                color = color,
+                                maxLines = 1,
+                                overflow = TextOverflow.Clip,
+                                modifier = Modifier.padding(vertical = 2.dp)
+                            )
+                        }
+                        item {
+                            Spacer(Modifier.height(8.dp))
+                            Button(
+                                onClick = {
+                                    LogManager.clear()
+                                    Toast.makeText(context, "Логи очищены", Toast.LENGTH_SHORT).show()
+                                },
+                                modifier = Modifier.fillMaxWidth().padding(horizontal = 8.dp),
+                                colors = ButtonDefaults.buttonColors(
+                                    containerColor = MaterialTheme.colorScheme.error
+                                )
+                            ) {
+                                Icon(Icons.Default.Delete, contentDescription = null)
+                                Spacer(Modifier.width(8.dp))
+                                Text("Очистить логи")
+                            }
+                            Spacer(Modifier.height(16.dp))
+                        }
                     }
                 }
             }
         }
     }
 }
+
+/**
+ * Minimal [SnackbarVisuals] implementation that carries an action label so the
+ * user can copy the export path to the clipboard.
+ */
+private class SnackbarVisualsWithAction(
+    override val message: String,
+    override val actionLabel: String?,
+    override val withDismissAction: Boolean = true,
+    override val duration: SnackbarDuration = SnackbarDuration.Long
+) : SnackbarVisuals

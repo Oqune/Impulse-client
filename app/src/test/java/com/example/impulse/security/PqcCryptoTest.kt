@@ -59,30 +59,30 @@ class PqcCryptoTest {
     }
 
     @Test
-    fun ed25519_signVerify_roundTrip() {
-        val kp = PqcCrypto.generateEd25519KeyPair()
+    fun mldsa65_signVerify_roundTrip() {
+        val kp = PqcCrypto.generateMlDsa65KeyPair()
         val msg = "authenticated message payload".toByteArray(Charsets.UTF_8)
-        val sig = PqcCrypto.sign(kp.privateEncoded, msg)
-        assertTrue("signature must be 64 bytes", sig.size == 64)
-        assertTrue("valid signature verifies", PqcCrypto.verify(kp.publicEncoded, msg, sig))
+        val sig = PqcCrypto.signMlDsa65(kp.privateEncoded, msg)
+        assertTrue("signature should be non-empty", sig.isNotEmpty())
+        assertTrue("valid signature verifies", PqcCrypto.verifyMlDsa65(kp.publicEncoded, msg, sig))
     }
 
     @Test
-    fun ed25519_verifyRejectsTamperedMessage() {
-        val kp = PqcCrypto.generateEd25519KeyPair()
+    fun mldsa65_verifyRejectsTamperedMessage() {
+        val kp = PqcCrypto.generateMlDsa65KeyPair()
         val msg = "original".toByteArray(Charsets.UTF_8)
-        val sig = PqcCrypto.sign(kp.privateEncoded, msg)
+        val sig = PqcCrypto.signMlDsa65(kp.privateEncoded, msg)
         val tampered = "tampered".toByteArray(Charsets.UTF_8)
-        assertFalse("tampered message must fail verification", PqcCrypto.verify(kp.publicEncoded, tampered, sig))
+        assertFalse("tampered message must fail verification", PqcCrypto.verifyMlDsa65(kp.publicEncoded, tampered, sig))
     }
 
     @Test
-    fun ed25519_verifyRejectsWrongKey() {
-        val alice = PqcCrypto.generateEd25519KeyPair()
-        val bob = PqcCrypto.generateEd25519KeyPair()
+    fun mldsa65_verifyRejectsWrongKey() {
+        val alice = PqcCrypto.generateMlDsa65KeyPair()
+        val bob = PqcCrypto.generateMlDsa65KeyPair()
         val msg = "hello".toByteArray(Charsets.UTF_8)
-        val sig = PqcCrypto.sign(alice.privateEncoded, msg)
+        val sig = PqcCrypto.signMlDsa65(alice.privateEncoded, msg)
         assertFalse("signature from alice must not verify under bob's key",
-            PqcCrypto.verify(bob.publicEncoded, msg, sig))
+            PqcCrypto.verifyMlDsa65(bob.publicEncoded, msg, sig))
     }
 }

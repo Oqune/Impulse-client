@@ -57,26 +57,72 @@ The client was completely rewritten around a modern, quantum-resistant stack:
 ## Binary protocol (opcodes `0x01`–`0x08`)
 
 Every frame starts with a single opcode byte. Field encoding is little-endian:
-`u8` (1 B), `u16` (2 B length prefix), `u32` (4 B), `u64` (8 B), `bytes`
-(`u16` length + raw). The server never sees plaintext metadata — the sender,
+`u8` (1 B), `u32` (4 B length prefix), `u64` (8 B), `bytes`
+(`u32` length + raw). The server never sees plaintext metadata — the sender,
 signature and content live inside the AES-256-GCM `OP_DATA` payload.
 
 | Opcode | Name | Direction | Body |
 |--------|------|-----------|------|
-| `0x01` | `OP_AUTH` | C→S | `password` (utf8) |
+| `0x01` | `OP_AUTH` | C→S | `sha256_hex(password)` (64-char lowercase hex utf8, length-prefixed) |
 | `0x02` | `OP_AUTH_RESULT` | S→C | `success(u8)` [error utf8 if !success] |
 | `0x03` | `OP_SYNC` | C→S | `last_seen_id(u64)` |
-| `0x04` | `OP_SYNC_RESPONSE` | S→C | `count(u32)` { `id(u64)`, `timestamp(u64)`, `len(u16)`, `payload(bytes)` } |
-| `0x05` | `OP_DATA` | both | C→S: `len(u16)`+`payload`. S→C relay: `server_msg_id(u64)`+`timestamp(u64)`+`len(u16)`+`payload` |
-| `0x06` | `OP_HEARTBEAT` | both | (no body) |
-| `0x07` | `OP_NEW_CERT_HASH` | S→C | `hash_len(u16)`+`hash`+`expiry(u64)` |
-| `0x08` | `OP_KEY_EXCHANGE` | both | `key_len(u16)`+`public_key` (ML-KEM **or** Ed25519, distinguished by length) |
+| `0x04` | `OP_SYNC_RESPONSE` | S→C | `count(u32)` { `id(u64)`, `timestamp(u64)`, `len(u32)`, `payload(bytes)` } |
+| `0x05` | `OP_DATA` | both | C→S: `len(u32)`+`payload`. S→C relay: `server_msg_id(u64)`+`timestamp(u64)`+`len(u32)`+`payload` |
+| `0x06` | `OP_HEARTBEAT` | both | `client_timestamp(u64)` |
+| `0x07` | `OP_NEW_CERT_HASH` | S→C | `hash(32 bytes raw)` + `expiry(u64)` (no length prefix) |
+| `0x08` | `OP_KEY_EXCHANGE` | both | `key_len(u32)`+`public_key` (ML-KEM-768 or Ed25519, distinguished by length) |
 
 The client sends `OP_DATA` as `len+payload`; the server prepends
 `server_msg_id` + `timestamp` when it relays the message back to all peers. The
 client stores the authoritative row keyed by the real (non-negative)
 `server_msg_id`; its own optimistic copy uses a **negative** temp id so it can
 never collide.
+
+## Server setup & authentication
+
+The server requires a password for client authentication. The password is **never
+sent in plaintext** — the client computes `SHA-256(password)` as a lowercase hex
+string and sends that hash in `OP_AUTH` (0x01).
+
+### Generating the server password hash
+
+```bash
+# From the server directory
+cargo run -- --hash-password "your-secret-password"
+# Output: 64-character lowercase hex string
+```
+
+Copy the output and pass it to the server via `config.toml` or CLI:
+
+```bash
+# Via CLI flag
+impulse-server --password-hash <64-char-hex>
+
+# Or in config.toml
+[server]
+password_hash = "<64-char-hex>"
+```
+
+### Client configuration
+
+In the app, go to **Settings → Server settings** and either:
+- Select the built-in *Production* server and enter the same password you hashed
+  on the server, or
+- Add a custom server with the correct IP, port, and password.
+
+The client stores the **plaintext password** locally (in `ServerConfig`) and
+computes the SHA-256 hex hash at connection time. If the server's stored hash
+doesn't match, authentication is rejected with `OP_AUTH_RESULT` (0x02)
+`success=0` and an error message.
+
+### Common auth failure causes
+
+| Symptom | Cause | Fix |
+|---------|-------|-----|
+| `Аутентификация отклонена сервером: Invalid password` | Client password doesn't match server hash | Ensure both sides use the same password; regenerate the server hash with `--hash-password` |
+| Connection drops immediately after QR scan | Certificate hash mismatch | Re-scan the QR code or enter the hash manually |
+| `Ошибка сессии WebTransport` | Server not reachable or not running | Check IP/port, ensure server is running, same network |
+| Auth timeout (15 s) | Stream not established or firewall blocking QUIC | Verify UDP port 4433 is open, server supports HTTP/3 |
 
 ## Group secret (deterministic, no KEM exchange)
 
@@ -126,10 +172,32 @@ Install the APK from `app/build/outputs/apk/debug/` onto a device/emulator
     certificate.
  4. After a successful handshake the server may push a *next* cert hash
     (`OP_NEW_CERT_HASH`); it is stored as the second slot for rotation.
- 5. ML-KEM-768 + Ed25519 public keys are exchanged automatically; once the group
-    secret is derived, chat is fully E2EE and the state becomes *READY* (the
-    connection state machine is `CONNECTING → CONNECTED → AUTHENTICATING →
-    AUTHENTICATED → READY`; sending is blocked until `READY`).
+  5. ML-KEM-768 + Ed25519 public keys are exchanged automatically; once the group
+     secret is derived, chat is fully E2EE and the state becomes *READY* (the
+     connection state machine is `CONNECTING → CONNECTED → AUTHENTICATING →
+     AUTHENTICATED → READY`; sending is blocked until `READY`).
+  6. **Authentication is automatic.** The moment the WebTransport session becomes
+     `CONNECTED`, the client sends `OP_AUTH` (0x01) with the server password
+     (UTF-8). If the server does not answer `OP_AUTH_RESULT` (0x02) within
+     **15 s**, the client transitions to `ERROR` with a clear message instead of
+     hanging in `CONNECTED`. (This auto-send was the root cause of the earlier
+     "client never connects" bug — the session was opened but authentication was
+     never transmitted.) On devices below **API 33** the client fails fast with a
+     clear error, since `android.net.http.WebTransport` is unavailable there.
+  6b. **Password is hashed before sending.** The `OP_AUTH` payload is
+     `SHA-256(password)` as **lowercase hex** (the same value the server computes
+     via `printf 'pw' | sha256sum`), never the raw password. Sending the raw
+     password previously caused every auth to be rejected ("Wrong password
+     hash"). The plaintext password is therefore never placed on the wire.
+  7. **Connection diagnostics.** If a connect fails, the UI (Home + Server
+     settings) now shows the *precise* reason instead of a generic "Ошибка":
+     - *"Нет доверенного QR-хэша…"* — no cert pinned and DEV-pinning off → scan
+       the QR or enable **DEV: отключить привязку сертификата** in Server settings.
+     - *"Хост <ip>:<port> недоступен…"* — a 3 s `InetAddress.isReachable` probe
+       failed → wrong IP/port or server not in the same network.
+     - *"Ошибка сессии WebTransport (code=N)…"* — the QUIC/HTTP3 handshake failed
+       (the server must speak WebTransport over HTTPS/QUIC, not plain WebSocket).
+     - *"Аутентификация отклонена сервером: …"* — wrong password.
 
 ## Project layout
 
@@ -202,10 +270,22 @@ Log line format:
 never logged. Cert hashes are truncated to the first 8 hex chars via
 `LogManager.shortHash`; secrets are replaced with `<redacted>` via
 `LogManager.redact`. The in-app **Logs** screen (Settings → Logs) shows the last
-1000 records with a level filter (ALL / ERROR / WARN / INFO), export to a file,
-and clear. A global uncaught-exception handler
-([`ImpulseApplication`](app/src/main/java/com/example/impulse/ImpulseApplication.kt))
-also writes a crash report to disk so "crashes without logs" are diagnosable.
+ 1000 records with a level filter (ALL / ERROR / WARN / INFO), export to a file,
+ and clear. A global uncaught-exception handler
+ ([`ImpulseApplication`](app/src/main/java/com/example/impulse/ImpulseApplication.kt))
+ also writes a crash report to disk so "crashes without logs" are diagnosable.
+
+ **Export & location.** The on-disk log directory is the app-specific path
+ `<filesDir>/logs/` (e.g. `/data/data/com.example.impulse/files/logs/` on the
+ device; no hardcoded absolute paths). When you tap **Экспортировать** (Export)
+ the app writes a timestamped file (`impulse_logs_YYYYMMDD_HHMMSS.txt`) into that
+ directory and immediately shows a **Toast with the exact absolute path** plus a
+ **Snackbar** with a *Copy* action (copies the path to the clipboard). A
+ **folder icon** button opens the log directory via a safe `FileProvider`
+ `ACTION_VIEW` intent (authority `<applicationId>.fileprovider`, declared in
+ `AndroidManifest.xml` + `res/xml/file_paths.xml`) — no `file://` URI is ever
+ used, so it works on Android 7+ without `FileUriExposedException`. The same
+ directory is where the rotating `FileTree` writes its 5 × 5 MB ring.
 
 ## Architecture
 

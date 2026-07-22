@@ -1,7 +1,12 @@
 package com.example.impulse.util
 
+import android.content.ContentResolver
+import android.content.ContentValues
 import android.content.Context
 import android.os.Build
+import android.os.Environment
+import android.provider.MediaStore
+import androidx.core.content.FileProvider
 import timber.log.Timber
 import java.io.BufferedWriter
 import java.io.File
@@ -17,7 +22,7 @@ import java.util.concurrent.atomic.AtomicBoolean
  * Wraps [Timber] and installs three trees depending on the build type:
  *  - [DebugTree]   : detailed logcat output, debug builds only.
  *  - [FileTree]    : appends every record to a rotating file set on disk
- *                    (max 5 MB per file, 5 files kept) so logs survive process
+ *                    (max 1 MB per file, 3 files kept) so logs survive process
  *                    death and can be exported from the in-app Logs screen.
  *  - [ReleaseTree] : only ERROR/ASSERT to logcat in production (no file, no PII).
  *
@@ -33,14 +38,14 @@ import java.util.concurrent.atomic.AtomicBoolean
  */
 object LogManager {
 
-    private const val MAX_FILE_SIZE_BYTES = 5L * 1024 * 1024 // 5 MB
-    private const val MAX_FILES = 5
+    private const val MAX_FILE_SIZE_BYTES = 1L * 1024 * 1024 // 1 MB
+    private const val MAX_FILES = 3
     private const val FILE_PREFIX = "impulse_log"
     private const val FILE_EXT = ".txt"
 
     private val initialized = AtomicBoolean(false)
     private lateinit var logDir: File
-    private val isoFmt = SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ss.SSS", Locale.US)
+    private val fileFmt = SimpleDateFormat("yyyy-MM-dd HH:mm:ss.SSS", Locale.US)
 
     // User-controlled master switch for on-disk file logging. When false, the
     // FileTree is not planted (or is uprooted), so nothing is written to disk.
@@ -194,11 +199,61 @@ object LogManager {
         }.getOrNull()
     }
 
+    /**
+     * Export logs to the public Downloads collection via MediaStore (API 29+).
+     * No WRITE_EXTERNAL_STORAGE permission is required. Returns the displayable
+     * name of the created file, or null on failure.
+     */
+    fun exportToDownloads(context: Context, max: Int = 1000): String? {
+        if (!initialized.get()) return null
+        val lines = readLast(max)
+        if (lines.isEmpty()) return null
+
+        val resolver = context.contentResolver
+        val fileName = "impulse_logs_${System.currentTimeMillis()}.txt"
+
+        return if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+            val values = ContentValues().apply {
+                put(MediaStore.Downloads.DISPLAY_NAME, fileName)
+                put(MediaStore.Downloads.MIME_TYPE, "text/plain")
+                put(MediaStore.Downloads.RELATIVE_PATH, Environment.DIRECTORY_DOWNLOADS)
+                put(MediaStore.Downloads.IS_PENDING, 1)
+            }
+            val uri = resolver.insert(MediaStore.Downloads.EXTERNAL_CONTENT_URI, values)
+            if (uri == null) {
+                Timber.w("LogManager", "MediaStore insert returned null")
+                return null
+            }
+            runCatching {
+                resolver.openOutputStream(uri)?.bufferedWriter()?.use { w ->
+                    lines.forEach { w.appendLine(it) }
+                }
+                values.clear()
+                values.put(MediaStore.Downloads.IS_PENDING, 0)
+                resolver.update(uri, values, null, null)
+                fileName
+            }.getOrNull()
+        } else {
+            // Fallback for API < 29: write to app-specific external files dir.
+            val targetDir = context.getExternalFilesDir(Environment.DIRECTORY_DOWNLOADS)
+                ?: context.filesDir
+            val out = exportRecent(targetDir, max)
+            out?.name
+        }
+    }
+
     /** Deletes every log file on disk. */
     fun clear() {
         if (!initialized.get()) return
         logFiles().forEach { runCatching { it.delete() } }
     }
+
+    /**
+     * Returns the on-disk directory that holds the rotating log files, or null
+     * if logging has not been initialized yet. Used by the in-app "Open folder"
+     * action (via a FileProvider content URI) so the user can locate exports.
+     */
+    fun logsDir(): File? = if (initialized.get()) logDir else null
 
     // ---- Internals ----
 
@@ -235,7 +290,7 @@ object LogManager {
 
     /**
      * Rotating file tree. Each line is formatted as:
-     *   [2025-07-17T14:30:45.123] [INFO] [Tag] message
+     *   [2025-07-17 14:30:45.123] [INFO] [Tag] message
      * When the active file exceeds [MAX_FILE_SIZE_BYTES], it is rolled and the
      * oldest of [MAX_FILES] is deleted. Every record is passed through
      * [redactSecrets] so no private key / password / ciphertext / full hash is
@@ -253,7 +308,7 @@ object LogManager {
                 android.util.Log.ERROR -> "ERROR"
                 else -> "ASSERT"
             }
-            val ts = isoFmt.format(Date())
+            val ts = fileFmt.format(Date())
             val line = buildString {
                 append("[$ts] [$level] [${tag ?: "?"}] $safe")
                 t?.let { append(" | ${it.javaClass.simpleName}: ${it.message?.let { m -> redactSecrets(m) }}") }

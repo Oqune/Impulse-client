@@ -72,16 +72,24 @@ fun MainScreen() {
         availableServers = ServerConfig.builtInServers + customServers
         if (savedServer != null) selectedServer = savedServer
         clientName = savedClientName.ifBlank { NameGenerator.generate() }
+
+        chatController.setAutoReconnect(serverPreferences.getAutoReconnect())
+
+        if (serverPreferences.getAutoConnect() && savedServer != null && clientName.isNotBlank()) {
+            chatController.connect(savedServer, clientName)
+        }
     }
 
     if (showQrScan) {
+        val currentServer = selectedServer
         QrScanScreen(
-            serverId = selectedServer.id,
-            onHashScanned = { hash ->
-                TrustedCertManager(context).trustHash(selectedServer.id, hash)
+            serverId = currentServer.id,
+            onCertScanned = { hash ->
+                val certManager = TrustedCertManager(context)
+                certManager.trustHash(currentServer.id, hash)
+                com.example.impulse.util.LogManager.i("MainScreen", "QR scan stored cert for server=${currentServer.id}")
                 showQrScan = false
-                // Attempt to connect now that we have a trusted hash.
-                chatController.connect(selectedServer, clientName)
+                chatController.connect(currentServer, clientName)
             },
             onBack = { showQrScan = false }
         )
@@ -151,14 +159,19 @@ fun MainScreen() {
                 clientName = clientName,
                 modifier = Modifier.padding(innerPadding)
             )
-            2 -> QrScanScreen(
-                serverId = selectedServer.id,
-                onHashScanned = { hash ->
-                    TrustedCertManager(context).trustHash(selectedServer.id, hash)
-                    chatController.connect(selectedServer, clientName)
-                },
-                onBack = { selectedItem = 0 }
-            )
+2 -> {
+                val currentServer = selectedServer
+                QrScanScreen(
+                    serverId = currentServer.id,
+                    onCertScanned = { hash ->
+                        val certManager = TrustedCertManager(context)
+                        certManager.trustHash(currentServer.id, hash)
+                        chatController.connect(currentServer, clientName)
+                        selectedItem = 0
+                    },
+                    onBack = { selectedItem = 0 }
+                )
+            }
             3 -> SettingsScreen(
                 selectedServer = selectedServer,
                 onServerSelected = { newServer ->

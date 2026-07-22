@@ -9,11 +9,13 @@ import android.graphics.ImageFormat
 import android.graphics.Matrix
 import android.graphics.RectF
 import android.graphics.SurfaceTexture
+import android.hardware.camera2.CameraAccessException
 import android.hardware.camera2.CameraCaptureSession
 import android.hardware.camera2.CameraCharacteristics
 import android.hardware.camera2.CameraDevice
 import android.hardware.camera2.CameraManager
 import android.hardware.camera2.CaptureRequest
+import android.hardware.camera2.params.OutputConfiguration
 import android.media.ImageReader
 import android.os.Handler
 import android.os.HandlerThread
@@ -67,9 +69,7 @@ import com.google.mlkit.vision.barcode.BarcodeScanner
 import com.google.mlkit.vision.barcode.BarcodeScannerOptions
 import com.google.mlkit.vision.barcode.common.Barcode
 import com.google.mlkit.vision.common.InputImage
-import kotlinx.coroutines.CoroutineScope
-import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.launch
+
 import java.util.concurrent.Executors
 import java.util.concurrent.Semaphore
 import kotlin.math.abs
@@ -93,7 +93,7 @@ import kotlin.math.abs
 @Composable
 fun QrScanScreen(
     serverId: String,
-    onHashScanned: (String) -> Unit,
+    onCertScanned: (String) -> Unit,
     onBack: () -> Unit
 ) {
     val context = LocalContext.current
@@ -141,6 +141,7 @@ fun QrScanScreen(
             modifier = Modifier
                 .fillMaxSize()
                 .padding(padding)
+                .navigationBarsPadding()
         ) {
             // ---- Top hero (≈30%): gradient background, logo, instruction ----
             Box(
@@ -195,7 +196,6 @@ fun QrScanScreen(
                 modifier = Modifier
                     .fillMaxWidth()
                     .weight(0.7f)
-                    .verticalScroll(rememberScrollState())
                     .padding(horizontal = 24.dp, vertical = 16.dp),
                 horizontalAlignment = Alignment.CenterHorizontally
             ) {
@@ -203,13 +203,18 @@ fun QrScanScreen(
                     val textureView = remember { TextureView(context) }
                     val controller = remember {
                         Camera2Controller(context, textureView) { raw ->
+                            // Guard against stale callbacks firing after the
+                            // composable left composition (e.g. quick tab switch
+                            // from QR to Settings). The controller's stop() sets
+                            // isActive=false synchronously, but in-flight ML Kit
+                            // tasks may complete after that.
                             if (scanned == null) {
                                 LogManager.d("QrScan", "raw detected: '$raw'")
                                 val hash = parseCertHash(raw)
                                 if (hash != null) {
                                     scanned = hash
-                                    LogManager.i("QrScan", "hash scanned (short=${LogManager.shortHash(hash)})")
-                                    onHashScanned(hash)
+                                    LogManager.i("QrScan", "cert scanned (short=${LogManager.shortHash(hash)})")
+                                    onCertScanned(hash)
                                 } else {
                                     LogManager.w("QrScan", "parseCertHash rejected raw value")
                                 }
@@ -224,14 +229,12 @@ fun QrScanScreen(
                             hasCameraPermission = false
                         }
                         onDispose {
-                            // Run teardown off the UI thread: controller.stop()
-                            // closes the camera/session/scanner and must not block
-                            // (or join) the main thread when the screen is removed
-                            // (e.g. navigating QR -> Settings would otherwise crash).
-                            val ctrl = controller
-                            CoroutineScope(Dispatchers.Default).launch {
-                                try { ctrl.stop() } catch (_: Exception) {}
-                            }
+                            // Sync teardown: camera/session/scanner close() calls
+                            // are non-blocking (async to camera service). The old
+                            // async pattern let ML Kit callbacks fire *after* the
+                            // composable left composition, crashing on disposed
+                            // state access when switching QR -> Settings quickly.
+                            try { controller.stop() } catch (_: Exception) {}
                         }
                     }
                     // Expose the controller to the flashlight button below.
@@ -381,8 +384,8 @@ fun QrScanScreen(
                     showManualEntry = false
                     if (scanned == null) {
                         scanned = hash
-                        LogManager.i("QrScan", "hash entered manually (short=${LogManager.shortHash(hash)})")
-                        onHashScanned(hash)
+                        LogManager.i("QrScan", "cert entered manually (short=${LogManager.shortHash(hash)})")
+                        onCertScanned(hash)
                     }
                 }
             }
@@ -575,12 +578,21 @@ private class Camera2Controller(
             .build()
     )
 
+    @Volatile private var isActive = false
+    @Volatile private var stopped = true
+
     private var previewSize: CameraSize? = null
 
     fun start() {
+        if (isActive) return
+        isActive = true
+        stopped = false
         if (ContextCompat.checkSelfPermission(context, Manifest.permission.CAMERA)
             != PackageManager.PERMISSION_GRANTED
-        ) return
+        ) {
+            isActive = false
+            return
+        }
         startBackgroundThread()
         if (textureView.isAvailable) {
             openCamera()
@@ -588,7 +600,9 @@ private class Camera2Controller(
             textureView.surfaceTextureListener = object : TextureView.SurfaceTextureListener {
                 override fun onSurfaceTextureAvailable(
                     surface: SurfaceTexture, width: Int, height: Int
-                ) = openCamera()
+                ) {
+                    if (isActive && !stopped) openCamera()
+                }
 
                 override fun onSurfaceTextureSizeChanged(
                     surface: SurfaceTexture, width: Int, height: Int
@@ -627,10 +641,12 @@ private class Camera2Controller(
     }
 
     private fun openCamera() {
+        if (!isActive) return
         val cameraId = chooseBackCamera() ?: return
         val characteristics = cameraManager.getCameraCharacteristics(cameraId)
         val map = characteristics.get(CameraCharacteristics.SCALER_STREAM_CONFIGURATION_MAP)
             ?: return
+        val handler = backgroundHandler ?: return
 
         val viewWidth = textureView.width.takeIf { it > 0 } ?: 1080
         val viewHeight = textureView.height.takeIf { it > 0 } ?: 1080
@@ -648,6 +664,10 @@ private class Camera2Controller(
         ).apply {
             setOnImageAvailableListener({ reader ->
                 if (!imageLock.tryAcquire()) return@setOnImageAvailableListener
+                if (!isActive || stopped) {
+                    imageLock.release()
+                    return@setOnImageAvailableListener
+                }
                 val image = try {
                     reader.acquireLatestImage()
                 } catch (e: IllegalStateException) {
@@ -662,21 +682,26 @@ private class Camera2Controller(
                 val inputImage = InputImage.fromMediaImage(image, rotation)
                 scanner.process(inputImage)
                     .addOnSuccessListener { barcodes ->
+                        if (!isActive || stopped) return@addOnSuccessListener
                         for (barcode in barcodes) {
                             if (barcode.format == Barcode.FORMAT_QR_CODE) {
                                 barcode.rawValue?.let { onQrDetected(it) }
                             }
                         }
                     }
-                    .addOnFailureListener { LogManager.w("QrScan", "scan failed", it) }
+                    .addOnFailureListener { if (!stopped) LogManager.w("QrScan", "scan failed", it) }
                     .addOnCompleteListener {
-                        try { image.close() } finally { imageLock.release() }
+                        try { image.close() } catch (_: Exception) {} finally { imageLock.release() }
                     }
-            }, backgroundHandler)
+            }, handler)
         }
 
         cameraManager.openCamera(cameraId, object : CameraDevice.StateCallback() {
             override fun onOpened(camera: CameraDevice) {
+                if (!isActive) {
+                    camera.close()
+                    return
+                }
                 cameraDevice = camera
                 createSession()
             }
@@ -689,32 +714,53 @@ private class Camera2Controller(
                 camera.close()
                 cameraDevice = null
             }
-        }, backgroundHandler)
+        }, handler)
     }
 
+    @Suppress("DEPRECATION")
     private fun createSession() {
+        if (!isActive) return
         val device = cameraDevice ?: return
-        val surface = Surface(textureView.surfaceTexture!!)
+        val handler = backgroundHandler ?: return
+        val surfaceTexture = textureView.surfaceTexture ?: run {
+            LogManager.w("QrScan", "createSession skipped: surfaceTexture is null")
+            return
+        }
+        val surface = Surface(surfaceTexture)
         val readerSurface = imageReader?.surface ?: return
-        device.createCaptureSession(
-            listOf(surface, readerSurface),
-            object : CameraCaptureSession.StateCallback() {
-                override fun onConfigured(session: CameraCaptureSession) {
-                    captureSession = session
-                    val request = device.createCaptureRequest(CameraDevice.TEMPLATE_PREVIEW).apply {
-                        addTarget(surface)
-                        addTarget(readerSurface)
-                        set(CaptureRequest.CONTROL_MODE, CaptureRequest.CONTROL_MODE_AUTO)
-                        set(CaptureRequest.CONTROL_AF_MODE, CaptureRequest.CONTROL_AF_MODE_CONTINUOUS_PICTURE)
+        try {
+            val outputs = listOf<OutputConfiguration>(
+                OutputConfiguration(surface),
+                OutputConfiguration(readerSurface)
+            )
+            device.createCaptureSessionByOutputConfigurations(
+                outputs,
+                object : CameraCaptureSession.StateCallback() {
+                    override fun onConfigured(session: CameraCaptureSession) {
+                        if (!isActive) {
+                            session.close()
+                            return
+                        }
+                        captureSession = session
+                        val request = device.createCaptureRequest(CameraDevice.TEMPLATE_PREVIEW).apply {
+                            addTarget(surface)
+                            addTarget(readerSurface)
+                            set(CaptureRequest.CONTROL_MODE, CaptureRequest.CONTROL_MODE_AUTO)
+                            set(CaptureRequest.CONTROL_AF_MODE, CaptureRequest.CONTROL_AF_MODE_CONTINUOUS_PICTURE)
+                        }
+                        session.setRepeatingRequest(request.build(), null, handler)
                     }
-                    session.setRepeatingRequest(request.build(), null, backgroundHandler)
-                }
-                override fun onConfigureFailed(session: CameraCaptureSession) {
-                    LogManager.e("QrScan", "camera capture session configure failed")
-                }
-            },
-            backgroundHandler
-        )
+                    override fun onConfigureFailed(session: CameraCaptureSession) {
+                        LogManager.e("QrScan", "camera capture session configure failed")
+                    }
+                },
+                handler
+            )
+        } catch (e: CameraAccessException) {
+            LogManager.e("QrScan", "createSession failed: ${e.message}", e)
+        } catch (e: IllegalStateException) {
+            LogManager.e("QrScan", "createSession failed (camera closed?): ${e.message}", e)
+        }
     }
 
     private fun configureTransform(viewWidth: Int, viewHeight: Int) {
@@ -742,24 +788,55 @@ private class Camera2Controller(
     }
 
     fun stop() {
-        try {
-            captureSession?.close()
-            captureSession = null
-            cameraDevice?.close()
-            cameraDevice = null
-            imageReader?.close()
-            imageReader = null
-        } catch (e: Exception) {
-            LogManager.e("QrScan", "stop failed", e)
-        }
-        stopBackgroundThread()
+        isActive = false
+        stopped = true
         scanner.close()
+        val handler = backgroundHandler
+        if (handler != null) {
+            val latch = java.util.concurrent.CountDownLatch(1)
+            handler.post {
+                try {
+                    captureSession?.close()
+                    captureSession = null
+                    cameraDevice?.close()
+                    cameraDevice = null
+                    imageReader?.close()
+                    imageReader = null
+                } catch (e: Exception) {
+                    LogManager.e("QrScan", "stop camera cleanup failed", e)
+                } finally {
+                    // Quit the looper from within the handler thread so any
+                    // pending Camera2 framework callbacks are drained first.
+                    // This avoids "Handler on a dead thread" IllegalStateException
+                    // when the framework tries to deliver a message after quit.
+                    backgroundThread?.quitSafely()
+                    backgroundThread = null
+                    backgroundHandler = null
+                    latch.countDown()
+                }
+            }
+            try { latch.await(500, java.util.concurrent.TimeUnit.MILLISECONDS) }
+            catch (_: InterruptedException) { }
+        } else {
+            try {
+                captureSession?.close()
+                captureSession = null
+                cameraDevice?.close()
+                cameraDevice = null
+                imageReader?.close()
+                imageReader = null
+            } catch (e: Exception) {
+                LogManager.e("QrScan", "stop failed", e)
+            }
+            stopBackgroundThread()
+        }
+        textureView.post { textureView.surfaceTextureListener = null }
     }
 
     private fun getRotationCompensation(cameraId: String): Int {
         val characteristics = cameraManager.getCameraCharacteristics(cameraId)
         val sensorOrientation = characteristics.get(CameraCharacteristics.SENSOR_ORIENTATION) ?: 0
-        val displayRotation = context.display?.rotation ?: android.view.Surface.ROTATION_0
+        val displayRotation = context.display.rotation
         val surfaceRotationDegrees = when (displayRotation) {
             android.view.Surface.ROTATION_0 -> 0
             android.view.Surface.ROTATION_90 -> 90
@@ -778,9 +855,11 @@ private class Camera2Controller(
     fun setTorch(enabled: Boolean) {
         val device = cameraDevice ?: return
         val session = captureSession ?: return
+        val st = textureView.surfaceTexture ?: return
+        val handler = backgroundHandler ?: return
         try {
             val request = device.createCaptureRequest(CameraDevice.TEMPLATE_PREVIEW).apply {
-                addTarget(Surface(textureView.surfaceTexture!!))
+                addTarget(Surface(st))
                 addTarget(imageReader?.surface ?: return)
                 set(CaptureRequest.CONTROL_MODE, CaptureRequest.CONTROL_MODE_AUTO)
                 set(CaptureRequest.CONTROL_AF_MODE, CaptureRequest.CONTROL_AF_MODE_CONTINUOUS_PICTURE)
@@ -789,7 +868,7 @@ private class Camera2Controller(
                     if (enabled) CaptureRequest.FLASH_MODE_TORCH else CaptureRequest.FLASH_MODE_OFF
                 )
             }
-            session.setRepeatingRequest(request.build(), null, backgroundHandler)
+            session.setRepeatingRequest(request.build(), null, handler)
         } catch (e: Exception) {
             LogManager.w("QrScan", "setTorch failed", e)
         }
@@ -797,41 +876,31 @@ private class Camera2Controller(
 }
 
 /**
- * Extracts the hex cert hash from a QR payload.
+ * Extracts the hex cert hash from a TOFU QR payload.
  *
  * STRICT validation (per security audit): the payload MUST carry a recognized
- * TOFU prefix and a 64-hex SHA-256 fingerprint. A bare 64-hex token found
- * elsewhere is NOT accepted — accepting arbitrary 64-hex strings let a
- * malicious or malformed QR silently pin the wrong certificate.
+ * TOFU prefix and a 64-hex SHA-256 fingerprint.
  *
- * Two payload forms are accepted (both case-insensitive prefix, tolerant of
- * surrounding whitespace):
- *   - `impulse-cert:<64-hex-sha256>`            (primary, client-pinned form)
- *   - `impulse-tofu|<64-hex>|<issued_at>`       (server TUI form; the trailing
- *      `|<issued_at>` unix-seconds field is ignored — the client only needs the
- *      fingerprint to pin, and the timestamp is not validated/trusted here)
+ * Accepted forms:
+ *   - `impulse-cert:<64-hex-sha256>`          (current server QR format)
+ *   - `impulse-tofu|<64-hex>|<issued_at>`     (legacy server QR format)
  *
- * In both cases the returned value is exactly the 64-char lowercase hex
- * fingerprint, so downstream [com.example.impulse.security.TrustedCertManager]
- * storage and comparison stay identical regardless of which form was scanned.
+ * Returns the normalized lowercase hash, or null for unrecognised/malformed payloads.
  */
 internal fun parseCertHash(raw: String): String? {
     val trimmed = raw.trim()
     val lower = trimmed.lowercase()
 
-    // Form 1: impulse-cert:<64-hex>
     val certPrefix = "impulse-cert:"
     if (lower.startsWith(certPrefix)) {
         val hash = trimmed.substring(certPrefix.length).trim()
-        if (hash.matches(Regex("^[0-9a-fA-F]{64}$"))) return hash.lowercase()
-        return null
+        if (!hash.matches(Regex("^[0-9a-fA-F]{64}$"))) return null
+        return hash.lowercase()
     }
 
-    // Form 2: impulse-tofu|<64-hex>|<issued_at>
     val tofuPrefix = "impulse-tofu|"
     if (lower.startsWith(tofuPrefix)) {
         val rest = trimmed.substring(tofuPrefix.length).trim()
-        // Split on '|'; the first segment must be exactly 64 hex chars.
         val fp = rest.substringBefore('|').trim()
         if (fp.matches(Regex("^[0-9a-fA-F]{64}$"))) return fp.lowercase()
         return null
@@ -840,5 +909,4 @@ internal fun parseCertHash(raw: String): String? {
     return null
 }
 
-/** True only for a recognized TOFU payload (used by manual entry). */
 internal fun isValidCertHash(raw: String): Boolean = parseCertHash(raw) != null

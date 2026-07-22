@@ -1,3 +1,5 @@
+import org.jetbrains.kotlin.gradle.dsl.JvmTarget
+
 plugins {
     alias(libs.plugins.android.application)
     alias(libs.plugins.kotlin.android)
@@ -30,8 +32,8 @@ android {
         sourceCompatibility = JavaVersion.VERSION_17
         targetCompatibility = JavaVersion.VERSION_17
     }
-    kotlinOptions {
-        jvmTarget = "17"
+    kotlin {
+        compilerOptions.jvmTarget.set(JvmTarget.JVM_17)
     }
     buildFeatures {
         compose = true
@@ -78,94 +80,52 @@ configurations.all {
 // ---------------------------------------------------------------------------
 // 16 KB page-size (Android 15+) ELF re-alignment.
 //
-// The standalone ML Kit Barcode library (com.google.mlkit:barcode-scanning)
-// bundles libbarhopper_v3.so whose PT_LOAD segments are 4 KB aligned
-// (p_align = 4096, p_offset not 16 KB aligned). Android 15+ devices that use
-// 16 KB memory pages reject such libraries ("has invalid alignment").
-// `zipalign` only aligns the *zip entry offset*, not the ELF-internal
-// p_offset/p_vaddr, so it cannot fix this by itself. This task rewrites every
-// lib/*.so inside the APK so each PT_LOAD segment gets p_align = 16384 AND a
-// 16 KB-aligned p_offset/p_vaddr (zero bias: p_offset == p_vaddr), then re-runs
-// zipalign -p 16. This makes the prebuilt native library 16 KB compatible
-// without recompiling it.
+// Pre-built native libraries (libbarhopper_v3.so from ML Kit,
+// libandroidx.graphics.path.so from Compose, and the small JNI shim
+// libquiche_jni.so from socket-quic-quiche-android) have PT_LOAD segments
+// aligned to 4 KB.  Android 15+ devices with 16 KB pages reject libraries
+// whose PT_LOAD segments aren't 16 KB-aligned.
+//
+// We fix the .so files *before* they are packaged into the APK: the task runs
+// after mergeNativeLibs (which merges all per‑ABI libraries into one output
+// directory) and before package{Variant} (which zips them).  This avoids
+// post‑hoc APK modification, re‑signing, and the timing issues with
+// finalizedBy + installDebug.
 // ---------------------------------------------------------------------------
 val align16kbScript = layout.projectDirectory.file("scripts/align16kb.py")
-val zipalignExecutable = File(
-    System.getenv("ANDROID_HOME")
-        ?: (System.getenv("ANDROID_SDK_ROOT") ?: "${System.getProperty("user.home")}/AppData/Local/Android/Sdk"),
-    "build-tools/36.1.0/zipalign.exe"
-).absolutePath
 
 afterEvaluate {
     val python = "python"
-    // Debug signing config (matches the AGP default debug keystore) so we can
-    // RE-SIGN the APK after re-zipping it for 16 KB alignment. Re-zipping the
-    // signed APK destroys the v1/v2/v3 signature, so we must re-sign with
-    // apksigner to keep the APK installable.
-    val androidHome = System.getenv("ANDROID_HOME")
-        ?: (System.getenv("ANDROID_SDK_ROOT") ?: "${System.getProperty("user.home")}/AppData/Local/Android/Sdk")
-    val apksignerExecutable = File(androidHome, "build-tools/36.1.0/apksigner.bat").absolutePath
-    val debugKeystore = File("${System.getProperty("user.home")}/.android/debug.keystore").absolutePath
-    val keyPass = "android"
-    val storePass = "android"
-    val keyAlias = "androiddebugkey"
-
     listOf("debug", "release").forEach { variant ->
         val cap = variant.replaceFirstChar { it.uppercase() }
-        val packageTask = tasks.findByName("package$cap") ?: return@forEach
-        val alignTask = tasks.register("align16kb$cap") {
-            // The script itself is an input: if it changes, re-align even when the
-            // APK is cached up-to-date.
+        val mergeTaskName = "merge${cap}NativeLibs"
+        val packageTaskName = "package$cap"
+        val mergeTask = tasks.findByName(mergeTaskName) ?: return@forEach
+        val packageTask = tasks.findByName(packageTaskName) ?: return@forEach
+
+        val fixTask = tasks.register("fixNativeLibsAlign${cap}") {
+            dependsOn(mergeTask)
             inputs.file(align16kbScript)
             doLast {
-                // Locate the APK produced by the package task (name may vary, e.g.
-                // app-debug.apk / app-debug-unsigned.apk). Search the output dir.
-                val outDir = File(buildDir, "outputs/apk/$variant")
-                val apk = (outDir.listFiles { f -> f.name.endsWith(".apk") }
-                    ?.sortedByDescending { it.lastModified() }
-                    ?: emptyList()).firstOrNull()
-                if (apk == null) {
-                    logger.lifecycle("align16kb: APK not found in $outDir, skipping")
+                val nativeDir = mergeTask.outputs.files.firstOrNull()
+                    ?: file("$buildDir/intermediates/merged_native_libs/$variant/merge${cap}NativeLibs/out")
+                if (!nativeDir.isDirectory) {
+                    logger.lifecycle("fixNativeLibsAlign: $nativeDir not found, skipping")
                     return@doLast
                 }
-                // 1) Re-align every lib/*.so to a 16 KB page size (zero bias).
-                exec { commandLine(python, align16kbScript.asFile.absolutePath, apk.absolutePath) }
-                // 2) Re-zipalign so zip entry offsets stay 16 KB aligned after the rewrite.
-                val aligned = File(outDir, "aligned_${apk.name}")
-                exec { commandLine(zipalignExecutable, "-p", "16", apk.absolutePath, aligned.absolutePath) }
-                apk.delete()
-                aligned.renameTo(apk)
-                // 3) Re-sign: re-zipping destroyed the v1/v2/v3 signature, so sign again.
-                val signed = File(outDir, "signed_${apk.name}")
-                exec {
-                    commandLine(
-                        apksignerExecutable, "sign",
-                        "--ks", debugKeystore,
-                        "--ks-key-alias", keyAlias,
-                        "--ks-pass", "pass:$storePass",
-                        "--key-pass", "pass:$keyPass",
-                        "--out", signed.absolutePath,
-                        apk.absolutePath
-                    )
+                nativeDir.walkTopDown().filter { it.name.endsWith(".so") }.forEach { so ->
+                    project.exec {
+                        commandLine(python, align16kbScript.asFile.absolutePath, so.absolutePath)
+                    }
                 }
-                apk.delete()
-                signed.renameTo(apk)
-                // 4) Verify: fail the build if any .so is still not 16 KB aligned so the
-                //    incompatible APK can never be uploaded to Google Play silently.
-                val verify = exec {
-                    isIgnoreExitValue = true
-                    commandLine(python, align16kbScript.asFile.absolutePath, "--check", apk.absolutePath)
-                }
-                if (verify.exitValue != 0) {
-                    error("align16kb: verification FAILED for ${apk.name} - not 16 KB aligned")
-                }
-                logger.lifecycle("align16kb: re-aligned, re-signed and verified ${apk.name} to 16 KB page size")
             }
         }
-        // finalizedBy guarantees the re-alignment + re-sign runs after *any* packaging
-        // path (assemble, install, bundle, or invoking package$cap directly).
-        packageTask.finalizedBy(alignTask)
-        tasks.findByName("assemble$cap")?.dependsOn(alignTask)
+        // Our fix must run before strip so the stripped output inherits aligned files.
+        val stripTask = tasks.findByName("strip${cap}DebugSymbols")
+        if (stripTask != null) {
+            stripTask.dependsOn(fixTask)
+        }
+        packageTask.dependsOn(fixTask)
     }
 }
 
@@ -203,6 +163,11 @@ dependencies {
     implementation(libs.room.runtime)
     implementation(libs.room.ktx)
     kapt(libs.room.compiler)
+    // Room 2.8.4's annotation processor pulls an old kotlin-metadata-jvm (via
+    // kotlinpoet) that cannot read Kotlin 2.4.0 class metadata, breaking kapt's
+    // incremental processor. Force the matching metadata library on the kapt
+    // classpath (Gradle picks the highest version).
+    kapt("org.jetbrains.kotlin:kotlin-metadata-jvm:2.4.0")
 
     // Post-quantum cryptography (ML-KEM-768) and AES-256-GCM.
     implementation(libs.bouncycastle.prov)
@@ -220,11 +185,16 @@ dependencies {
     // dataSync foreground service after BOOT_COMPLETED on Android 14+.
     implementation(libs.workmanager)
 
-    // WebTransport / HttpEngine transport. The real classes live in the Android
-    // framework (android.net.http.*, API 33+). Because some SDK platform stubs do
-    // not ship these symbols, we compile against a local stub JAR (compileOnly,
-    // not packaged) and rely on the device's framework implementation at runtime.
-    compileOnly(files("libs/android-net-http-stub.jar"))
+    // WebTransport via DitchOoM/socket (QUIC/HTTP3, RFC 9220). Uses quiche
+    // under the hood — no `@hide` framework API, works on any Android device.
+    // Since 3.9.x, the quiche native library ships as a proper Android AAR
+    // (socket-quic-quiche-android, jni/<abi>/libquiche{,_jni}.so for
+    // arm64-v8a/armeabi-v7a/x86_64), pulled in transitively via
+    // socket-http3 → socket-quic-default → socket-quic-quiche. NativeLibLoader
+    // resolves it with System.loadLibrary — no manual extraction needed.
+    // buffer/flow транзитивно подтягиваются socket-http3 — не указываем явно.
+    implementation("com.ditchoom:socket-http3:3.9.5")
+    implementation("com.ditchoom:socket-quic:3.9.5")
 
     testImplementation(libs.junit)
     androidTestImplementation(libs.androidx.junit)

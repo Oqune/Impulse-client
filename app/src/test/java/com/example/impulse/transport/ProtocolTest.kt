@@ -84,4 +84,19 @@ class ProtocolTest {
         val parsed = Protocol.parseKeyExchange(Protocol.Reader(frame, 1))
         assertTrue(parsed.publicKey.contentEquals(pub))
     }
+
+    @Test
+    fun auth_sendsSha256Hex_notRawPassword() {
+        // The server compares SHA-256(password) (printf 'pw' | sha256sum), so the
+        // Auth frame MUST carry the lowercase hex digest, never the plaintext.
+        val pw = "yourpassword"
+        val frame = Protocol.buildAuth(pw)
+        assertEquals(Protocol.OP_AUTH, frame[0])
+        val sent = Protocol.parseAuthPassword(Protocol.Reader(frame, 1))
+        // Must NOT equal the raw password.
+        assertTrue("auth frame must not contain the raw password", sent != pw)
+        // Must equal the locally computed SHA-256 hex.
+        assertEquals(Protocol.sha256Hex(pw), sent)
+        assertEquals(64, sent.length)
+    }
 }

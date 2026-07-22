@@ -1,1 +1,0 @@
-39:w: file:///D:/Data/Projects/ImpulseProject/client/app/src/main/java/com/example/impulse/ui/screens/QrScanScreen.kt:686:16 'fun createCaptureSession(p0: (MutableList<Surface!>..List<Surface!>), p1: CameraCaptureSession.StateCallback, p2: Handler?): Unit' is deprecated. Deprecated in Java.

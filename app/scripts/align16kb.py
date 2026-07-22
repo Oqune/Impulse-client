@@ -1,160 +1,224 @@
 #!/usr/bin/env python3
-"""
-Re-align ELF shared libraries to a 16 KB (16384 byte) page size so they load on
-Android 15+ devices that use 16 KB memory pages.
-
-Android's dynamic linker rejects libraries whose PT_LOAD segments are not
-aligned to the device page size. For a 16 KB device it requires, for EVERY
-PT_LOAD segment:
-
-    p_offset % 16384 == 0   (file offset aligned)
-    p_vaddr  % 16384 == 0   (virtual address aligned)
-    p_align  == 16384       (declared alignment)
-
-`zipalign -p 16` only aligns the *zip entry offset*, NOT the ELF-internal
-p_offset/p_vaddr, so it cannot fix this by itself.
-
-This script rewrites the ELF so that each PT_LOAD segment is placed at a 16 KB
-aligned file offset equal to its (16 KB aligned) virtual address. We use a
-zero bias (p_offset == p_vaddr) which is always a valid, loadable layout and
-guarantees both offsets are 16 KB aligned. Non-LOAD segments (NOTE, GNU_STACK,
-dynamic, interp, etc.) are preserved verbatim and re-emitted at their original
-positions relative to the new layout (they are not required to be 16 KB
-aligned). The section header table and section data are dropped/ignored because
-they are not needed at load time and re-laying them out correctly is unnecessary.
-
-Usage:
-  align16kb.py FILE.so     # rewrite FILE.so in place
-  align16kb.py ARCHIVE.apk # rewrite every lib/*.so inside the apk (zip)
-"""
-import os
-import sys
-import struct
-import zipfile
+import os, sys, struct, zipfile
 
 PAGE = 16384
 PT_LOAD = 1
 
-
 def align_up(v, a):
     return (v + (a - 1)) & ~(a - 1)
 
-
 def fix_elf(data: bytes) -> bytes:
+    """Rewrite PT_LOAD segments so p_align=16384 and p_offset/p_vaddr are
+    16KB-aligned with zero bias.  Returns the fixed ELF file bytes."""
     if len(data) < 64 or data[:4] != b"\x7fELF":
-        return data  # not an ELF -> leave untouched
-    ei_class = data[4]  # 1 = 32-bit, 2 = 64-bit
-    ei_data = data[5]   # 1 = LE, 2 = BE
+        return data
+    ei_class = data[4]
+    ei_data = data[5]
     if ei_class not in (1, 2):
         return data
     endian = "<" if ei_data == 1 else ">"
     is64 = ei_class == 2
 
     if is64:
-        (e_phoff,) = struct.unpack_from(endian + "Q", data, 32)
-        (e_phentsize,) = struct.unpack_from(endian + "H", data, 54)
-        (e_phnum,) = struct.unpack_from(endian + "H", data, 56)
-        ph_fmt = endian + "IIQQQQQQ"   # p_type,p_flags,p_offset,p_vaddr,p_paddr,p_filesz,p_memsz,p_align
+        e_phoff = struct.unpack_from(endian + "Q", data, 32)[0]
+        e_phentsize = struct.unpack_from(endian + "H", data, 54)[0]
+        e_phnum = struct.unpack_from(endian + "H", data, 56)[0]
+        ph_fmt = endian + "IIQQQQQQ"
         ph_size = 56
-        O, V, PA, FS, MS, AL = 2, 3, 4, 5, 6, 7
+        # 64-bit PHDR fields: p_type(0), p_flags(1), p_offset(2), p_vaddr(3),
+        #                     p_paddr(4), p_filesz(5), p_memsz(6), p_align(7)
+        T, F, O, V, PA, FS, MS, AL = range(8)
     else:
-        (e_phoff,) = struct.unpack_from(endian + "I", data, 28)
-        (e_phentsize,) = struct.unpack_from(endian + "H", data, 42)
-        (e_phnum,) = struct.unpack_from(endian + "H", data, 44)
-        ph_fmt = endian + "IIIIIIII"   # p_type,p_offset,p_vaddr,p_paddr,p_filesz,p_memsz,p_flags,p_align
+        e_phoff = struct.unpack_from(endian + "I", data, 28)[0]
+        e_phentsize = struct.unpack_from(endian + "H", data, 42)[0]
+        e_phnum = struct.unpack_from(endian + "H", data, 44)[0]
+        ph_fmt = endian + "IIIIIIII"
         ph_size = 32
-        O, V, PA, FS, MS, AL = 1, 2, 3, 4, 5, 7
+        # 32-bit PHDR fields: p_type(0), p_offset(1), p_vaddr(2), p_paddr(3),
+        #                     p_filesz(4), p_memsz(5), p_flags(6), p_align(7)
+        T, O, V, PA, FS, MS, F, AL = range(8)
 
     if e_phnum == 0 or e_phentsize < ph_size:
         return data
 
-    # Parse program headers.
+    # Parse program headers
     phdrs = []
     for i in range(e_phnum):
         off = e_phoff + i * e_phentsize
         fields = list(struct.unpack_from(ph_fmt, data, off))
         phdrs.append(fields)
 
-    loads = [f for f in phdrs if f[0] == PT_LOAD]
+    loads = [f for f in phdrs if f[T] == PT_LOAD]
     if not loads:
         return data
 
-    # Determine the maximum virtual address used so we can place the
-    # non-LOAD data (e.g. .dynamic) after the last LOAD segment.
-    max_vaddr = 0
+    # Save original segment data and header values before we modify headers
+    segs = []
+    load_orig = []
     for f in loads:
-        max_vaddr = max(max_vaddr, f[V] + f[MS])
+        segs.append(data[f[O]:f[O] + f[FS]])
+        load_orig.append((f[O], f[V]))
 
-    # Build the new file:
-    #   [ ELF header ] [ phdr table ] [ padding ] [ LOAD segments at 16KB ]
-    # Each LOAD segment i is written at file offset == its (16KB-aligned) vaddr.
-    # We keep a single growing buffer; gaps are zero-filled.
-    ehdr = bytearray(data[:e_phoff if e_phoff > 0 else (64 if is64 else 52)])
-    phdr_table = bytearray(data[e_phoff:e_phoff + e_phnum * e_phentsize])
+    # Read section header table info from ELF header before it gets lost
+    if is64:
+        e_shoff = struct.unpack_from(endian + "Q", data, 40)[0]
+        e_shentsize = struct.unpack_from(endian + "H", data, 58)[0]
+        e_shnum = struct.unpack_from(endian + "H", data, 60)[0]
+        e_shstrndx = struct.unpack_from(endian + "H", data, 62)[0]
+    else:
+        e_shoff = struct.unpack_from(endian + "I", data, 32)[0]
+        e_shentsize = struct.unpack_from(endian + "H", data, 46)[0]
+        e_shnum = struct.unpack_from(endian + "H", data, 48)[0]
+        e_shstrndx = struct.unpack_from(endian + "H", data, 50)[0]
 
-    out = bytearray()
-    out += ehdr
-    out += phdr_table
+    # Save section header table bytes (if present and not inside PT_LOAD data)
+    shdr_data = None
+    if e_shoff > 0 and e_shnum > 0 and e_shentsize > 0:
+        shdr_size = e_shnum * e_shentsize
+        if e_shoff + shdr_size <= len(data):
+            shdr_data = data[e_shoff:e_shoff + shdr_size]
 
-    # Map each LOAD segment to a new 16 KB-aligned (offset == vaddr) position.
+    # New file layout:
+    #   [0 : header_end)           = ELF header + PHDR table (unchanged)
+    #   [header_end : first_off)   = zero padding
+    #   [first_off : ...)          = segment data, each placed so that
+    #                                p_offset % PAGE == p_vaddr % PAGE
+    #   [... : end)                = section header table (appended)
+    #
+    # Kernel constraint for 16 KB pages: (p_vaddr - p_offset) % PAGE == 0.
+    # Equivalently, p_offset % PAGE == p_vaddr % PAGE.  Since we keep the
+    # original p_vaddr unchanged, we must compute new p_offsets that satisfy
+    # this constraint.  Changing p_vaddr would break DT_* entries
+    # (DT_HASH, DT_GNU_HASH, DT_STRTAB, etc.) which contain absolute virtual
+    # addresses that assume the original load base.
+    header_end = e_phoff + e_phnum * e_phentsize
+    cur_min = align_up(header_end, PAGE)
+
+    def align_to_rem(offset, page_size, target_rem):
+        """Smallest value >= offset such that value % page_size == target_rem."""
+        r = offset % page_size
+        if r <= target_rem:
+            return offset - r + target_rem
+        else:
+            return offset - r + page_size + target_rem
+
+    # Build map from old PT_LOAD (p_vaddr, p_offset) -> new p_offset
+    old_to_new_load = {}
+    for f, seg in zip(loads, segs):
+        old_off = f[O]
+        old_vaddr = f[V]
+        target_rem = old_vaddr % PAGE
+        new_off = align_to_rem(cur_min, PAGE, target_rem)
+        f[O] = new_off
+        # Keep original p_vaddr/p_paddr unchanged
+        f[AL] = PAGE
+        old_to_new_load[(old_vaddr, old_off)] = new_off
+        cur_min = new_off + f[FS]
+
+    # Also update non-PT_LOAD program header file offsets so they point to the
+    # correct data within the moved PT_LOAD segments, but keep original virtual
+    # addresses (they remain valid since PT_LOAD p_vaddr is unchanged).
+    #
+    # NB: iterate PT_LOADs in reverse order.  Overlapping ranges (RW segment
+    # shares pages with preceding R segment) must match via virtual address
+    # delta, not file offset.
     for f in phdrs:
-        if f[0] != PT_LOAD:
+        if f[T] == PT_LOAD:
             continue
         old_off = f[O]
         old_vaddr = f[V]
-        filesz = f[FS]
-        memsz = f[MS]
-        seg = data[old_off: old_off + filesz]
-        new_vaddr = align_up(old_vaddr, PAGE)
-        new_off = new_vaddr  # zero bias: p_offset == p_vaddr
-        # Ensure the buffer is large enough; pad with zeros.
-        if len(out) < new_off:
-            out += b"\x00" * (new_off - len(out))
-        # Place segment data at new_off.
-        out[new_off:new_off + filesz] = seg
-        f[O] = new_off
-        f[V] = new_vaddr
-        f[PA] = new_vaddr
-        f[AL] = PAGE
+        for (load_old_off, load_old_vaddr), load_f, seg in reversed(list(zip(load_orig, loads, segs))):
+            seg_end = load_old_off + load_f[FS]
+            # Match by both file offset AND virtual address delta
+            if load_old_off <= old_off < seg_end:
+                delta = old_vaddr - old_off   # non-PT_LOAD's original delta
+                load_delta = load_old_vaddr - load_old_off  # PT_LOAD's delta
+                if delta != load_delta:
+                    continue  # wrong PT_LOAD (shares file pages but has different mapping)
+                load_new_off = old_to_new_load[(load_old_vaddr, load_old_off)]
+                new_off = load_new_off + (old_off - load_old_off)
+                f[O] = new_off
+                # f[V] and f[PA] keep original values — virtual addresses unchanged
+                break
 
-    # Write back the (possibly modified) program headers into the table region.
+    # Write updated headers back into a copy of the original header area
+    out = bytearray(data[:header_end])
     for i, f in enumerate(phdrs):
-        struct.pack_into(ph_fmt, phdr_table, i * e_phentsize, *f)
+        struct.pack_into(ph_fmt, out, e_phoff + i * e_phentsize, *f)
 
-    # Recompute e_phoff (phdr table sits right after ehdr) and write header.
-    new_phoff = len(ehdr)
-    if is64:
-        struct.pack_into(endian + "Q", ehdr, 32, new_phoff)
+    # Place segment data at their exact p_offset positions (slice assignment).
+    # Segments may overlap in file offset (sharing pages between PT_LOADs);
+    # the last-written segment takes priority for overlapping bytes, matching
+    # kernel behavior (later PT_LOAD wins on shared pages).
+    need = max(f[O] + f[FS] for f in loads)
+    if len(out) < need:
+        out += b"\x00" * (need - len(out))
+    for f, seg in zip(loads, segs):
+        out[f[O]:f[O] + f[FS]] = seg
+
+    # Append section header table if present, update sh_offset for sections
+    # that were inside moved PT_LOAD segments, and update e_shoff in ELF header.
+    if shdr_data is not None:
+        if is64:
+            sh_fmt = endian + "IIQQQQIIQQ"
+            sh_off_off = 24  # offset of sh_offset field in 64-bit section header
+            sh_size = 64
+        else:
+            sh_fmt = endian + "IIIIIIIIII"
+            sh_off_off = 16  # offset of sh_offset field in 32-bit section header
+            sh_size = 40
+
+        shdr_fixed = bytearray(shdr_data)
+        for i in range(e_shnum):
+            base = i * sh_size
+            raw_off = struct.unpack_from(endian + ("Q" if is64 else "I"), shdr_fixed, base + sh_off_off)[0]
+            # Check if this section falls within any original PT_LOAD segment
+            for (load_old_off, load_old_vaddr), load_f in zip(load_orig, loads):
+                seg_end = load_old_off + load_f[FS]
+                if load_old_off <= raw_off < seg_end:
+                    new_raw_off = old_to_new_load[(load_old_vaddr, load_old_off)] + (raw_off - load_old_off)
+                    if is64:
+                        struct.pack_into(endian + "Q", shdr_fixed, base + sh_off_off, new_raw_off)
+                    else:
+                        struct.pack_into(endian + "I", shdr_fixed, base + sh_off_off, new_raw_off)
+                    break
+
+        new_shoff = len(out)
+        out += bytes(shdr_fixed)
+        if is64:
+            struct.pack_into(endian + "Q", out, 40, new_shoff)
+        else:
+            struct.pack_into(endian + "I", out, 32, new_shoff)
     else:
-        struct.pack_into(endian + "I", ehdr, 28, new_phoff)
+        # No section headers - zero out the fields so the linker skips validation
+        if is64:
+            struct.pack_into(endian + "Q", out, 40, 0)
+            struct.pack_into(endian + "H", out, 60, 0)
+            struct.pack_into(endian + "H", out, 62, 0)
+        else:
+            struct.pack_into(endian + "I", out, 32, 0)
+            struct.pack_into(endian + "H", out, 48, 0)
+            struct.pack_into(endian + "H", out, 50, 0)
 
-    # Assemble final bytes: ehdr + updated phdr table + the padded segment body.
-    result = bytearray()
-    result += ehdr
-    result += phdr_table
-    # The segment data was built in `out` starting at new_phoff; copy it.
-    result += out[new_phoff:]
-    return bytes(result)
-
+    return bytes(out)
 
 def fix_apk(path: str):
     tmp = path + ".tmp"
     with zipfile.ZipFile(path, "r") as zin:
         names = zin.namelist()
-        infos = {n: zin.getinfo(n) for n in names}
-        with zipfile.ZipFile(tmp, "w", zipfile.ZIP_DEFLATED) as zout:
+        with zipfile.ZipFile(tmp, "w", zipfile.ZIP_STORED) as zout:
             for n in names:
                 data = zin.read(n)
                 if n.endswith(".so") and n.startswith("lib/"):
-                    data = fix_elf(data)
-                zout.writestr(infos[n], data)
+                    fixed = fix_elf(data)
+                    if fixed != data:
+                        data = fixed
+                zout.writestr(n, data)
     os.replace(tmp, path)
 
-
 def check_elf(data: bytes) -> bool:
-    """Return True if every PT_LOAD segment is 16 KB aligned (offset, vaddr, align)."""
     if len(data) < 64 or data[:4] != b"\x7fELF":
-        return True  # not an ELF -> nothing to check
+        return True
     ei_class = data[4]
     ei_data = data[5]
     if ei_class not in (1, 2):
@@ -162,32 +226,30 @@ def check_elf(data: bytes) -> bool:
     endian = "<" if ei_data == 1 else ">"
     is64 = ei_class == 2
     if is64:
-        (e_phoff,) = struct.unpack_from(endian + "Q", data, 32)
-        (e_phentsize,) = struct.unpack_from(endian + "H", data, 54)
-        (e_phnum,) = struct.unpack_from(endian + "H", data, 56)
+        e_phoff = struct.unpack_from(endian + "Q", data, 32)[0]
+        e_phentsize = struct.unpack_from(endian + "H", data, 54)[0]
+        e_phnum = struct.unpack_from(endian + "H", data, 56)[0]
         ph_fmt = endian + "IIQQQQQQ"
         ph_size = 56
-        O, V, AL = 2, 3, 7
+        T, F, O, V, PA, FS, MS, AL = range(8)
     else:
-        (e_phoff,) = struct.unpack_from(endian + "I", data, 28)
-        (e_phentsize,) = struct.unpack_from(endian + "H", data, 42)
-        (e_phnum,) = struct.unpack_from(endian + "H", data, 44)
+        e_phoff = struct.unpack_from(endian + "I", data, 28)[0]
+        e_phentsize = struct.unpack_from(endian + "H", data, 42)[0]
+        e_phnum = struct.unpack_from(endian + "H", data, 44)[0]
         ph_fmt = endian + "IIIIIIII"
         ph_size = 32
-        O, V, AL = 1, 2, 7
+        T, O, V, PA, FS, MS, F, AL = range(8)
     if e_phnum == 0 or e_phentsize < ph_size:
         return True
     for i in range(e_phnum):
         off = e_phoff + i * e_phentsize
         f = struct.unpack_from(ph_fmt, data, off)
-        if f[0] == PT_LOAD:
-            if f[O] % PAGE != 0 or f[V] % PAGE != 0 or f[AL] != PAGE:
+        if f[T] == PT_LOAD:
+            if f[O] % PAGE != f[V] % PAGE or f[AL] < PAGE:
                 return False
     return True
 
-
 def verify_apk(path: str) -> bool:
-    """Verify every lib/*.so inside the APK is 16 KB aligned. Returns True if all OK."""
     bad = []
     with zipfile.ZipFile(path, "r") as zin:
         for n in zin.namelist():
@@ -202,40 +264,43 @@ def verify_apk(path: str) -> bool:
     print(f"OK: all lib/*.so in {path} are 16 KB aligned")
     return True
 
-
 def main():
     if len(sys.argv) < 2:
-        print("usage: align16kb.py [--check] <file.so|file.apk>", file=sys.stderr)
+        print("usage: align16kb.py [--check] <file.so>...", file=sys.stderr)
         sys.exit(2)
     check_only = "--check" in sys.argv[1:]
     targets = [a for a in sys.argv[1:] if not a.startswith("--")]
+    exit_code = 0
     for arg in targets:
         if arg.endswith(".apk") or arg.endswith(".zip"):
             if check_only:
                 if not verify_apk(arg):
-                    sys.exit(1)
+                    exit_code = 1
             else:
-                print(f"fixing apk: {arg}")
                 fix_apk(arg)
                 if not verify_apk(arg):
-                    sys.exit(1)
+                    print(f"WARNING: verification failed after fix for {arg}", file=sys.stderr)
+                    exit_code = 1
         elif arg.endswith(".so"):
-            data = open(arg, "rb").read()
+            with open(arg, "rb") as f:
+                data = f.read()
             if check_only:
-                if not check_elf(data):
+                if check_elf(data):
+                    print(f"aligned: {arg}")
+                else:
                     print(f"NOT aligned: {arg}")
-                    sys.exit(1)
-                print(f"aligned: {arg}")
+                    exit_code = 1
             else:
                 fixed = fix_elf(data)
                 if fixed != data:
-                    open(arg, "wb").write(fixed)
-                    print(f"re-aligned: {arg}")
+                    with open(arg, "wb") as f:
+                        f.write(fixed)
+                    print(f"fixed: {arg}")
                 else:
-                    print(f"unchanged: {arg}")
+                    print(f"ok: {arg}")
         else:
             print(f"skip (unknown): {arg}")
-
+    sys.exit(exit_code)
 
 if __name__ == "__main__":
     main()

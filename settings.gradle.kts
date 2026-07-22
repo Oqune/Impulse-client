@@ -1,33 +1,41 @@
 pluginManagement {
     repositories {
-        // Приоритет 1: Зеркала, работающие в РФ
+        // Aliyun/public зеркалирует Maven Central — для kotlin-reflect и т.д.
         maven("https://maven.aliyun.com/repository/public")
+        // Aliyun/google зеркалирует Google Maven — для KSP symbol-processing
         maven("https://maven.aliyun.com/repository/google")
+
+        // Gradle Plugin Portal — для Kotlin и KSP плагинов.
+        // P.S. Его transitive dependencies разрешаются ТОЛЬКО через
+        // репозитории pluginManagement. Aliyun/public перехватывает
+        // kotlin-reflect/stdlib до того, как Plugin Portal редиректит
+        // на заблокированный repo.maven.apache.org (HTTP 403 в РФ).
+        gradlePluginPortal()
+
+        // Прямой Maven Central (если Aliyun чего-то не имеет)
+        maven("https://repo1.maven.org/maven2")
+
+        // Остальные зеркала
         maven("https://maven.aliyun.com/repository/gradle-plugin")
         maven("https://mirrors.huaweicloud.com/repository/maven/")
-
-        // Приоритет 2: Оригинальные репозитории (если зеркала не помогут)
-        google()
-        mavenCentral()
-        gradlePluginPortal()
     }
 }
 plugins {
-    id("org.gradle.toolchains.foojay-resolver-convention") version "0.10.0"
 }
 
 dependencyResolutionManagement {
     repositoriesMode.set(RepositoriesMode.FAIL_ON_PROJECT_REPOS)
     repositories {
-        // Для зависимостей проекта используем те же зеркала
-        maven("https://maven.aliyun.com/repository/public")
-        maven("https://maven.aliyun.com/repository/google")
-        maven("https://mirrors.huaweicloud.com/repository/maven/")
-        maven("https://jitpack.io") // Для библиотек с GitHub
+        // Maven Central (прямой URL, не repo.maven.apache.org — тот 403 в РФ)
+        maven("https://repo1.maven.org/maven2")
 
-        // Запасные варианты
-        google()
-        mavenCentral()
+        // Google библиотеки — только через Aliyun зеркало (dl.google.com 403 в РФ)
+        maven("https://maven.aliyun.com/repository/google")
+
+        // Aliyun mirror для всего остального
+        maven("https://maven.aliyun.com/repository/public")
+        maven("https://mirrors.huaweicloud.com/repository/maven/")
+        maven("https://jitpack.io")
     }
 }
 rootProject.name = "Impulse-client"

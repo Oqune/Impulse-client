@@ -163,7 +163,7 @@ class WebTransportForegroundService : Service() {
             else -> "Отключено" to "Фоновое подключение неактивно"
         }
         val notification = createConnectionNotification(
-            title, content, state == ConnectionState.AUTHENTICATED
+            title, content, state == ConnectionState.AUTHENTICATED || state == ConnectionState.READY
         )
         // The service is already promoted to foreground in onStartCommand; just
         // update the existing notification instead of re-calling startForeground
@@ -176,7 +176,12 @@ class WebTransportForegroundService : Service() {
         job?.cancel()
         chatController?.disconnect()
         releaseWakeLock()
-        stopForeground(true)
+        if (Build.VERSION.SDK_INT >= 34) {
+            stopForeground(android.app.Service.STOP_FOREGROUND_REMOVE)
+        } else {
+            @Suppress("DEPRECATION")
+            stopForeground(true)
+        }
     }
 
     override fun onBind(intent: Intent?): IBinder? = null

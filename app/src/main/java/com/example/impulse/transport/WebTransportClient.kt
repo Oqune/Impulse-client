@@ -1,16 +1,23 @@
 package com.example.impulse.transport
 
 import android.content.Context
-import android.net.http.HttpEngine
-import android.net.http.WebTransport
-import android.net.http.WebTransportBidirectionalStream
-import android.net.http.WebTransportCallback
-import android.net.http.WebTransportServerCertificateHashes
-import android.net.http.WebTransportSession
+import com.ditchoom.buffer.BufferFactory
+import com.ditchoom.buffer.freeIfNeeded
+import com.ditchoom.buffer.flow.ReadResult
+import com.ditchoom.socket.http3.WebTransportException
+import com.ditchoom.socket.http3.WebTransportSession
+import com.ditchoom.socket.http3.WebTransportOptions
+import com.ditchoom.socket.http3.WebTransportStream
+import com.ditchoom.socket.http3.withHttp3Connection
+import com.ditchoom.socket.quic.CertificateHash
+import com.ditchoom.socket.quic.QuicOptions
 import com.example.impulse.util.LogManager
+import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.CoroutineExceptionHandler
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
+import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -18,82 +25,88 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
-import kotlinx.coroutines.CoroutineExceptionHandler
-import java.nio.ByteBuffer
+import kotlin.coroutines.coroutineContext
+import java.io.ByteArrayOutputStream
+import java.net.URI
+import com.ditchoom.buffer.Default
 import java.util.concurrent.atomic.AtomicBoolean
 
-/**
- * WebTransport client (Android `android.net.http.WebTransport`, API 33+).
- *
- * Responsibilities:
- *  - Establish a WebTransport session to the server over HTTPS/QUIC.
- *  - Pin the server certificate hash(es) via [WebTransportServerCertificateHashes]
- *    (TOFU hashes supplied by [com.example.impulse.security.TrustedCertManager]).
- *  - Open a single bidirectional stream used as the control + chat channel.
- *  - Reconnect with exponential backoff on network loss.
- *  - Expose connection state and an inbound binary-frame callback.
- *
- * The class is intentionally transport-only: encryption, key exchange and
- * persistence are handled by the layers above it (see [com.example.impulse.ChatController]).
- *
- * Framing: every binary frame is prefixed with a 4-byte big-endian length so
- * the read loop can delimit arbitrary binary payloads (the protocol no longer
- * uses newline-delimited JSON).
- */
 class WebTransportClient(
     private val context: Context,
-    private val certHashes: List<String>, // hex-encoded SHA-256 cert hashes
+    private val serverCertHashes: List<String>,
     private val onFrame: (ByteArray) -> Unit,
     private val onState: (ConnectionState) -> Unit,
     private val onCertHashPush: (String) -> Unit,
-    /** DEV ONLY: when true, certificate pinning is skipped so a self-signed /
-     *  mismatched server cert is accepted. NEVER enable in production builds. */
-    private val skipCertPinning: Boolean = false
+    private val onSessionError: ((Int) -> Unit)? = null,
+    private val onReady: (() -> Unit)? = null,
 ) {
-
     private val scope = CoroutineScope(
         SupervisorJob() + Dispatchers.IO + CoroutineExceptionHandler { _, e ->
             LogManager.e(TAG, "uncaught transport coroutine exception", e)
         }
     )
-    private var engine: HttpEngine? = null
+
     private var session: WebTransportSession? = null
-    private var stream: WebTransportBidirectionalStream? = null
+    private var stream: WebTransportStream? = null
+    private var connectionJob: Job? = null
+    private var connectTimeoutJob: Job? = null
+    private var currentHost = ""
+    private var currentPort = 4433
+    private var currentPath = "/"
 
     private val _state = MutableStateFlow(ConnectionState.DISCONNECTED)
     val state: StateFlow<ConnectionState> = _state.asStateFlow()
-
     private val intentionalClose = AtomicBoolean(false)
-    private var reconnectJob: Job? = null
-    private var reconnectAttempts = 0
-    private var currentUrl: String = ""
-    // Watchdog that fires if the session never becomes ready (e.g. server
-    // unreachable, QUIC blocked, or cert-pin rejection with no callback).
-    private var connectTimeoutJob: Job? = null
 
     fun connect(url: String) {
         intentionalClose.set(false)
-        currentUrl = url
+        val uri = URI(url)
+        currentHost = uri.host
+        if (uri.port > 0) currentPort = uri.port
+        currentPath = uri.path.ifEmpty { "/" }
         startConnectTimeout()
         startSession()
     }
 
     fun disconnect() {
         intentionalClose.set(true)
-        reconnectJob?.cancel()
-        reconnectJob = null
         connectTimeoutJob?.cancel()
         connectTimeoutJob = null
-        closeStreamAndSession()
+        connectionJob?.cancel()
+        connectionJob = null
+        closeSessionAndStream()
         setState(ConnectionState.DISCONNECTED)
     }
 
-    /**
-     * Starts a watchdog: if [ConnectionState.CONNECTED] is not reached within
-     * [CONNECT_TIMEOUT_MS], the connection is considered failed (server
-     * unreachable, QUIC blocked, or cert-pin rejected without a callback) and we
-     * transition to ERROR and schedule a reconnect. Cancelled on success/close.
-     */
+    suspend fun send(frame: ByteArray): Boolean {
+        if (intentionalClose.get()) return false
+        val st = stream ?: run {
+            LogManager.w(TAG, "send ignored: stream not open (state=${_state.value})")
+            return false
+        }
+        if (_state.value != ConnectionState.CONNECTED &&
+            _state.value != ConnectionState.AUTHENTICATING &&
+            _state.value != ConnectionState.AUTHENTICATED
+        ) {
+            LogManager.w(TAG, "send ignored: not ready (state=${_state.value})")
+            return false
+        }
+        return try {
+            val buf = BufferFactory.Default.allocate(frame.size)
+            try {
+                for (b in frame) buf.writeByte(b)
+                buf.resetForRead()
+                st.write(buf)
+            } finally {
+                buf.freeIfNeeded()
+            }
+            true
+        } catch (e: Exception) {
+            LogManager.e(TAG, "send failed", e)
+            false
+        }
+    }
+
     private fun startConnectTimeout() {
         connectTimeoutJob?.cancel()
         connectTimeoutJob = scope.launch {
@@ -102,7 +115,6 @@ class WebTransportClient(
             if (_state.value == ConnectionState.CONNECTING) {
                 LogManager.e(TAG, "connect timeout after ${CONNECT_TIMEOUT_MS}ms; marking ERROR")
                 setState(ConnectionState.ERROR)
-                scheduleReconnect()
             }
         }
     }
@@ -112,184 +124,170 @@ class WebTransportClient(
         connectTimeoutJob = null
     }
 
-    /** Sends a raw binary frame (length-prefixed) over the bidirectional stream. */
-    fun send(frame: ByteArray): Boolean {
-        // Never send before the transport is ready or after it has closed — this
-        // guards against IllegalStateException ("write after close") and against
-        // writing onto a stream that is CONNECTED but not yet open.
-        if (intentionalClose.get()) return false
-        val st = stream ?: run {
-            LogManager.w(TAG, "send ignored: stream not open (state=${_state.value})")
-            return false
-        }
-        if (_state.value != ConnectionState.CONNECTED &&
-            _state.value != ConnectionState.AUTHENTICATED
-        ) {
-            LogManager.w(TAG, "send ignored: not ready (state=${_state.value})")
-            return false
-        }
-        return try {
-            // 4-byte big-endian length prefix + payload.
-            val out = ByteBuffer.allocateDirect(4 + frame.size)
-            out.putInt(frame.size)
-            out.put(frame)
-            out.flip()
-            st.write(out)
-            true
-        } catch (e: Exception) {
-            LogManager.e(TAG, "send failed", e)
-            false
-        }
-    }
-
-    // ------------------------------------------------------------------
-
     private fun startSession() {
         setState(ConnectionState.CONNECTING)
-        LogManager.i(TAG, "connecting to $currentUrl (pinning=${!skipCertPinning}, hashes=${certHashes.size})")
-        scope.launch {
+        LogManager.i(TAG, "connecting to $currentHost:$currentPort${currentPath} " +
+            "(TOFU pinnedHashes=${serverCertHashes.size})")
+        connectionJob?.cancel()
+        connectionJob = scope.launch {
             try {
-                ensureEngine()
-                val builder = WebTransport.Builder(currentUrl)
-                if (skipCertPinning) {
-                    LogManager.w(TAG, "DEV MODE: certificate pinning DISABLED — any server cert accepted")
-                } else if (certHashes.isNotEmpty()) {
-                    val hashesBuilder = WebTransportServerCertificateHashes.Builder()
-                    certHashes.forEach { hashesBuilder.addSha256Hash(hexToBytes(it)) }
-                    builder.setServerCertificateHashes(hashesBuilder.build())
+                // W3C WebTransport TOFU: pin the leaf cert by SHA-256 hash of its
+                // DER encoding. With the default HashOnly mode the hash match is
+                // the sole trust check — exactly what a self-signed short-lived
+                // server cert needs.
+                val pinned = serverCertHashes.mapNotNull { hex -> certHashFromHex(hex) }
+                if (pinned.isEmpty()) {
+                    LogManager.e(TAG, "no valid pinned cert hashes; aborting connect")
+                    cancelConnectTimeout()
+                    setState(ConnectionState.ERROR)
+                    return@launch
                 }
-                val wt = builder.build()
-                wt.createSession(object : WebTransportCallback() {
-                    override fun onSessionReady(session: WebTransportSession) {
-                        cancelConnectTimeout()
-                        LogManager.i(TAG, "session ready")
-                        this@WebTransportClient.session = session
-                        setState(ConnectionState.CONNECTED)
-                        openStream(session)
-                    }
+                val quicOptions = QuicOptions(
+                    alpnProtocols = listOf("h3"),
+                    serverCertificateHashes = pinned,
+                )
+                withHttp3Connection(
+                    hostname = currentHost,
+                    port = currentPort,
+                    quicOptions = quicOptions,
+                    webTransport = WebTransportOptions(maxSessions = 1),
+                ) {
+                    val wtSession = connectWebTransport(
+                        authority = currentHost,
+                        path = currentPath,
+                    )
+                    val wtStream = wtSession.openBidiStream()
+                    session = wtSession
+                    stream = wtStream
+                    cancelConnectTimeout()
+                    LogManager.i(TAG, "session ready")
+                    setState(ConnectionState.CONNECTED)
+                    LogManager.i(TAG, "stream ready")
 
-                    override fun onSessionError(error: Int) {
-                        LogManager.e(TAG, "session error: $error")
-                        cancelConnectTimeout()
-                        setState(ConnectionState.ERROR)
-                        scheduleReconnect()
-                    }
-
-                    override fun onSessionClosed(info: Int) {
-                        LogManager.w(TAG, "session closed: $info")
-                        cancelConnectTimeout()
-                        if (!intentionalClose.get()) {
-                            setState(ConnectionState.ERROR)
-                            scheduleReconnect()
-                        }
-                    }
-                })
-            } catch (e: Exception) {
+                    kotlinx.coroutines.yield()
+                    onReady?.invoke()
+                    runReadLoop(wtStream)
+                }
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: WebTransportException) {
+                if (intentionalClose.get()) return@launch
                 LogManager.e(TAG, "connect failed: ${e.message}", e)
+                onSessionError?.invoke(0)
+                cancelConnectTimeout()
                 setState(ConnectionState.ERROR)
-                scheduleReconnect()
+            } catch (e: Exception) {
+                if (intentionalClose.get()) return@launch
+                LogManager.e(TAG, "connect failed: ${e.message}", e)
+                cancelConnectTimeout()
+                setState(ConnectionState.ERROR)
             }
         }
     }
 
-    private fun openStream(sess: WebTransportSession) {
-        sess.createBidirectionalStream(object : WebTransportBidirectionalStream.Callback() {
-            override fun onStreamReady(stream: WebTransportBidirectionalStream) {
-                this@WebTransportClient.stream = stream
-                // The transport is now CONNECTED. AUTHENTICATED is only set once the
-                // upper layer (ChatController) has completed auth + key exchange and
-                // derived the group secret, so we do NOT mark AUTHENTICATED here.
-                LogManager.i(TAG, "stream ready")
-                setState(ConnectionState.CONNECTED)
-                scope.launch { readLoop(stream) }
-            }
-
-            override fun onStreamFailed(errorCode: Int) {
-                LogManager.e(TAG, "stream failed: $errorCode")
-                setState(ConnectionState.ERROR)
-                scheduleReconnect()
-            }
-        })
-    }
-
-    private suspend fun readLoop(st: WebTransportBidirectionalStream) {
-        // Accumulate bytes; parse 4-byte length prefix then the payload.
-        val acc = java.io.ByteArrayOutputStream()
+    private suspend fun runReadLoop(stream: WebTransportStream) {
+        val acc = ByteArrayOutputStream()
         try {
-            while (scope.isActive) {
-                val buf = ByteBuffer.allocateDirect(16 * 1024)
-                val n = st.read(buf)
-                if (n <= 0) break
-                buf.flip()
-                val chunk = ByteArray(n)
-                buf.get(chunk)
-                acc.write(chunk)
-                // Drain as many complete frames as we have buffered.
-                while (true) {
-                    val bytes = acc.toByteArray()
-                    if (bytes.size < 4) break
-                    val len = ((bytes[0].toInt() and 0xFF) shl 24) or
-                        ((bytes[1].toInt() and 0xFF) shl 16) or
-                        ((bytes[2].toInt() and 0xFF) shl 8) or
-                        (bytes[3].toInt() and 0xFF)
-                    if (bytes.size < 4 + len) break
-                    val frame = bytes.copyOfRange(4, 4 + len)
-                    acc.reset()
-                    acc.write(bytes, 4 + len, bytes.size - (4 + len))
-                    dispatch(frame)
+            while (coroutineContext.isActive && !intentionalClose.get()) {
+                when (val result = stream.read()) {
+                    is ReadResult.Data -> {
+                        val buf = result.buffer
+                        val n = buf.remaining()
+                        if (n > 0) {
+                            val chunk = ByteArray(n)
+                            for (i in 0 until n) {
+                                chunk[i] = buf.readByte()
+                            }
+                            handleInboundChunk(chunk, acc)
+                        }
+                        buf.freeIfNeeded()
+                    }
+                    ReadResult.End -> {
+                        LogManager.w(TAG, "read EOF (server closed connection)")
+                        break
+                    }
+                    ReadResult.Reset -> {
+                        LogManager.w(TAG, "read reset (peer aborted)")
+                        break
+                    }
                 }
             }
+        } catch (e: CancellationException) {
+            throw e
         } catch (e: Exception) {
-            LogManager.w(TAG, "read loop ended: ${e.message}")
+            if (!intentionalClose.get()) {
+                LogManager.e(TAG, "read loop error: ${e.message}", e)
+            }
+        } finally {
+            if (!intentionalClose.get()) {
+                LogManager.w(TAG, "connection lost")
+                setState(ConnectionState.ERROR)
+            } else {
+                setState(ConnectionState.DISCONNECTED)
+            }
+        }
+    }
+
+    private fun handleInboundChunk(chunk: ByteArray, acc: ByteArrayOutputStream) {
+        acc.write(chunk)
+        drainFrames(acc)
+    }
+
+    private val readAccumulator = ByteArrayOutputStream()
+
+    private fun drainFrames(acc: ByteArrayOutputStream) {
+        val bytes = acc.toByteArray()
+        if (bytes.isEmpty()) return
+        var pos = 0
+        while (pos < bytes.size) {
+            val frameLen = try {
+                Protocol.frameLength(bytes, pos)
+            } catch (_: Exception) {
+                break
+            }
+            if (pos + frameLen > bytes.size) break
+            val frame = bytes.copyOfRange(pos, pos + frameLen)
+            pos += frameLen
+            dispatch(frame)
+        }
+        if (pos > 0) {
+            acc.reset()
+            acc.write(bytes, pos, bytes.size - pos)
         }
     }
 
     private fun dispatch(raw: ByteArray) {
         if (raw.isEmpty()) return
         val opcode = raw[0]
-        // Route cert-hash pushes to the TOFU manager before handing to caller.
-        if (opcode == Protocol.OP_NEW_CERT_HASH) {
-            try {
-                val r = Protocol.Reader(raw, 1)
-                val frame = Protocol.parseNewCertHash(r)
-                LogManager.i(TAG, "cert hash push received (new=${LogManager.shortHash(frame.hash)})")
-                onCertHashPush(frame.hash)
-            } catch (e: Exception) {
-                LogManager.w(TAG, "cert hash parse failed", e)
+        when (opcode) {
+            Protocol.OP_NEW_CERT_HASH -> {
+                try {
+                    val r = Protocol.Reader(raw, 1)
+                    val frame = Protocol.parseNewCertHash(r)
+                    LogManager.i(TAG, "cert hash push received (new=${LogManager.shortHash(frame.hash)})")
+                    onCertHashPush(frame.hash)
+                } catch (e: Exception) {
+                    LogManager.w(TAG, "cert hash parse failed", e)
+                }
             }
-        }
-        onFrame(raw)
-    }
-
-    private fun scheduleReconnect() {
-        if (intentionalClose.get()) return
-        reconnectJob?.cancel()
-        val delayMs = nextReconnectDelay()
-        reconnectAttempts++
-        LogManager.w(TAG, "scheduling reconnect #$reconnectAttempts in ${delayMs}ms")
-        reconnectJob = scope.launch {
-            delay(delayMs)
-            if (!intentionalClose.get()) startSession()
+            else -> onFrame(raw)
         }
     }
 
-    private fun nextReconnectDelay(): Long {
-        val exp = (2_000L * Math.pow(2.0, reconnectAttempts.toDouble())).toLong()
-        val capped = exp.coerceAtMost(60_000L)
-        return (capped + (capped * 0.3 * Math.random())).toLong()
-    }
-
-    private fun ensureEngine() {
-        if (engine == null) {
-            engine = HttpEngine.Builder(context).build()
-        }
-    }
-
-    private fun closeStreamAndSession() {
-        try { stream?.close() } catch (_: Exception) { }
-        try { session?.close() } catch (_: Exception) { }
+    private fun closeSessionAndStream() {
+        try {
+            val st = stream
+            val se = session
+            if (st != null || se != null) {
+                runBlocking {
+                    st?.close()
+                    se?.close()
+                }
+            }
+        } catch (_: Exception) { }
         stream = null
         session = null
+        readAccumulator.reset()
     }
 
     private fun setState(s: ConnectionState) {
@@ -297,16 +295,22 @@ class WebTransportClient(
         onState(s)
     }
 
-    private fun hexToBytes(hex: String): ByteArray {
-        val clean = hex.lowercase().filter { it in '0'..'9' || it in 'a'..'f' }
-        return ByteArray(clean.length / 2) { i ->
-            clean.substring(i * 2, i * 2 + 2).toInt(16).toByte()
-        }
-    }
-
     companion object {
         private const val TAG = "WebTransportClient"
-        /** Max time to wait for the WebTransport session to become ready. */
         private const val CONNECT_TIMEOUT_MS = 15_000L
+
+        /** Convert a 64-char lowercase/uppercase hex SHA-256 fingerprint into a
+         *  [CertificateHash] pinning the server leaf cert (DER encoding). */
+        private fun certHashFromHex(hex: String): CertificateHash? {
+            val clean = hex.trim().lowercase()
+            if (!clean.matches(Regex("^[0-9a-f]{64}$"))) {
+                LogManager.w(TAG, "ignoring malformed cert hash (len=${clean.length})")
+                return null
+            }
+            val bytes = ByteArray(32) { i ->
+                clean.substring(i * 2, i * 2 + 2).toInt(16).toByte()
+            }
+            return CertificateHash(BufferFactory.Default.wrap(bytes))
+        }
     }
 }

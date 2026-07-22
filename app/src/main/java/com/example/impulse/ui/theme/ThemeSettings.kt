@@ -76,10 +76,36 @@ object ThemeSettings {
         scope.launch { themePreferences.accentColorFlow.collect { _accentColor = it } }
         scope.launch { themePreferences.fontSizeFlow.collect { _fontSize = it } }
         scope.launch { themePreferences.fontScaleFlow.collect { _fontScale = it } }
+        scope.launch {
+            themePreferences.themePresetFlow.collect { preset ->
+                ThemeConfig.preset = preset
+            }
+        }
+        scope.launch {
+            themePreferences.effectsFlow.collect { effects ->
+                ThemeConfig.glowEnabled = effects.glow
+                ThemeConfig.glitchEnabled = effects.glitches
+                ThemeConfig.glassEnabled = effects.glass
+                ThemeConfig.terminalCursorEnabled = effects.terminalCursor
+            }
+        }
     }
 
     fun setThemeMode(mode: ThemeMode) { _themeMode = mode; preferences?.saveThemeMode(mode) }
     fun setAccentColor(color: DynamicColor) { _accentColor = color; preferences?.saveAccentColor(color) }
     fun setFontSize(size: FontSize) { _fontSize = size; preferences?.saveFontSize(size) }
     fun setFontScale(scale: Float) { _fontScale = scale.coerceIn(0.8f, 1.4f); preferences?.saveFontScale(_fontScale) }
+
+    fun setThemePreset(preset: ThemePreset) {
+        ThemeConfig.preset = preset
+        preferences?.saveThemePreset(preset)
+    }
+
+    fun setEffects(effects: EffectsConfig) {
+        ThemeConfig.glowEnabled = effects.glow
+        ThemeConfig.glitchEnabled = effects.glitches
+        ThemeConfig.glassEnabled = effects.glass
+        ThemeConfig.terminalCursorEnabled = effects.terminalCursor
+        preferences?.saveEffects(effects)
+    }
 }

@@ -47,7 +47,7 @@ class ImpulseApplication : Application() {
                 PrintWriter(sw).use { pw ->
                     pw.append("=== Impulse crash ===\n")
                     pw.append("Thread: ${thread.name} (${thread.id})\n")
-                    pw.append("App version: ${BuildConfig.DEBUG}\n")
+                    pw.append("App version: ${BuildConfig.VERSION_NAME} (${BuildConfig.VERSION_CODE})\n")
                     pw.append("SDK: ${Build.VERSION.SDK_INT} (${Build.VERSION.RELEASE})\n")
                     pw.append("Device: ${Build.MANUFACTURER} ${Build.MODEL}\n")
                     pw.append("Time: ${System.currentTimeMillis()}\n")

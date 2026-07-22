@@ -1,7 +1,7 @@
 package com.example.impulse.security
 
-import org.bouncycastle.jce.provider.BouncyCastleProvider
 import org.bouncycastle.pqc.jcajce.provider.BouncyCastlePQCProvider
+import org.bouncycastle.pqc.jcajce.spec.DilithiumParameterSpec
 import org.bouncycastle.pqc.jcajce.spec.KyberParameterSpec
 import java.security.KeyFactory
 import java.security.KeyPairGenerator
@@ -34,8 +34,9 @@ import javax.crypto.spec.SecretKeySpec
  *    ML-KEM public keys (see [deriveGroupKey]); the server only relays pubkeys,
  *    there is no KEM encapsulate/decapsulate step.
  *
- *  - Sender authentication: every message is signed with **Ed25519** (Bouncy
- *    Castle generic provider) so receivers can verify the sender.
+ *  - Sender authentication: every message is signed with **ML-DSA-65**
+ *    (Dilithium3, NIST-standardised post-quantum signature) so receivers can
+ *    verify the sender with PQ security.
  *
  *  - Message encryption: AES-256-GCM (authenticated, randomised IV per message).
  */
@@ -49,10 +50,6 @@ object PqcCrypto {
     init {
         if (Security.getProvider(PQC_PROVIDER) == null) {
             Security.addProvider(BouncyCastlePQCProvider())
-        }
-        // BouncyCastle's generic provider is required for Ed25519 Signature.
-        if (Security.getProvider(BouncyCastleProvider.PROVIDER_NAME) == null) {
-            Security.addProvider(BouncyCastleProvider())
         }
     }
 
@@ -112,65 +109,41 @@ object PqcCrypto {
     }
 
     // ------------------------------------------------------------------
-    // Ed25519 signatures (sender authentication of the inner envelope)
+    // ML-DSA-65 (Dilithium3) signatures — NIST-standard post-quantum
+    // sender authentication of the inner envelope
     // ------------------------------------------------------------------
 
-    data class Ed25519KeyPair(
+    data class MlDsa65KeyPair(
+        /** PKCS8-encoded private key (keep secret on device). */
         val privateEncoded: ByteArray,
+        /** X509-encoded public key (sent via OP_KEY_EXCHANGE). */
         val publicEncoded: ByteArray
     )
 
-    /**
-     * Generates an Ed25519 signing key pair.
-     *
-     * On Android the `Ed25519` KeyPairGenerator is provided by the platform
-     * (AndroidOpenSSL / Conscrypt), NOT by BouncyCastle's `BC` provider — asking
-     * `BC` for it throws `NoSuchAlgorithmException` and crashes the app at
-     * connect time. We therefore use the default (platform) provider, with a
-     * fallback to `BC` only if the platform one is somehow unavailable.
-     */
-    fun generateEd25519KeyPair(): Ed25519KeyPair {
-        val kpg = try {
-            KeyPairGenerator.getInstance("Ed25519")
-        } catch (e: Exception) {
-            KeyPairGenerator.getInstance("Ed25519", "BC")
-        }
+    /** Generates an ML-DSA-65 signing key pair via BouncyCastle PQC. */
+    fun generateMlDsa65KeyPair(): MlDsa65KeyPair {
+        val kpg = KeyPairGenerator.getInstance("Dilithium", PQC_PROVIDER)
+        kpg.initialize(DilithiumParameterSpec.dilithium3, SecureRandom())
         val pair = kpg.generateKeyPair()
-        return Ed25519KeyPair(pair.private.encoded, pair.public.encoded)
+        return MlDsa65KeyPair(pair.private.encoded, pair.public.encoded)
     }
 
-    /** Signs [data] with the Ed25519 private key (PKCS8-encoded). */
-    fun sign(privateEncoded: ByteArray, data: ByteArray): ByteArray {
-        val kf = try {
-            KeyFactory.getInstance("Ed25519")
-        } catch (e: Exception) {
-            KeyFactory.getInstance("Ed25519", "BC")
-        }
+    /** Signs [data] with the ML-DSA-65 private key (PKCS8-encoded). */
+    fun signMlDsa65(privateEncoded: ByteArray, data: ByteArray): ByteArray {
+        val kf = KeyFactory.getInstance("Dilithium", PQC_PROVIDER)
         val priv = kf.generatePrivate(PKCS8EncodedKeySpec(privateEncoded))
-        val sig = try {
-            Signature.getInstance("Ed25519")
-        } catch (e: Exception) {
-            Signature.getInstance("Ed25519", "BC")
-        }
+        val sig = Signature.getInstance("Dilithium", PQC_PROVIDER)
         sig.initSign(priv)
         sig.update(data)
         return sig.sign()
     }
 
-    /** Verifies an Ed25519 [signature] over [data] using the public key (X509). */
-    fun verify(publicEncoded: ByteArray, data: ByteArray, signature: ByteArray): Boolean {
+    /** Verifies an ML-DSA-65 [signature] over [data] using the public key (X509). */
+    fun verifyMlDsa65(publicEncoded: ByteArray, data: ByteArray, signature: ByteArray): Boolean {
         return try {
-            val kf = try {
-                KeyFactory.getInstance("Ed25519")
-            } catch (e: Exception) {
-                KeyFactory.getInstance("Ed25519", "BC")
-            }
+            val kf = KeyFactory.getInstance("Dilithium", PQC_PROVIDER)
             val pub = kf.generatePublic(X509EncodedKeySpec(publicEncoded))
-            val sig = try {
-                Signature.getInstance("Ed25519")
-            } catch (e: Exception) {
-                Signature.getInstance("Ed25519", "BC")
-            }
+            val sig = Signature.getInstance("Dilithium", PQC_PROVIDER)
             sig.initVerify(pub)
             sig.update(data)
             sig.verify(signature)

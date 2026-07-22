@@ -19,7 +19,6 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
-import androidx.compose.ui.unit.sp
 import androidx.lifecycle.viewmodel.compose.viewModel
 import com.example.impulse.ChatController
 import com.example.impulse.data.MessageRepository
@@ -388,7 +387,9 @@ fun ChatScreen(
             messageInput = ""
             // Optimistic local echo; the authoritative row arrives via the
             // reactive store (upsert keyed by server id) and replaces this copy.
-            viewModel.send(textToSend)
+            scope.launch {
+                viewModel.send(textToSend)
+            }
         }
     }
 

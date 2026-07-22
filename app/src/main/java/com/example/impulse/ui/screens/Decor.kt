@@ -27,7 +27,7 @@ fun DecorativeBackground(
     contentAlignment: Alignment = Alignment.TopStart,
     content: @Composable BoxScope.() -> Unit
 ) {
-    Box(modifier = modifier.fillMaxSize(), contentAlignment = contentAlignment) {
+    Box(modifier = modifier, contentAlignment = contentAlignment) {
         val glyphColor = tint.copy(alpha = alpha)
 
         Text(

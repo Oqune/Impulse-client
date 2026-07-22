@@ -125,7 +125,7 @@ class SecureStorage(context: Context) {
         // Key names used across the app.
         const val KEY_PQ_PRIVATE = "pq_kem_private_key"
         const val KEY_PQ_PUBLIC = "pq_kem_public_key"
-        const val KEY_ED25519_PRIVATE = "ed25519_private_key"
-        const val KEY_ED25519_PUBLIC = "ed25519_public_key"
+        const val KEY_MLDSA65_PRIVATE = "mldsa65_private_key"
+        const val KEY_MLDSA65_PUBLIC = "mldsa65_public_key"
     }
 }

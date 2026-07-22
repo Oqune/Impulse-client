@@ -62,7 +62,7 @@ class ChatViewModel(
     }
 
     /** Sends a chat message; returns true if it was accepted by the transport. */
-    fun send(text: String): Boolean {
+    suspend fun send(text: String): Boolean {
         if (text.isBlank()) return false
         return chatController.sendChat(text)
     }

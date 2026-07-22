@@ -7,6 +7,6 @@ import java.nio.ByteBuffer;
  * Real implementation is provided by the Android framework at runtime.
  */
 public class WebTransportSession {
-    public void createBidirectionalStream(WebTransportBidirectionalStream.Callback callback) { }
+    public void createBidirectionalStream(WebTransport.BidirectionalStream.Callback callback) { }
     public void close() { }
 }

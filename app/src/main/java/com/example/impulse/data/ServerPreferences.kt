@@ -16,9 +16,9 @@ class ServerPreferences(context: Context) {
         private const val CUSTOM_SERVERS_KEY = "custom_servers"
         private const val SELECTED_SERVER_KEY = "selected_server"
         private const val AUTO_CONNECT_KEY = "auto_connect"
+        private const val AUTO_RECONNECT_KEY = "auto_reconnect"
         private const val BIOMETRIC_ENABLED_KEY = "biometric_enabled"
         private const val CLIENT_NAME_KEY = "client_name"
-        private const val DEV_SKIP_PINNING_KEY = "dev_skip_cert_pinning"
         private const val LOGGING_ENABLED_KEY = "logging_enabled"
     }
 
@@ -116,6 +116,14 @@ class ServerPreferences(context: Context) {
         prefs.edit().putBoolean(AUTO_CONNECT_KEY, enabled).apply()
     }
 
+    fun getAutoReconnect(): Boolean {
+        return prefs.getBoolean(AUTO_RECONNECT_KEY, false)
+    }
+
+    fun saveAutoReconnect(enabled: Boolean) {
+        prefs.edit().putBoolean(AUTO_RECONNECT_KEY, enabled).apply()
+    }
+
     fun getBiometricEnabled(): Boolean {
         return prefs.getBoolean(BIOMETRIC_ENABLED_KEY, false)
     }
@@ -130,15 +138,6 @@ class ServerPreferences(context: Context) {
 
     fun saveClientName(name: String) {
         prefs.edit().putString(CLIENT_NAME_KEY, name).apply()
-    }
-
-    /** DEV ONLY: when true, the client skips TLS certificate pinning. */
-    fun getDevSkipPinning(): Boolean {
-        return prefs.getBoolean(DEV_SKIP_PINNING_KEY, false)
-    }
-
-    fun saveDevSkipPinning(enabled: Boolean) {
-        prefs.edit().putBoolean(DEV_SKIP_PINNING_KEY, enabled).apply()
     }
 
     /**

@@ -68,6 +68,7 @@ fun AppSettingsScreen(
     var fontScale by remember { mutableStateOf(ThemeSettings.fontScale) }
 
     var autoConnect by remember { mutableStateOf(serverPreferences.getAutoConnect()) }
+    var autoReconnect by remember { mutableStateOf(serverPreferences.getAutoReconnect()) }
     var biometricEnabled by remember { mutableStateOf(serverPreferences.getBiometricEnabled()) }
     var loggingEnabled by remember { mutableStateOf(serverPreferences.getLoggingEnabled()) }
 
@@ -364,6 +365,32 @@ fun AppSettingsScreen(
                             onCheckedChange = {
                                 autoConnect = it
                                 serverPreferences.saveAutoConnect(it)
+                            }
+                        )
+                    }
+
+                    HorizontalDivider(modifier = Modifier.padding(vertical = 8.dp))
+
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(vertical = 8.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.SpaceBetween
+                    ) {
+                        Column(modifier = Modifier.weight(1f)) {
+                            Text(text = "Авто-переподключение", style = MaterialTheme.typography.bodyLarge)
+                            Text(
+                                text = "Повторять попытки при ошибке",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                        }
+                        Switch(
+                            checked = autoReconnect,
+                            onCheckedChange = {
+                                autoReconnect = it
+                                serverPreferences.saveAutoReconnect(it)
                             }
                         )
                     }

@@ -21,13 +21,25 @@
         android:label="@string/app_name"
         android:roundIcon="@mipmap/ic_launcher_round"
         android:supportsRtl="true"
-        android:theme="@style/Theme.Impulse"
-        android:extractNativeLibs="true">
+        android:theme="@style/Theme.Impulse">
+
+        <!-- Exposes the app-specific logs directory to a file manager via a
+             safe content:// URI (used by the in-app "Open folder" action). -->
+        <provider
+            android:name="androidx.core.content.FileProvider"
+            android:authorities="${applicationId}.fileprovider"
+            android:exported="false"
+            android:grantUriPermissions="true">
+            <meta-data
+                android:name="android.support.FILE_PROVIDER_PATHS"
+                android:resource="@xml/file_paths" />
+        </provider>
         <activity
             android:name=".MainActivity"
             android:exported="true"
             android:windowSoftInputMode="adjustNothing"
-            android:theme="@style/Theme.Impulse">
+        android:theme="@style/Theme.Impulse"
+        android:extractNativeLibs="true">
             <intent-filter>
                 <action android:name="android.intent.action.MAIN" />
 

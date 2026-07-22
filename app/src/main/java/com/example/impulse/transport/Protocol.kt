@@ -10,20 +10,19 @@ package com.example.impulse.transport
  *
  * Field encoding (little-endian):
  *  - u8   : 1 byte
- *  - u16  : 2 bytes (length prefixes)
- *  - u32  : 4 bytes
+ *  - u32  : 4 bytes (length prefixes)
  *  - u64  : 8 bytes (ids / timestamps)
- *  - bytes: u16 length prefix followed by the raw bytes
+ *  - bytes: u32 length prefix followed by the raw bytes
  *
  * Opcodes:
- *  0x01 OP_AUTH         -> password (utf8 bytes)
+ *  0x01 OP_AUTH         -> SHA-256(password) as lowercase hex (utf8)
  *  0x02 OP_AUTH_RESULT  <- success(u8) [error message bytes if !success]
  *  0x03 OP_SYNC         -> last_seen_id (u64)
- *  0x04 OP_SYNC_RESPONSE<- count(u32) { id(u64), timestamp(u64), len(u16), payload(bytes) }
- *  0x05 OP_DATA         -> len(u16), payload(bytes)            (both directions)
+ *  0x04 OP_SYNC_RESPONSE<- count(u32) { id(u64), timestamp(u64), len(u32), payload(bytes) }
+ *  0x05 OP_DATA         -> len(u32), payload(bytes)            (both directions)
  *  0x06 OP_HEARTBEAT    -> (no body)                           (both directions)
- *  0x07 OP_NEW_CERT_HASH<- hash_len(u16), hash(bytes), expiry(u64)
- *  0x08 OP_KEY_EXCHANGE -> key_len(u16), public_key(bytes)     (both directions)
+ *  0x07 OP_NEW_CERT_HASH<- 32 raw SHA-256 bytes, expiry(u64)
+ *  0x08 OP_KEY_EXCHANGE -> key_len(u32), public_key(bytes)     (both directions)
  */
 object Protocol {
 
@@ -60,10 +59,6 @@ object Protocol {
     class Writer(initial: Int = 64) {
         private val buf = java.io.ByteArrayOutputStream(initial)
         fun u8(v: Int) = buf.write(v and 0xFF)
-        fun u16(v: Int) {
-            buf.write((v ushr 0) and 0xFF)
-            buf.write((v ushr 8) and 0xFF)
-        }
         fun u32(v: Long) {
             val x = v and 0xFFFFFFFFL
             buf.write((x ushr 0).toInt() and 0xFF)
@@ -79,7 +74,7 @@ object Protocol {
             }
         }
         fun bytes(data: ByteArray) {
-            u16(data.size)
+            u32(data.size.toLong())
             buf.write(data)
         }
         fun utf8(s: String) = bytes(s.toByteArray(Charsets.UTF_8))
@@ -91,11 +86,6 @@ object Protocol {
         fun u8(): Int {
             require(pos < data.size) { "u8: out of bounds" }
             return data[pos++].toInt() and 0xFF
-        }
-        fun u16(): Int {
-            val lo = u8()
-            val hi = u8()
-            return (hi shl 8) or lo
         }
         fun u32(): Long {
             val a = u8()
@@ -111,7 +101,7 @@ object Protocol {
             return x
         }
         fun bytes(): ByteArray {
-            val len = u16()
+            val len = u32().toInt()
             if (len > MAX_PAYLOAD_BYTES) {
                 throw ProtocolException("bytes: length $len exceeds MAX_PAYLOAD_BYTES $MAX_PAYLOAD_BYTES")
             }
@@ -123,18 +113,42 @@ object Protocol {
             return out
         }
         fun utf8(): String = String(bytes(), Charsets.UTF_8)
+        fun readBytes(n: Int): ByteArray {
+            if (pos + n > data.size) throw ProtocolException("readBytes: $n exceeds remaining ${remaining()}")
+            val out = data.copyOfRange(pos, pos + n)
+            pos += n
+            return out
+        }
     }
 
     // ======================================================================
     // Client -> Server frame builders
     // ======================================================================
 
-    /** Auth: opcode + password (UTF-8). */
+    /**
+     * Auth: opcode + SHA-256(password) as lowercase hex.
+     *
+     * The server stores/compares the SHA-256 of the password (the same value
+     * produced by `printf 'pw' | sha256sum` on the server side), NOT the raw
+     * password. Sending the raw password previously caused every auth to be
+     * rejected ("Wrong password hash"). We hash client-side so the plaintext
+     * password is never placed on the wire.
+     */
     fun buildAuth(password: String): ByteArray {
         val w = Writer()
         w.u8(OP_AUTH.toInt())
-        w.utf8(password)
+        w.utf8(sha256Hex(password))
         return w.toByteArray()
+    }
+
+    /**
+     * Lowercase hex SHA-256 of a UTF-8 string (no salt). Matches the server's
+     * `sha256sum` of the password. Used for the Auth (0x01) frame.
+     */
+    fun sha256Hex(input: String): String {
+        val md = java.security.MessageDigest.getInstance("SHA-256")
+        val digest = md.digest(input.toByteArray(Charsets.UTF_8))
+        return digest.joinToString("") { "%02x".format(it) }
     }
 
     /** Sync: opcode + last_seen_id (u64). */
@@ -146,7 +160,7 @@ object Protocol {
     }
 
     /**
-     * Data: opcode + len(u16) + payload(bytes).
+     * Data: opcode + len(u32) + payload(bytes).
      * [payload] is the already AES-256-GCM-encrypted blob (IV || ciphertext).
      */
     fun buildData(payload: ByteArray): ByteArray {
@@ -156,11 +170,16 @@ object Protocol {
         return w.toByteArray()
     }
 
-    /** Heartbeat: opcode only. */
-    fun buildHeartbeat(): ByteArray = byteArrayOf(OP_HEARTBEAT)
+    /** Heartbeat: opcode + client_timestamp(u64). */
+    fun buildHeartbeat(): ByteArray {
+        val w = Writer()
+        w.u8(OP_HEARTBEAT.toInt())
+        w.u64(System.currentTimeMillis())
+        return w.toByteArray()
+    }
 
     /**
-     * KeyExchange: opcode + key_len(u16) + public_key(bytes).
+     * KeyExchange: opcode + key_len(u32) + public_key(bytes).
      * [publicKey] is the X509-encoded ML-KEM public key.
      */
     fun buildKeyExchange(publicKey: ByteArray): ByteArray {
@@ -179,7 +198,7 @@ object Protocol {
         return w.toByteArray()
     }
 
-    /** SyncResponse: opcode + count(u32) { id(u64), timestamp(u64), len(u16), payload(bytes) }. */
+    /** SyncResponse: opcode + count(u32) { id(u64), timestamp(u64), len(u32), payload(bytes) }. */
     fun buildSyncResponse(messages: List<SyncMessage>): ByteArray {
         val w = Writer()
         w.u8(OP_SYNC_RESPONSE.toInt())
@@ -205,6 +224,14 @@ object Protocol {
         return AuthResultFrame(ok, msg)
     }
 
+    /**
+     * Parses the Auth (0x01) frame body (opcode already consumed by caller) and
+     * returns the SHA-256 hex the client sent. Used by tests/diagnostics to
+     * verify the wire format; the plaintext password is never recoverable from
+     * this value.
+     */
+    fun parseAuthPassword(r: Reader): String = r.utf8()
+
     data class SyncMessage(
         val id: Long,
         val timestamp: Long,
@@ -225,8 +252,8 @@ object Protocol {
         }
         val list = ArrayList<SyncMessage>(count)
         repeat(count) {
-            // Each iteration must have at least 16 bytes (2×u64) + 2 bytes (len).
-            if (r.remaining() < 18) {
+            // Each iteration must have at least 16 bytes (2×u64) + 4 bytes (len).
+            if (r.remaining() < 20) {
                 throw ProtocolException("SyncResponse truncated at message $it/$count")
             }
             val id = r.u64()
@@ -250,7 +277,7 @@ object Protocol {
      * Parses a Data frame (opcode already consumed by caller).
      *
      * Wire layout (server→client relay, per the binary spec):
-     *   server_msg_id(u64) | timestamp(u64) | len(u16) | payload(bytes)
+     *   server_msg_id(u64) | timestamp(u64) | len(u32) | payload(bytes)
      *
      * The client MUST use [serverMsgId] for deduplication/storage so that the
      * optimistic local copy (negative temp id) is replaced by the authoritative
@@ -268,10 +295,13 @@ object Protocol {
         val expiry: Long
     )
 
-    /** Parses a NewCertHash frame (opcode already consumed by caller). */
+    /** Parses a NewCertHash frame (opcode already consumed by caller).
+     *  Wire format: [32 raw SHA-256 bytes] [u64 expiry]. */
     fun parseNewCertHash(r: Reader): NewCertHashFrame {
-        val hash = r.utf8()
-        val expiry = if (r.remaining() >= 8) r.u64() else 0L
+        if (r.remaining() < 40) throw ProtocolException("NewCertHash: expected at least 40 bytes, got ${r.remaining()}")
+        val raw = r.readBytes(32)
+        val hash = raw.joinToString("") { "%02x".format(it) }
+        val expiry = r.u64()
         return NewCertHashFrame(hash, expiry)
     }
 
@@ -325,6 +355,59 @@ object Protocol {
         }
         sb.append('"')
         return sb.toString()
+    }
+
+    /** Returns the total byte length of the complete frame starting at [offset]
+     *  in [data], or throws [ProtocolException] if incomplete or unknown opcode.
+     *  Mirrors the server's try_read_packet logic. */
+    fun frameLength(data: ByteArray, offset: Int = 0): Int {
+        if (offset >= data.size) throw ProtocolException("frameLength: empty")
+        val opcode = data[offset]
+        return when (opcode) {
+            OP_AUTH, OP_DATA, OP_KEY_EXCHANGE -> {
+                if (data.size - offset < 5) throw ProtocolException("frameLength: incomplete $opcode")
+                val payloadLen = ((data[offset + 1].toInt() and 0xFF)) or
+                    ((data[offset + 2].toInt() and 0xFF) shl 8) or
+                    ((data[offset + 3].toInt() and 0xFF) shl 16) or
+                    ((data[offset + 4].toInt() and 0xFF) shl 24)
+                if (payloadLen < 0 || payloadLen > MAX_PAYLOAD_BYTES * 2) throw ProtocolException("frameLength: $opcode len=$payloadLen out of range")
+                1 + 4 + payloadLen
+            }
+            OP_SYNC -> 1 + 8
+            OP_HEARTBEAT -> 1 + 8
+            OP_NEW_CERT_HASH -> 1 + 32 + 8
+            OP_AUTH_RESULT -> {
+                if (data.size - offset < 2) throw ProtocolException("frameLength: incomplete OP_AUTH_RESULT")
+                val success = data[offset + 1]
+                if (success == 0.toByte()) 2
+                else {
+                    if (data.size - offset < 6) throw ProtocolException("frameLength: incomplete OP_AUTH_RESULT")
+                    val msgLen = ((data[offset + 2].toInt() and 0xFF)) or
+                        ((data[offset + 3].toInt() and 0xFF) shl 8) or
+                        ((data[offset + 4].toInt() and 0xFF) shl 16) or
+                        ((data[offset + 5].toInt() and 0xFF) shl 24)
+                    2 + 4 + msgLen
+                }
+            }
+            OP_SYNC_RESPONSE -> {
+                if (data.size - offset < 5) throw ProtocolException("frameLength: incomplete OP_SYNC_RESPONSE")
+                val count = ((data[offset + 1].toInt() and 0xFF)) or
+                    ((data[offset + 2].toInt() and 0xFF) shl 8) or
+                    ((data[offset + 3].toInt() and 0xFF) shl 16) or
+                    ((data[offset + 4].toInt() and 0xFF) shl 24)
+                var pos = offset + 5
+                repeat(count.toInt()) {
+                    if (data.size - pos < 20) throw ProtocolException("frameLength: incomplete OP_SYNC_RESPONSE message")
+                    val payloadLen = ((data[pos + 16].toInt() and 0xFF)) or
+                        ((data[pos + 17].toInt() and 0xFF) shl 8) or
+                        ((data[pos + 18].toInt() and 0xFF) shl 16) or
+                        ((data[pos + 19].toInt() and 0xFF) shl 24)
+                    pos += 20 + payloadLen
+                }
+                pos - offset
+            }
+            else -> throw ProtocolException("frameLength: unknown opcode $opcode")
+        }
     }
 
     data class InnerEnvelope(

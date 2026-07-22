@@ -31,6 +31,7 @@ fun HomeScreen(
     val context = LocalContext.current
     val chatController = remember { ChatController.getInstance(context) }
     val connectionState by chatController.state.collectAsState()
+    val lastError by chatController.lastError.collectAsState()
     val scope = rememberCoroutineScope()
 
     DecorativeBackground(modifier = modifier.fillMaxSize()) {
@@ -121,6 +122,25 @@ fun HomeScreen(
                         style = MaterialTheme.typography.bodyMedium
                     )
 
+                    // Surface the precise failure reason (wrong IP, no cert, QUIC
+                    // error, auth rejected) so the user can act instead of seeing
+                    // a generic "Ошибка".
+                    if (!lastError.isNullOrBlank()) {
+                        Spacer(modifier = Modifier.height(10.dp))
+                        Surface(
+                            onClick = { chatController.clearError() },
+                            shape = RoundedCornerShape(12.dp),
+                            color = MaterialTheme.colorScheme.errorContainer.copy(alpha = 0.6f)
+                        ) {
+                            Text(
+                                text = lastError!!,
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onErrorContainer,
+                                modifier = Modifier.padding(12.dp)
+                            )
+                        }
+                    }
+
                     Spacer(modifier = Modifier.height(24.dp))
 
                     Button(
@@ -134,7 +154,9 @@ fun HomeScreen(
                                 else -> chatController.disconnect()
                             }
                         },
-                        enabled = connectionState != ConnectionState.CONNECTING,
+                        // Always enabled: the user must be able to disconnect even
+                        // during CONNECTING (e.g. wrong server, stuck handshake).
+                        enabled = true,
                         modifier = Modifier
                             .fillMaxWidth()
                             .height(52.dp),
