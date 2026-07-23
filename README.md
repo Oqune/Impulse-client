@@ -35,8 +35,9 @@ The client was completely rewritten around a modern, quantum-resistant stack:
 - 🚀 **WebTransport** transport (Android 13+), replacing WebSocket entirely.
 - 🔐 **Post-quantum E2EE**: ML-KEM-768 key generation, deterministic group-secret
   derivation from the set of observed public keys, and AES-256-GCM message
-  encryption. Every message is signed with **Ed25519** so receivers can
-  authenticate the sender (TOFU for signatures, same trust model as cert pinning).
+  encryption. Every message is signed with **ML-DSA-65 (Dilithium3)** — the NIST
+  post-quantum signature standard — so receivers can authenticate the sender
+  with PQ security.
 - 📷 **TOFU certificate pinning** via QR scan (`impulse-cert:<sha256>`). The pinned
   hash is stored in an in-module encrypted store (`SecureStorage`, Android
   Keystore + AES-256-GCM); up to two hashes (current + next) are kept for
@@ -70,7 +71,7 @@ signature and content live inside the AES-256-GCM `OP_DATA` payload.
 | `0x05` | `OP_DATA` | both | C→S: `len(u32)`+`payload`. S→C relay: `server_msg_id(u64)`+`timestamp(u64)`+`len(u32)`+`payload` |
 | `0x06` | `OP_HEARTBEAT` | both | `client_timestamp(u64)` |
 | `0x07` | `OP_NEW_CERT_HASH` | S→C | `hash(32 bytes raw)` + `expiry(u64)` (no length prefix) |
-| `0x08` | `OP_KEY_EXCHANGE` | both | `key_len(u32)`+`public_key` (ML-KEM-768 or Ed25519, distinguished by length) |
+| `0x08` | `OP_KEY_EXCHANGE` | both | `key_len(u32)`+`public_key` (ML-KEM-768 or ML-DSA-65, distinguished by length) |
 
 The client sends `OP_DATA` as `len+payload`; the server prepends
 `server_msg_id` + `timestamp` when it relays the message back to all peers. The
@@ -107,7 +108,8 @@ password_hash = "<64-char-hex>"
 
 In the app, go to **Settings → Server settings** and either:
 - Select the built-in *Production* server and enter the same password you hashed
-  on the server, or
+  on the server (built-in servers no longer ship with a default password for
+  security), or
 - Add a custom server with the correct IP, port, and password.
 
 The client stores the **plaintext password** locally (in `ServerConfig`) and
@@ -184,11 +186,19 @@ Install the APK from `app/build/outputs/apk/debug/` onto a device/emulator
      "client never connects" bug — the session was opened but authentication was
      never transmitted.) On devices below **API 33** the client fails fast with a
      clear error, since `android.net.http.WebTransport` is unavailable there.
-  6b. **Password is hashed before sending.** The `OP_AUTH` payload is
-     `SHA-256(password)` as **lowercase hex** (the same value the server computes
-     via `printf 'pw' | sha256sum`), never the raw password. Sending the raw
-     password previously caused every auth to be rejected ("Wrong password
-     hash"). The plaintext password is therefore never placed on the wire.
+   6b. **Password is hashed before sending.** The `OP_AUTH` payload is
+      `SHA-256(password)` as **lowercase hex** (the same value the server computes
+      via `printf 'pw' | sha256sum`), never the raw password. Sending the raw
+      password previously caused every auth to be rejected ("Wrong password
+      hash"). The plaintext password is therefore never placed on the wire.
+   6c. **AuthResult frame parsing fix.** The client's binary frame-length
+      calculator (`Protocol.frameLength`) previously inverted the success/failure
+      condition for `OP_AUTH_RESULT` (0x02) — the `success` byte 0x01 (success)
+      was treated as carrying an error message, and 0x00 (failure) was treated
+      as having no body. This caused successful auth responses to be truncated
+      and lost, leaving the connection stuck in `AUTHENTICATING` until timeout.
+      The condition is now corrected: `success != 0` → 2 bytes (no message),
+      `success == 0` → has an error message body.
   7. **Connection diagnostics.** If a connect fails, the UI (Home + Server
      settings) now shows the *precise* reason instead of a generic "Ошибка":
      - *"Нет доверенного QR-хэша…"* — no cert pinned and DEV-pinning off → scan
@@ -238,13 +248,15 @@ app/src/main/java/com/example/impulse/
 
 Test coverage includes:
 - `PqcCryptoTest` — ML-KEM keygen, AES-256-GCM round-trip, deterministic group key
-  (identical across clients), Ed25519 sign/verify (incl. tamper & wrong-key rejection).
+  (identical across clients), ML-DSA-65 sign/verify (incl. tamper & wrong-key rejection).
 - `ProtocolTest` — all opcodes `0x01`–`0x08` build/parse round-trips.
 - `QrParseTest` — **strict** `impulse-cert:<64 hex>` validation (rejects bare 64-hex).
 - `ChatControllerIntegrationTest` — full protocol cycle simulated without a network:
   two clients derive the same group secret, auth/key-exchange frames round-trip,
   `OP_DATA` carries the server-assigned id for dedup, optimistic send uses a
   negative temp id, and the `READY` state exists.
+- `LogManagerRedactTest` — verifies defensive secret-redaction masks passwords,
+  private keys, ciphertext and long hex runs in all log output.
 - `MessageDaoTest` (instrumented) — upsert dedup (negative temp id → real id),
   ordered select, 72 h TTL purge, `maxServerMsgId`, per-server clear.
 
@@ -322,13 +334,14 @@ stateDiagram-v2
 
 ## Build notes / implementation details
 
-- **Post-quantum crypto (ML-KEM-768) + Ed25519.** Provided by BouncyCastle
-  (`bcprov`/`bcpkix` 1.79). On Android's ART runtime the Kyber/ML-KEM algorithms
-  are only reachable through the dedicated `BouncyCastlePQCProvider`
+- **Post-quantum crypto (ML-KEM-768) + ML-DSA-65 (Dilithium3).** Provided by
+  BouncyCastle (`bcprov`/`bcpkix` 1.79). On Android's ART runtime the Kyber/ML-KEM
+  algorithms are only reachable through the dedicated `BouncyCastlePQCProvider`
   (`Security.addProvider(BouncyCastlePQCProvider())`); the generic
   `BouncyCastleProvider` does **not** register them. Key generation uses
-  `KeyPairGenerator.getInstance("ML-KEM")` with `MLKEMParameterSpec.ml_kem_768`.
-  Ed25519 signing/verification uses `Ed25519` via `BouncyCastleProvider`. See
+  `KeyPairGenerator.getInstance("Kyber")` with `KyberParameterSpec.kyber768`.
+  ML-DSA-65 signing/verification uses `KeyFactory.getInstance("Dilithium")` via
+  the same PQC provider. See
   [`security/PqcCrypto.kt`](app/src/main/java/com/example/impulse/security/PqcCrypto.kt).
 - **Deterministic group key.** `PqcCrypto.deriveGroupKey` sorts the observed
   ML-KEM public keys (by bytes) and returns `SHA-256(concat(...))[0..32]`. This

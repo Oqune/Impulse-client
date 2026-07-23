@@ -28,7 +28,7 @@ data class ServerConfig(
             ipAddress = "192.168.2.50",
             port = 4433,
             description = "Основной продакшн сервер",
-            password = "test"
+            password = ""
         )
 
         val local = ServerConfig(

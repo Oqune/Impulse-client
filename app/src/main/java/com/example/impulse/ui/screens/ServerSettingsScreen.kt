@@ -12,7 +12,6 @@ import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.*
 import androidx.compose.material3.*
 import androidx.compose.material3.RadioButtonDefaults
-import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -30,12 +29,11 @@ import com.example.impulse.transport.ConnectionState
 import com.example.impulse.transport.Protocol
 import com.example.impulse.util.LogManager
 
-@OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun ServerSettingsScreen(
+fun ServerSettingsContent(
+    modifier: Modifier = Modifier,
     selectedServer: ServerConfig,
     onServerSelected: (ServerConfig) -> Unit,
-    onBack: () -> Unit,
     availableServers: List<ServerConfig> = ServerConfig.builtInServers,
     onServerDeleted: (ServerConfig) -> Unit = {},
     onServerUpdated: (ServerConfig) -> Unit = {}
@@ -52,14 +50,12 @@ fun ServerSettingsScreen(
     var serverToDelete by remember { mutableStateOf<ServerConfig?>(null) }
     var serverToEdit by remember { mutableStateOf<ServerConfig?>(null) }
     var isEditMode by remember { mutableStateOf(false) }
-    // Certificate viewer and removal for the selected server.
     var showForgetCert by remember { mutableStateOf(false) }
     var showCertDetails by remember { mutableStateOf(false) }
     var certVersion by remember { mutableIntStateOf(0) }
     val certManager = remember { TrustedCertManager(context) }
     val isCertTrusted by remember(selectedServer, certVersion) { mutableStateOf(certManager.isTrusted(selectedServer.id)) }
 
-    // Helper function to load server data for editing
     fun loadServerForEdit(server: ServerConfig) {
         customName = server.name
         customIpAddress = server.ipAddress
@@ -85,301 +81,277 @@ fun ServerSettingsScreen(
         it !in ServerConfig.builtInServers
     }
 
-    Scaffold(
-        topBar = {
-            TopAppBar(
-                title = { Text("Настройки сервера") },
-                navigationIcon = {
-                    IconButton(onClick = onBack) {
-                        Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Назад")
-                    }
-                },
-                colors = TopAppBarDefaults.topAppBarColors(
-                    containerColor = MaterialTheme.colorScheme.surface
-                )
-            )
-        }
-    ) { innerPadding ->
-        Column(
-            modifier = Modifier
-                .fillMaxSize()
-                .padding(innerPadding)
-                .navigationBarsPadding() // keep content clear of the outer bottom nav bar
-                .imePadding()
-                .verticalScroll(rememberScrollState())
-                .padding(16.dp),
-            verticalArrangement = Arrangement.spacedBy(16.dp)
+    Column(
+        modifier = modifier
+            .verticalScroll(rememberScrollState())
+            .padding(16.dp),
+        verticalArrangement = Arrangement.spacedBy(16.dp)
+    ) {
+        Card(
+            modifier = Modifier.fillMaxWidth(),
+            elevation = CardDefaults.cardElevation()
         ) {
-            Card(
-                modifier = Modifier.fillMaxWidth(),
-                elevation = CardDefaults.cardElevation()
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(16.dp)
             ) {
+                Text(
+                    text = "Выберите сервер",
+                    style = MaterialTheme.typography.titleMedium,
+                    fontWeight = FontWeight.Bold
+                )
+
+                Spacer(modifier = Modifier.height(8.dp))
+
                 Column(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .padding(16.dp)
+                    modifier = Modifier.selectableGroup(),
+                    verticalArrangement = Arrangement.spacedBy(10.dp)
                 ) {
-                    Text(
-                        text = "Выберите сервер",
-                        style = MaterialTheme.typography.titleMedium,
-                        fontWeight = FontWeight.Bold
-                    )
+                    availableServers.forEach { server ->
+                        val isCustom = server !in ServerConfig.builtInServers
+                        val isSelectedServer = server == selectedServer
+                        val serverConnectionState = if (isSelectedServer) connectionState else ConnectionState.DISCONNECTED
 
-                    Spacer(modifier = Modifier.height(8.dp))
-
-                    Column(
-                        modifier = Modifier.selectableGroup(),
-                        verticalArrangement = Arrangement.spacedBy(10.dp)
-                    ) {
-                        availableServers.forEach { server ->
-                            val isCustom = server !in ServerConfig.builtInServers
-                            val isSelectedServer = server == selectedServer
-                            val serverConnectionState = if (isSelectedServer) connectionState else ConnectionState.DISCONNECTED
-
-                            Surface(
+                        Surface(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .selectable(
+                                    selected = isSelectedServer,
+                                    onClick = { onServerSelected(server) },
+                                    role = Role.RadioButton
+                                ),
+                            shape = RoundedCornerShape(16.dp),
+                            color = if (isSelectedServer)
+                                MaterialTheme.colorScheme.primaryContainer
+                            else
+                                MaterialTheme.colorScheme.surfaceContainerHigh,
+                            tonalElevation = if (isSelectedServer) 2.dp else 0.dp
+                        ) {
+                            Row(
                                 modifier = Modifier
                                     .fillMaxWidth()
-                                    .selectable(
-                                        selected = isSelectedServer,
-                                        onClick = { onServerSelected(server) },
-                                        role = Role.RadioButton
-                                    ),
-                                shape = RoundedCornerShape(16.dp),
-                                color = if (isSelectedServer)
-                                    MaterialTheme.colorScheme.primaryContainer
-                                else
-                                    MaterialTheme.colorScheme.surfaceContainerHigh,
-                                tonalElevation = if (isSelectedServer) 2.dp else 0.dp
+                                    .padding(14.dp),
+                                verticalAlignment = Alignment.CenterVertically
                             ) {
-                                Row(
-                                    modifier = Modifier
-                                        .fillMaxWidth()
-                                        .padding(14.dp),
-                                    verticalAlignment = Alignment.CenterVertically
+                                RadioButton(
+                                    selected = isSelectedServer,
+                                    onClick = null,
+                                    colors = RadioButtonDefaults.colors(
+                                        selectedColor = MaterialTheme.colorScheme.primary
+                                    )
+                                )
+
+                                Spacer(Modifier.width(10.dp))
+
+                                Column(
+                                    modifier = Modifier.weight(1f)
                                 ) {
-                                    RadioButton(
-                                        selected = isSelectedServer,
-                                        onClick = null,
-                                        colors = RadioButtonDefaults.colors(
-                                            selectedColor = MaterialTheme.colorScheme.primary
-                                        )
+                                    Text(
+                                        text = server.name,
+                                        style = MaterialTheme.typography.bodyLarge,
+                                        fontWeight = FontWeight.SemiBold,
+                                        color = if (isSelectedServer)
+                                            MaterialTheme.colorScheme.onPrimaryContainer
+                                        else
+                                            MaterialTheme.colorScheme.onSurface
                                     )
 
-                                    Spacer(Modifier.width(10.dp))
+                                    Text(
+                                        text = "IP: ${server.ipAddress}:${server.port} (WebTransport)",
+                                        style = MaterialTheme.typography.bodyMedium,
+                                        color = if (isSelectedServer)
+                                            MaterialTheme.colorScheme.onPrimaryContainer.copy(alpha = 0.8f)
+                                        else
+                                            MaterialTheme.colorScheme.onSurfaceVariant
+                                    )
 
-                                    Column(
-                                        modifier = Modifier.weight(1f)
-                                    ) {
+                                    if (server.password.isNotEmpty()) {
+                                        val passwordHash = remember(server.password) { Protocol.sha256Hex(server.password) }
                                         Text(
-                                            text = server.name,
-                                            style = MaterialTheme.typography.bodyLarge,
-                                            fontWeight = FontWeight.SemiBold,
+                                            text = "Пароль установлен",
+                                            style = MaterialTheme.typography.bodySmall,
                                             color = if (isSelectedServer)
                                                 MaterialTheme.colorScheme.onPrimaryContainer
                                             else
-                                                MaterialTheme.colorScheme.onSurface
+                                                MaterialTheme.colorScheme.primary
                                         )
-
+                                        Spacer(modifier = Modifier.height(2.dp))
                                         Text(
-                                            text = "IP: ${server.ipAddress}:${server.port} (WebTransport)",
-                                            style = MaterialTheme.typography.bodyMedium,
+                                            text = "SHA-256: ${passwordHash.take(16)}…",
+                                            style = MaterialTheme.typography.bodySmall,
+                                            fontFamily = FontFamily.Monospace,
                                             color = if (isSelectedServer)
-                                                MaterialTheme.colorScheme.onPrimaryContainer.copy(alpha = 0.8f)
+                                                MaterialTheme.colorScheme.onPrimaryContainer.copy(alpha = 0.7f)
                                             else
                                                 MaterialTheme.colorScheme.onSurfaceVariant
                                         )
+                                    }
 
-                                        if (server.password.isNotEmpty()) {
-                                            val passwordHash = remember(server.password) { Protocol.sha256Hex(server.password) }
+                                    if (isSelectedServer) {
+                                        val err by chatController.lastError.collectAsState()
+                                        ServerConnectionStatusIndicator(serverConnectionState, err)
+                                    }
+
+                                    if (isSelectedServer) {
+                                        Spacer(Modifier.height(8.dp))
+                                        OutlinedButton(
+                                            onClick = { showCertDetails = !showCertDetails },
+                                            modifier = Modifier.fillMaxWidth(),
+                                            colors = ButtonDefaults.outlinedButtonColors(
+                                                contentColor = if (isCertTrusted) MaterialTheme.colorScheme.primary
+                                                    else MaterialTheme.colorScheme.onSurfaceVariant
+                                            )
+                                        ) {
+                                            Icon(
+                                                if (isCertTrusted) Icons.Default.Lock else Icons.Default.LockOpen,
+                                                contentDescription = null
+                                            )
+                                            Spacer(Modifier.width(8.dp))
                                             Text(
-                                                text = "Пароль установлен",
-                                                style = MaterialTheme.typography.bodySmall,
-                                                color = if (isSelectedServer)
+                                                if (isCertTrusted) "Сертификат: привязан"
+                                                else "Сертификат: не привязан"
+                                            )
+                                            Spacer(Modifier.weight(1f))
+                                            Icon(
+                                                if (showCertDetails) Icons.Default.ExpandLess else Icons.Default.ExpandMore,
+                                                contentDescription = null,
+                                                tint = MaterialTheme.colorScheme.onSurfaceVariant
+                                            )
+                                        }
+                                    }
+                                }
+
+                                if (isCustom) {
+                                    Row(
+                                        modifier = Modifier,
+                                        horizontalArrangement = Arrangement.End
+                                    ) {
+                                        IconButton(
+                                            onClick = {
+                                                serverToEdit = server
+                                                isEditMode = true
+                                                loadServerForEdit(server)
+                                                showCustomServerDialog = true
+                                            }
+                                        ) {
+                                            Icon(
+                                                Icons.Default.Edit,
+                                                contentDescription = "Редактировать сервер",
+                                                tint = if (isSelectedServer)
                                                     MaterialTheme.colorScheme.onPrimaryContainer
                                                 else
                                                     MaterialTheme.colorScheme.primary
                                             )
-                                            Spacer(modifier = Modifier.height(2.dp))
-                                            Text(
-                                                text = "SHA-256: ${passwordHash.take(16)}…",
-                                                style = MaterialTheme.typography.bodySmall,
-                                                fontFamily = FontFamily.Monospace,
-                                                color = if (isSelectedServer)
-                                                    MaterialTheme.colorScheme.onPrimaryContainer.copy(alpha = 0.7f)
-                                                else
-                                                    MaterialTheme.colorScheme.onSurfaceVariant
+                                        }
+                                        Spacer(Modifier.width(4.dp))
+                                        IconButton(
+                                            onClick = { serverToDelete = server }
+                                        ) {
+                                            Icon(
+                                                Icons.Default.Delete,
+                                                contentDescription = "Удалить сервер",
+                                                tint = MaterialTheme.colorScheme.error
                                             )
                                         }
-
-                                        // Connection status for selected server
-                                        if (isSelectedServer) {
-                                            val err by chatController.lastError.collectAsState()
-                                            ServerConnectionStatusIndicator(serverConnectionState, err)
-                                        }
-
-                                        // Certificate status toggle for the selected server.
-                                        if (isSelectedServer) {
-                                            Spacer(Modifier.height(8.dp))
-                                            OutlinedButton(
-                                                onClick = { showCertDetails = !showCertDetails },
-                                                modifier = Modifier.fillMaxWidth(),
-                                                colors = ButtonDefaults.outlinedButtonColors(
-                                                    contentColor = if (isCertTrusted) MaterialTheme.colorScheme.primary
-                                                        else MaterialTheme.colorScheme.onSurfaceVariant
-                                                )
-                                            ) {
-                                                Icon(
-                                                    if (isCertTrusted) Icons.Default.Lock else Icons.Default.LockOpen,
-                                                    contentDescription = null
-                                                )
-                                                Spacer(Modifier.width(8.dp))
-                                                Text(
-                                                    if (isCertTrusted) "Сертификат: привязан"
-                                                    else "Сертификат: не привязан"
-                                                )
-                                                Spacer(Modifier.weight(1f))
-                                                Icon(
-                                                    if (showCertDetails) Icons.Default.ExpandLess else Icons.Default.ExpandMore,
-                                                    contentDescription = null,
-                                                    tint = MaterialTheme.colorScheme.onSurfaceVariant
-                                                )
-                                            }
-                                        }
-                                    }
-
-                                    if (isCustom) {
-                                        Row(
-                                            modifier = Modifier,
-                                            horizontalArrangement = Arrangement.End
-                                        ) {
-                                            IconButton(
-                                                onClick = {
-                                                    serverToEdit = server
-                                                    isEditMode = true
-                                                    loadServerForEdit(server)
-                                                    showCustomServerDialog = true
-                                                }
-                                            ) {
-                                                Icon(
-                                                    Icons.Default.Edit,
-                                                    contentDescription = "Редактировать сервер",
-                                                    tint = if (isSelectedServer)
-                                                        MaterialTheme.colorScheme.onPrimaryContainer
-                                                    else
-                                                        MaterialTheme.colorScheme.primary
-                                                )
-                                            }
-                                            Spacer(Modifier.width(4.dp))
-                                            IconButton(
-                                                onClick = { serverToDelete = server }
-                                            ) {
-                                                Icon(
-                                                    Icons.Default.Delete,
-                                                    contentDescription = "Удалить сервер",
-                                                    tint = MaterialTheme.colorScheme.error
-                                                )
-                                            }
-                                        }
                                     }
                                 }
                             }
                         }
                     }
+                }
 
+                Spacer(modifier = Modifier.height(16.dp))
+
+                Button(
+                    onClick = {
+                        customName = ""
+                        customIpAddress = ""
+                        customPort = "8080"
+                        customPassword = ""
+                        ipError = ""
+                        portError = ""
+                        nameError = ""
+                        isEditMode = false
+                        showCustomServerDialog = true
+                    },
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    Icon(Icons.Default.Add, contentDescription = null)
+                    Spacer(Modifier.width(8.dp))
+                    Text("Добавить кастомный сервер")
+                }
+
+                if (isCertTrusted && showCertDetails) {
                     Spacer(modifier = Modifier.height(16.dp))
-
-                    Button(
-                        onClick = {
-                            customName = ""
-                            customIpAddress = ""
-                            customPort = "8080"
-                            customPassword = ""
-                            ipError = ""
-                            portError = ""
-                            nameError = ""
-                            isEditMode = false
-                            showCustomServerDialog = true
-                        },
-                        modifier = Modifier.fillMaxWidth()
+                    Card(
+                        modifier = Modifier.fillMaxWidth(),
+                        colors = CardDefaults.cardColors(
+                            containerColor = MaterialTheme.colorScheme.surfaceContainerHigh
+                        )
                     ) {
-                        Icon(Icons.Default.Add, contentDescription = null)
-                        Spacer(Modifier.width(8.dp))
-                        Text("Добавить кастомный сервер")
-                    }
-
-                    // Certificate details for the selected server.
-                    if (isCertTrusted && showCertDetails) {
-                        Spacer(modifier = Modifier.height(16.dp))
-                        Card(
-                            modifier = Modifier.fillMaxWidth(),
-                            colors = CardDefaults.cardColors(
-                                containerColor = MaterialTheme.colorScheme.surfaceContainerHigh
-                            )
+                        Column(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(16.dp)
                         ) {
-                            Column(
-                                modifier = Modifier
-                                    .fillMaxWidth()
-                                    .padding(16.dp)
-                            ) {
+                            Text(
+                                text = "Сертификат сервера",
+                                style = MaterialTheme.typography.titleSmall,
+                                fontWeight = FontWeight.Bold
+                            )
+
+                            Spacer(Modifier.height(12.dp))
+
+                            val certHashes = remember(selectedServer.id) { certManager.getHashes(selectedServer.id) }
+
+                            certHashes.forEachIndexed { index, hash ->
+                                val label = when {
+                                    index == 0 && certHashes.size == 1 -> "Отпечаток SHA-256"
+                                    index == 0 -> "Текущий (основной)"
+                                    index == 1 -> "Следующий (ротация)"
+                                    else -> "Хеш #${index + 1}"
+                                }
+                                val short = LogManager.shortHash(hash)
+
                                 Text(
-                                    text = "Сертификат сервера",
-                                    style = MaterialTheme.typography.titleSmall,
-                                    fontWeight = FontWeight.Bold
+                                    text = "$label: $short…",
+                                    style = MaterialTheme.typography.bodyMedium,
+                                    fontFamily = FontFamily.Monospace,
+                                    fontWeight = FontWeight.SemiBold
                                 )
 
-                                Spacer(Modifier.height(12.dp))
+                                Spacer(Modifier.height(4.dp))
 
-                                val certHashes = remember(selectedServer.id) { certManager.getHashes(selectedServer.id) }
+                                Text(
+                                    text = hash,
+                                    style = MaterialTheme.typography.bodySmall,
+                                    fontFamily = FontFamily.Monospace,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                                )
 
-                                certHashes.forEachIndexed { index, hash ->
-                                    val label = when {
-                                        index == 0 && certHashes.size == 1 -> "Отпечаток SHA-256"
-                                        index == 0 -> "Текущий (основной)"
-                                        index == 1 -> "Следующий (ротация)"
-                                        else -> "Хеш #${index + 1}"
-                                    }
-                                    val short = LogManager.shortHash(hash)
-
-                                    Text(
-                                        text = "$label: $short…",
-                                        style = MaterialTheme.typography.bodyMedium,
-                                        fontFamily = FontFamily.Monospace,
-                                        fontWeight = FontWeight.SemiBold
-                                    )
-
-                                    Spacer(Modifier.height(4.dp))
-
-                                    Text(
-                                        text = hash,
-                                        style = MaterialTheme.typography.bodySmall,
-                                        fontFamily = FontFamily.Monospace,
-                                        color = MaterialTheme.colorScheme.onSurfaceVariant
-                                    )
-
-                                    if (index < certHashes.size - 1) {
-                                        Spacer(Modifier.height(12.dp))
-                                        HorizontalDivider()
-                                        Spacer(Modifier.height(12.dp))
-                                    }
+                                if (index < certHashes.size - 1) {
+                                    Spacer(Modifier.height(12.dp))
+                                    HorizontalDivider()
+                                    Spacer(Modifier.height(12.dp))
                                 }
+                            }
 
-                                Spacer(Modifier.height(16.dp))
+                            Spacer(Modifier.height(16.dp))
 
-                                OutlinedButton(
-                                    onClick = { showForgetCert = true },
-                                    modifier = Modifier.fillMaxWidth(),
-                                    colors = ButtonDefaults.outlinedButtonColors(
-                                        contentColor = MaterialTheme.colorScheme.error
-                                    )
-                                ) {
-                                    Icon(Icons.Default.Delete, contentDescription = null)
-                                    Spacer(Modifier.width(8.dp))
-                                    Text("Отвязать сертификат")
-                                }
+                            OutlinedButton(
+                                onClick = { showForgetCert = true },
+                                modifier = Modifier.fillMaxWidth(),
+                                colors = ButtonDefaults.outlinedButtonColors(
+                                    contentColor = MaterialTheme.colorScheme.error
+                                )
+                            ) {
+                                Icon(Icons.Default.Delete, contentDescription = null)
+                                Spacer(Modifier.width(8.dp))
+                                Text("Отвязать сертификат")
                             }
                         }
                     }
-
                 }
             }
         }
@@ -488,7 +460,6 @@ fun ServerSettingsScreen(
         )
     }
 
-    // Confirmation dialog for manual TOFU certificate removal.
     if (showForgetCert) {
         AlertDialog(
             onDismissRequest = { showForgetCert = false },
@@ -525,7 +496,6 @@ fun ServerSettingsScreen(
         )
     }
 }
-
 
 @Composable
 private fun CustomServerDialog(
@@ -697,8 +667,6 @@ private fun ServerConnectionStatusIndicator(
                     .padding(horizontal = 10.dp, vertical = 3.dp)
             )
         }
-        // Show the precise failure reason so the user can act (wrong IP, no cert,
-        // QUIC error, auth rejected) instead of a generic "Ошибка".
         if (connectionState == ConnectionState.ERROR && !lastError.isNullOrBlank()) {
             Spacer(Modifier.height(6.dp))
             Text(

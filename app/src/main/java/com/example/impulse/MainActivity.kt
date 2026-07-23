@@ -8,7 +8,7 @@ import androidx.compose.runtime.remember
 import androidx.core.content.ContextCompat
 import androidx.fragment.app.FragmentActivity
 import com.example.impulse.data.ServerPreferences
-import com.example.impulse.data.ThemePreferences
+import com.example.impulse.ui.theme.ThemePreferences
 import com.example.impulse.service.TtlPurgeWorker
 import com.example.impulse.service.WebTransportForegroundService
 import com.example.impulse.ui.screens.BiometricLockScreen

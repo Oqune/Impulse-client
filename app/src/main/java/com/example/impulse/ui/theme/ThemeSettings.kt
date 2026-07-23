@@ -4,7 +4,6 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.graphics.Color
-import com.example.impulse.data.ThemePreferences
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
@@ -68,6 +67,21 @@ object ThemeSettings {
     private var _fontScale by mutableStateOf(1.0f)
     val fontScale: Float get() = _fontScale
 
+    private var _preset by mutableStateOf(ThemePreset.CYBER_BLUE)
+    val preset: ThemePreset get() = _preset
+
+    private var _glowEnabled by mutableStateOf(false)
+    val glowEnabled: Boolean get() = _glowEnabled
+
+    private var _glitchEnabled by mutableStateOf(false)
+    val glitchEnabled: Boolean get() = _glitchEnabled
+
+    private var _glassEnabled by mutableStateOf(false)
+    val glassEnabled: Boolean get() = _glassEnabled
+
+    private var _terminalCursorEnabled by mutableStateOf(false)
+    val terminalCursorEnabled: Boolean get() = _terminalCursorEnabled
+
     val isOLEDMode: Boolean get() = _themeMode == ThemeMode.OLED
 
     fun initialize(themePreferences: ThemePreferences) {
@@ -76,17 +90,13 @@ object ThemeSettings {
         scope.launch { themePreferences.accentColorFlow.collect { _accentColor = it } }
         scope.launch { themePreferences.fontSizeFlow.collect { _fontSize = it } }
         scope.launch { themePreferences.fontScaleFlow.collect { _fontScale = it } }
-        scope.launch {
-            themePreferences.themePresetFlow.collect { preset ->
-                ThemeConfig.preset = preset
-            }
-        }
+        scope.launch { themePreferences.themePresetFlow.collect { _preset = it } }
         scope.launch {
             themePreferences.effectsFlow.collect { effects ->
-                ThemeConfig.glowEnabled = effects.glow
-                ThemeConfig.glitchEnabled = effects.glitches
-                ThemeConfig.glassEnabled = effects.glass
-                ThemeConfig.terminalCursorEnabled = effects.terminalCursor
+                _glowEnabled = effects.glow
+                _glitchEnabled = effects.glitches
+                _glassEnabled = effects.glass
+                _terminalCursorEnabled = effects.terminalCursor
             }
         }
     }
@@ -95,17 +105,13 @@ object ThemeSettings {
     fun setAccentColor(color: DynamicColor) { _accentColor = color; preferences?.saveAccentColor(color) }
     fun setFontSize(size: FontSize) { _fontSize = size; preferences?.saveFontSize(size) }
     fun setFontScale(scale: Float) { _fontScale = scale.coerceIn(0.8f, 1.4f); preferences?.saveFontScale(_fontScale) }
-
-    fun setThemePreset(preset: ThemePreset) {
-        ThemeConfig.preset = preset
-        preferences?.saveThemePreset(preset)
-    }
+    fun setThemePreset(preset: ThemePreset) { _preset = preset; preferences?.saveThemePreset(preset) }
 
     fun setEffects(effects: EffectsConfig) {
-        ThemeConfig.glowEnabled = effects.glow
-        ThemeConfig.glitchEnabled = effects.glitches
-        ThemeConfig.glassEnabled = effects.glass
-        ThemeConfig.terminalCursorEnabled = effects.terminalCursor
+        _glowEnabled = effects.glow
+        _glitchEnabled = effects.glitches
+        _glassEnabled = effects.glass
+        _terminalCursorEnabled = effects.terminalCursor
         preferences?.saveEffects(effects)
     }
 }

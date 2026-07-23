@@ -30,6 +30,7 @@ import java.io.ByteArrayOutputStream
 import java.net.URI
 import com.ditchoom.buffer.Default
 import java.util.concurrent.atomic.AtomicBoolean
+import kotlin.time.Duration.Companion.seconds
 
 class WebTransportClient(
     private val context: Context,
@@ -64,11 +65,13 @@ class WebTransportClient(
         currentHost = uri.host
         if (uri.port > 0) currentPort = uri.port
         currentPath = uri.path.ifEmpty { "/" }
+        LogManager.i(TAG, "connect() url=$url host=$currentHost port=$currentPort path=$currentPath")
         startConnectTimeout()
         startSession()
     }
 
     fun disconnect() {
+        LogManager.i(TAG, "disconnect() called — closing session/stream")
         intentionalClose.set(true)
         connectTimeoutJob?.cancel()
         connectTimeoutJob = null
@@ -81,14 +84,14 @@ class WebTransportClient(
     suspend fun send(frame: ByteArray): Boolean {
         if (intentionalClose.get()) return false
         val st = stream ?: run {
-            LogManager.w(TAG, "send ignored: stream not open (state=${_state.value})")
+            LogManager.w(TAG, "SEND BLOCKED: stream is null (state=${_state.value})")
             return false
         }
         if (_state.value != ConnectionState.CONNECTED &&
             _state.value != ConnectionState.AUTHENTICATING &&
             _state.value != ConnectionState.AUTHENTICATED
         ) {
-            LogManager.w(TAG, "send ignored: not ready (state=${_state.value})")
+            LogManager.w(TAG, "SEND BLOCKED: wrong state=${_state.value}")
             return false
         }
         return try {
@@ -102,7 +105,7 @@ class WebTransportClient(
             }
             true
         } catch (e: Exception) {
-            LogManager.e(TAG, "send failed", e)
+            LogManager.e(TAG, "SEND FAILED: ${e.javaClass.simpleName}: ${e.message}", e)
             false
         }
     }
@@ -113,7 +116,7 @@ class WebTransportClient(
             delay(CONNECT_TIMEOUT_MS)
             if (intentionalClose.get()) return@launch
             if (_state.value == ConnectionState.CONNECTING) {
-                LogManager.e(TAG, "connect timeout after ${CONNECT_TIMEOUT_MS}ms; marking ERROR")
+                LogManager.e(TAG, "CONNECT TIMEOUT after ${CONNECT_TIMEOUT_MS}ms — no response from server, state→ERROR")
                 setState(ConnectionState.ERROR)
             }
         }
@@ -126,59 +129,65 @@ class WebTransportClient(
 
     private fun startSession() {
         setState(ConnectionState.CONNECTING)
+        val startTime = System.currentTimeMillis()
         LogManager.i(TAG, "connecting to $currentHost:$currentPort${currentPath} " +
-            "(TOFU pinnedHashes=${serverCertHashes.size})")
+            "(pinnedHashes=${serverCertHashes.size})")
         connectionJob?.cancel()
         connectionJob = scope.launch {
             try {
-                // W3C WebTransport TOFU: pin the leaf cert by SHA-256 hash of its
-                // DER encoding. With the default HashOnly mode the hash match is
-                // the sole trust check — exactly what a self-signed short-lived
-                // server cert needs.
                 val pinned = serverCertHashes.mapNotNull { hex -> certHashFromHex(hex) }
                 if (pinned.isEmpty()) {
-                    LogManager.e(TAG, "no valid pinned cert hashes; aborting connect")
+                    LogManager.e(TAG, "ABORT: no valid pinned cert hashes")
                     cancelConnectTimeout()
                     setState(ConnectionState.ERROR)
                     return@launch
                 }
+                LogManager.i(TAG, "QUIC options: idleTimeout=120s keepAlive=15s handshakeTimeout=300s")
                 val quicOptions = QuicOptions(
                     alpnProtocols = listOf("h3"),
                     serverCertificateHashes = pinned,
+                    idleTimeout = 120.seconds,
+                    keepAliveInterval = 15.seconds,
                 )
                 withHttp3Connection(
                     hostname = currentHost,
                     port = currentPort,
                     quicOptions = quicOptions,
+                    timeout = 300.seconds,
                     webTransport = WebTransportOptions(maxSessions = 1),
                 ) {
+                    LogManager.i(TAG, "HTTP/3 connection established, opening WebTransport session...")
                     val wtSession = connectWebTransport(
                         authority = currentHost,
                         path = currentPath,
                     )
+                    LogManager.i(TAG, "WebTransport session opened, opening bidirectional stream...")
                     val wtStream = wtSession.openBidiStream()
                     session = wtSession
                     stream = wtStream
                     cancelConnectTimeout()
-                    LogManager.i(TAG, "session ready")
+                    val elapsed = System.currentTimeMillis() - startTime
+                    LogManager.i(TAG, "SESSION READY (${elapsed}ms) — session + stream open")
                     setState(ConnectionState.CONNECTED)
-                    LogManager.i(TAG, "stream ready")
 
                     kotlinx.coroutines.yield()
+                    LogManager.i(TAG, "invoking onReady callback")
                     onReady?.invoke()
+                    LogManager.i(TAG, "entering read loop")
                     runReadLoop(wtStream)
+                    LogManager.i(TAG, "read loop exited normally")
                 }
             } catch (e: CancellationException) {
                 throw e
             } catch (e: WebTransportException) {
                 if (intentionalClose.get()) return@launch
-                LogManager.e(TAG, "connect failed: ${e.message}", e)
+                LogManager.e(TAG, "WebTransportException: ${e.message}", e)
                 onSessionError?.invoke(0)
                 cancelConnectTimeout()
                 setState(ConnectionState.ERROR)
             } catch (e: Exception) {
                 if (intentionalClose.get()) return@launch
-                LogManager.e(TAG, "connect failed: ${e.message}", e)
+                LogManager.e(TAG, "connect failed: ${e.javaClass.simpleName}: ${e.message}", e)
                 cancelConnectTimeout()
                 setState(ConnectionState.ERROR)
             }
@@ -187,6 +196,8 @@ class WebTransportClient(
 
     private suspend fun runReadLoop(stream: WebTransportStream) {
         val acc = ByteArrayOutputStream()
+        var bytesRead = 0L
+        var framesRead = 0L
         try {
             while (coroutineContext.isActive && !intentionalClose.get()) {
                 when (val result = stream.read()) {
@@ -194,20 +205,22 @@ class WebTransportClient(
                         val buf = result.buffer
                         val n = buf.remaining()
                         if (n > 0) {
+                            bytesRead += n
                             val chunk = ByteArray(n)
                             for (i in 0 until n) {
                                 chunk[i] = buf.readByte()
                             }
                             handleInboundChunk(chunk, acc)
+                            framesRead++
                         }
                         buf.freeIfNeeded()
                     }
                     ReadResult.End -> {
-                        LogManager.w(TAG, "read EOF (server closed connection)")
+                        LogManager.w(TAG, "READ EOF — server closed the stream (bytes=$bytesRead frames=$framesRead)")
                         break
                     }
                     ReadResult.Reset -> {
-                        LogManager.w(TAG, "read reset (peer aborted)")
+                        LogManager.w(TAG, "READ RESET — peer aborted the stream (bytes=$bytesRead frames=$framesRead)")
                         break
                     }
                 }
@@ -216,13 +229,14 @@ class WebTransportClient(
             throw e
         } catch (e: Exception) {
             if (!intentionalClose.get()) {
-                LogManager.e(TAG, "read loop error: ${e.message}", e)
+                LogManager.e(TAG, "READ LOOP ERROR: ${e.javaClass.simpleName}: ${e.message} (bytes=$bytesRead frames=$framesRead)", e)
             }
         } finally {
             if (!intentionalClose.get()) {
-                LogManager.w(TAG, "connection lost")
+                LogManager.w(TAG, "CONNECTION LOST — read loop terminated unexpectedly (bytes=$bytesRead frames=$framesRead)")
                 setState(ConnectionState.ERROR)
             } else {
+                LogManager.i(TAG, "read loop ended (intentional close, bytes=$bytesRead frames=$framesRead)")
                 setState(ConnectionState.DISCONNECTED)
             }
         }
@@ -259,6 +273,18 @@ class WebTransportClient(
     private fun dispatch(raw: ByteArray) {
         if (raw.isEmpty()) return
         val opcode = raw[0]
+        val opcodeName = when (opcode) {
+            Protocol.OP_AUTH -> "Auth"
+            Protocol.OP_AUTH_RESULT -> "AuthResult"
+            Protocol.OP_SYNC -> "Sync"
+            Protocol.OP_SYNC_RESPONSE -> "SyncResponse"
+            Protocol.OP_DATA -> "Data"
+            Protocol.OP_KEY_EXCHANGE -> "KeyExchange"
+            Protocol.OP_HEARTBEAT -> "Heartbeat"
+            Protocol.OP_NEW_CERT_HASH -> "NewCertHash"
+            else -> "0x%02x".format(opcode)
+        }
+        LogManager.d(TAG, "RX frame: opcode=$opcodeName (${raw.size} bytes)")
         when (opcode) {
             Protocol.OP_NEW_CERT_HASH -> {
                 try {

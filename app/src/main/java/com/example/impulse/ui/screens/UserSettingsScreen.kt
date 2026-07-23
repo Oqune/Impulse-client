@@ -18,188 +18,167 @@ import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 
-@OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun UserSettingsScreen(
+fun UserSettingsContent(
+    modifier: Modifier = Modifier,
     clientName: String,
     onClientNameChange: (String) -> Unit,
-    onBack: () -> Unit
 ) {
     var showNameDialog by remember { mutableStateOf(false) }
     var tempName by remember { mutableStateOf(clientName) }
 
-    Scaffold(
-        topBar = {
-            TopAppBar(
-                title = { Text("Профиль") },
-                navigationIcon = {
-                    IconButton(onClick = onBack) {
-                        Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Назад")
-                    }
-                },
-                colors = TopAppBarDefaults.topAppBarColors(
-                    containerColor = MaterialTheme.colorScheme.surface
-                )
+    Column(
+        modifier = modifier
+            .verticalScroll(rememberScrollState())
+            .padding(16.dp),
+        verticalArrangement = Arrangement.spacedBy(16.dp)
+    ) {
+        Card(
+            modifier = Modifier.fillMaxWidth(),
+            shape = RoundedCornerShape(20.dp),
+            colors = CardDefaults.cardColors(
+                containerColor = MaterialTheme.colorScheme.primaryContainer
             )
-        }
-    ) { padding ->
-        Column(
-            modifier = Modifier
-                .fillMaxSize()
-                .padding(padding)
-                .verticalScroll(rememberScrollState())
-                .padding(16.dp)
-                .navigationBarsPadding(),
-            verticalArrangement = Arrangement.spacedBy(16.dp)
         ) {
-            // Avatar + name card
-            Card(
-                modifier = Modifier.fillMaxWidth(),
-                shape = RoundedCornerShape(20.dp),
-                colors = CardDefaults.cardColors(
-                    containerColor = MaterialTheme.colorScheme.primaryContainer
-                )
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(20.dp),
+                verticalAlignment = Alignment.CenterVertically
             ) {
-                Row(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .padding(20.dp),
-                    verticalAlignment = Alignment.CenterVertically
+                Surface(
+                    modifier = Modifier.size(64.dp),
+                    shape = CircleShape,
+                    color = MaterialTheme.colorScheme.primary
                 ) {
-                    Surface(
-                        modifier = Modifier.size(64.dp),
-                        shape = CircleShape,
-                        color = MaterialTheme.colorScheme.primary
-                    ) {
-                        Box(contentAlignment = Alignment.Center) {
-                            Text(
-                                text = clientName.take(1).uppercase(),
-                                style = MaterialTheme.typography.headlineMedium,
-                                fontWeight = FontWeight.Bold,
-                                color = MaterialTheme.colorScheme.onPrimary
-                            )
-                        }
-                    }
-
-                    Spacer(Modifier.width(16.dp))
-
-                    Column(modifier = Modifier.weight(1f)) {
+                    Box(contentAlignment = Alignment.Center) {
                         Text(
-                            text = "Имя в чате",
-                            style = MaterialTheme.typography.labelMedium,
-                            color = MaterialTheme.colorScheme.onPrimaryContainer.copy(alpha = 0.7f)
-                        )
-                        Text(
-                            text = clientName,
-                            style = MaterialTheme.typography.titleLarge,
+                            text = clientName.take(1).uppercase(),
+                            style = MaterialTheme.typography.headlineMedium,
                             fontWeight = FontWeight.Bold,
-                            color = MaterialTheme.colorScheme.onPrimaryContainer
+                            color = MaterialTheme.colorScheme.onPrimary
                         )
                     }
                 }
-            }
 
-            Card(
-                modifier = Modifier.fillMaxWidth(),
-                shape = RoundedCornerShape(16.dp)
-            ) {
-                Column(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .padding(16.dp)
-                ) {
+                Spacer(Modifier.width(16.dp))
+
+                Column(modifier = Modifier.weight(1f)) {
                     Text(
-                        text = "Отображаемое имя",
-                        style = MaterialTheme.typography.titleMedium,
-                        fontWeight = FontWeight.Bold
+                        text = "Имя в чате",
+                        style = MaterialTheme.typography.labelMedium,
+                        color = MaterialTheme.colorScheme.onPrimaryContainer.copy(alpha = 0.7f)
                     )
-
-                    Spacer(modifier = Modifier.height(8.dp))
-
                     Text(
                         text = clientName,
-                        style = MaterialTheme.typography.bodyLarge,
-                        modifier = Modifier.padding(bottom = 12.dp)
+                        style = MaterialTheme.typography.titleLarge,
+                        fontWeight = FontWeight.Bold,
+                        color = MaterialTheme.colorScheme.onPrimaryContainer
                     )
-
-                    Button(
-                        onClick = {
-                            tempName = clientName
-                            showNameDialog = true
-                        },
-                        modifier = Modifier.fillMaxWidth(),
-                        shape = RoundedCornerShape(12.dp)
-                    ) {
-                        Icon(Icons.Default.Edit, contentDescription = null)
-                        Spacer(Modifier.width(8.dp))
-                        Text("Изменить имя")
-                    }
                 }
             }
         }
 
-        if (showNameDialog) {
-            var nameError by remember { mutableStateOf("") }
-            val focusRequester = remember { FocusRequester() }
+        Card(
+            modifier = Modifier.fillMaxWidth(),
+            shape = RoundedCornerShape(16.dp)
+        ) {
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(16.dp)
+            ) {
+                Text(
+                    text = "Отображаемое имя",
+                    style = MaterialTheme.typography.titleMedium,
+                    fontWeight = FontWeight.Bold
+                )
 
-            AlertDialog(
-                onDismissRequest = { showNameDialog = false },
-                containerColor = MaterialTheme.colorScheme.surface,
-                tonalElevation = 8.dp,
-                title = { Text("Изменить имя") },
-                text = {
-                    Column {
-                        Text("Введите новое имя для отображения в чате:")
-                        Spacer(modifier = Modifier.height(16.dp))
+                Spacer(modifier = Modifier.height(8.dp))
 
-                        OutlinedTextField(
-                            value = tempName,
-                            onValueChange = {
-                                tempName = it
-                                nameError = ""
-                            },
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .focusRequester(focusRequester),
-                            label = { Text("Имя пользователя") },
-                            placeholder = { Text("Введите имя") },
-                            isError = nameError.isNotEmpty(),
-                            supportingText = {
-                                if (nameError.isNotEmpty()) {
-                                    Text(nameError)
-                                }
-                            },
-                            singleLine = true
-                        )
-                    }
-                },
-                confirmButton = {
-                    TextButton(
-                        onClick = {
-                            if (tempName.isBlank()) {
-                                nameError = "Имя не может быть пустым"
-                            } else if (tempName.length > 30) {
-                                nameError = "Имя слишком длинное (макс. 30 символов)"
-                            } else {
-                                onClientNameChange(tempName)
-                                showNameDialog = false
+                Text(
+                    text = clientName,
+                    style = MaterialTheme.typography.bodyLarge,
+                    modifier = Modifier.padding(bottom = 12.dp)
+                )
+
+                Button(
+                    onClick = {
+                        tempName = clientName
+                        showNameDialog = true
+                    },
+                    modifier = Modifier.fillMaxWidth(),
+                    shape = RoundedCornerShape(12.dp)
+                ) {
+                    Icon(Icons.Default.Edit, contentDescription = null)
+                    Spacer(Modifier.width(8.dp))
+                    Text("Изменить имя")
+                }
+            }
+        }
+    }
+
+    if (showNameDialog) {
+        var nameError by remember { mutableStateOf("") }
+        val focusRequester = remember { FocusRequester() }
+
+        AlertDialog(
+            onDismissRequest = { showNameDialog = false },
+            containerColor = MaterialTheme.colorScheme.surface,
+            tonalElevation = 8.dp,
+            title = { Text("Изменить имя") },
+            text = {
+                Column {
+                    Text("Введите новое имя для отображения в чате:")
+                    Spacer(modifier = Modifier.height(16.dp))
+
+                    OutlinedTextField(
+                        value = tempName,
+                        onValueChange = {
+                            tempName = it
+                            nameError = ""
+                        },
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .focusRequester(focusRequester),
+                        label = { Text("Имя пользователя") },
+                        placeholder = { Text("Введите имя") },
+                        isError = nameError.isNotEmpty(),
+                        supportingText = {
+                            if (nameError.isNotEmpty()) {
+                                Text(nameError)
                             }
+                        },
+                        singleLine = true
+                    )
+                }
+            },
+            confirmButton = {
+                TextButton(
+                    onClick = {
+                        if (tempName.isBlank()) {
+                            nameError = "Имя не может быть пустым"
+                        } else if (tempName.length > 30) {
+                            nameError = "Имя слишком длинное (макс. 30 символов)"
+                        } else {
+                            onClientNameChange(tempName)
+                            showNameDialog = false
                         }
-                    ) {
-                        Text("Сохранить")
                     }
-                },
-                dismissButton = {
-                    TextButton(onClick = { showNameDialog = false }) {
-                        Text("Отмена")
-                    }
+                ) {
+                    Text("Сохранить")
                 }
-            )
+            },
+            dismissButton = {
+                TextButton(onClick = { showNameDialog = false }) {
+                    Text("Отмена")
+                }
+            }
+        )
 
-            LaunchedEffect(showNameDialog) {
-                if (showNameDialog) {
-                    focusRequester.requestFocus()
-                }
+        LaunchedEffect(showNameDialog) {
+            if (showNameDialog) {
+                focusRequester.requestFocus()
             }
         }
     }

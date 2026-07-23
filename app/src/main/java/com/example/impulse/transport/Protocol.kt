@@ -379,7 +379,8 @@ object Protocol {
             OP_AUTH_RESULT -> {
                 if (data.size - offset < 2) throw ProtocolException("frameLength: incomplete OP_AUTH_RESULT")
                 val success = data[offset + 1]
-                if (success == 0.toByte()) 2
+                // Server encodes: success=0x01 → 2 bytes total; fail=0x00 → has error message
+                if (success != 0.toByte()) 2
                 else {
                     if (data.size - offset < 6) throw ProtocolException("frameLength: incomplete OP_AUTH_RESULT")
                     val msgLen = ((data[offset + 2].toInt() and 0xFF)) or

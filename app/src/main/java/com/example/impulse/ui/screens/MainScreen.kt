@@ -41,6 +41,7 @@ import com.example.impulse.transport.ConnectionState
 import com.example.impulse.util.NameGenerator
 import androidx.compose.ui.platform.LocalContext
 
+/** A navigation tab in the bottom bar: [title] label and [icon] for the tab button. */
 data class TabItem(val title: String, val icon: ImageVector)
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -96,34 +97,38 @@ fun MainScreen() {
         return
     }
 
+    val showTopBar = selectedItem != 3
+
     Scaffold(
         topBar = {
-            TopAppBar(
-                title = { Text("Impulse") },
-                actions = {
-                    val (label, color) = when (connectionState) {
-                        ConnectionState.DISCONNECTED -> "Отключено" to MaterialTheme.colorScheme.outline
-                        ConnectionState.CONNECTING -> "Подключение…" to MaterialTheme.colorScheme.tertiary
-                        ConnectionState.CONNECTED -> "Аутентификация…" to MaterialTheme.colorScheme.tertiary
-                        ConnectionState.AUTHENTICATING -> "Аутентификация…" to MaterialTheme.colorScheme.tertiary
-                        ConnectionState.AUTHENTICATED -> "Канал…" to MaterialTheme.colorScheme.tertiary
-                        ConnectionState.READY -> "PQ-E2EE" to MaterialTheme.colorScheme.primary
-                        ConnectionState.ERROR -> "Ошибка" to MaterialTheme.colorScheme.error
+            if (showTopBar) {
+                TopAppBar(
+                    title = { Text("Impulse") },
+                    actions = {
+                        val (label, color) = when (connectionState) {
+                            ConnectionState.DISCONNECTED -> "Отключено" to MaterialTheme.colorScheme.outline
+                            ConnectionState.CONNECTING -> "Подключение…" to MaterialTheme.colorScheme.tertiary
+                            ConnectionState.CONNECTED -> "Аутентификация…" to MaterialTheme.colorScheme.tertiary
+                            ConnectionState.AUTHENTICATING -> "Аутентификация…" to MaterialTheme.colorScheme.tertiary
+                            ConnectionState.AUTHENTICATED -> "Канал…" to MaterialTheme.colorScheme.tertiary
+                            ConnectionState.READY -> "PQ-E2EE" to MaterialTheme.colorScheme.primary
+                            ConnectionState.ERROR -> "Ошибка" to MaterialTheme.colorScheme.error
+                        }
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            modifier = Modifier.padding(end = 16.dp)
+                        ) {
+                            Box(
+                                modifier = Modifier
+                                    .size(10.dp)
+                                    .background(color, CircleShape)
+                            )
+                            Spacer(Modifier.size(8.dp))
+                            Text(label, style = MaterialTheme.typography.labelMedium, color = color)
+                        }
                     }
-                    Row(
-                        verticalAlignment = Alignment.CenterVertically,
-                        modifier = Modifier.padding(end = 16.dp)
-                    ) {
-                        Box(
-                            modifier = Modifier
-                                .size(10.dp)
-                                .background(color, CircleShape)
-                        )
-                        Spacer(Modifier.size(8.dp))
-                        Text(label, style = MaterialTheme.typography.labelMedium, color = color)
-                    }
-                }
-            )
+                )
+            }
         },
         bottomBar = {
             NavigationBar(
@@ -199,7 +204,7 @@ fun MainScreen() {
                         ServerPreferences(context).saveSelectedServer(selectedServer)
                     }
                 },
-                modifier = Modifier.padding(innerPadding)
+                modifier = Modifier.padding(bottom = innerPadding.calculateBottomPadding())
             )
         }
     }

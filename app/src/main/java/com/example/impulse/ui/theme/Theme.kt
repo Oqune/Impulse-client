@@ -19,7 +19,7 @@ fun ImpulseTheme(
     },
     content: @Composable () -> Unit
 ) {
-    val preset = ThemeConfig.preset
+    val preset = ThemeSettings.preset
     val palettes = ThemePalettes[preset] ?: ThemePalettes[ThemePreset.CYBER_BLUE]!!
     val isOled = ThemeSettings.isOLEDMode
 
@@ -42,6 +42,8 @@ fun ImpulseTheme(
     MaterialTheme(
         colorScheme = colorScheme,
         typography = getTypography(ThemeSettings.fontScale),
-        content = content
-    )
+        shapes = ImpulseShapes,
+    ) {
+        content()
+    }
 }

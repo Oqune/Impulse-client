@@ -1,12 +1,7 @@
-package com.example.impulse.data
+package com.example.impulse.ui.theme
 
 import android.content.Context
 import android.content.SharedPreferences
-import com.example.impulse.ui.theme.DynamicColor
-import com.example.impulse.ui.theme.EffectsConfig
-import com.example.impulse.ui.theme.FontSize
-import com.example.impulse.ui.theme.ThemeMode
-import com.example.impulse.ui.theme.ThemePreset
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow

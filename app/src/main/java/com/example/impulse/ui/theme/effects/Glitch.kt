@@ -8,7 +8,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.drawWithContent
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalDensity
-import com.example.impulse.ui.theme.ThemeConfig
+import com.example.impulse.ui.theme.ThemeSettings
 
 @Composable
 fun GlitchOverlay(
@@ -16,7 +16,7 @@ fun GlitchOverlay(
     color: Color = Color(0xFF00FF41),
     intensity: Float = 1f,
 ) {
-    if (!ThemeConfig.glitchEnabled) return
+    if (!ThemeSettings.glitchEnabled) return
 
     val infinite = rememberInfiniteTransition()
     val offsetX by infinite.animateFloat(

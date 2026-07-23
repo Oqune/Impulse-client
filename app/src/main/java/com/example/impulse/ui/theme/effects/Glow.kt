@@ -6,14 +6,14 @@ import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
-import com.example.impulse.ui.theme.ThemeConfig
+import com.example.impulse.ui.theme.ThemeSettings
 
 fun Modifier.glow(
     color: Color,
     radius: Dp = 12.dp,
     alpha: Float = 0.5f,
 ): Modifier {
-    if (!ThemeConfig.glowEnabled) return this
+    if (!ThemeSettings.glowEnabled) return this
     return this.then(drawBehind {
         val r = radius.toPx()
         drawCircle(

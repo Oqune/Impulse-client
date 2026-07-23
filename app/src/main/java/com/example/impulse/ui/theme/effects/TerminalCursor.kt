@@ -10,7 +10,7 @@ import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
-import com.example.impulse.ui.theme.ThemeConfig
+import com.example.impulse.ui.theme.ThemeSettings
 
 @Composable
 fun TerminalCursor(
@@ -18,7 +18,7 @@ fun TerminalCursor(
     color: Color = Color(0xFF00FF41),
     width: Dp = 8.dp,
 ) {
-    if (!ThemeConfig.terminalCursorEnabled) return
+    if (!ThemeSettings.terminalCursorEnabled) return
 
     val infinite = rememberInfiniteTransition()
     val visible by infinite.animateFloat(

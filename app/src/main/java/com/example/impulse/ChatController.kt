@@ -101,10 +101,14 @@ class ChatController private constructor(private val context: Context) {
     }
 
     fun connect(server: ServerConfig, name: String) {
-        if (_state.value == ConnectionState.CONNECTING ||
-            _state.value == ConnectionState.CONNECTED
+        val cur = _state.value
+        if (cur == ConnectionState.CONNECTING ||
+            cur == ConnectionState.CONNECTED ||
+            cur == ConnectionState.AUTHENTICATING ||
+            cur == ConnectionState.AUTHENTICATED ||
+            cur == ConnectionState.READY
         ) {
-            LogManager.w(TAG, "connect ignored: already connecting/connected")
+            LogManager.w(TAG, "connect ignored: already active (state=$cur)")
             return
         }
         userDisconnect = false
@@ -114,6 +118,11 @@ class ChatController private constructor(private val context: Context) {
         clientName = name
         ensureKeyPair()
         _lastError.value = null
+
+        // Reset crypto state from any previous session
+        peerPublicKeys.clear()
+        peerMlDsa65Keys.clear()
+        groupSecret = null
 
         val hashes = certManager.getHashes(server.id)
 
@@ -126,6 +135,7 @@ class ChatController private constructor(private val context: Context) {
 
         LogManager.i(TAG, "connect: server=${server.id} ip=${server.ipAddress} pinnedHashes=${hashes.size}")
 
+        val clientHolder = arrayOfNulls<WebTransportClient>(1)
         val wtClient = WebTransportClient(
             context = context,
             serverCertHashes = hashes,
@@ -136,10 +146,11 @@ class ChatController private constructor(private val context: Context) {
                 "Возможно, сервер не поддерживает HTTP/3 (QUIC) или недоступен на ${server.ipAddress}:${server.port}." },
             onReady = {
                 scope.launch {
-                    sendAuth()
+                    sendAuth(clientHolder[0])
                 }
             },
         )
+        clientHolder[0] = wtClient
         client = wtClient
         scope.launch {
             try {
@@ -174,6 +185,7 @@ class ChatController private constructor(private val context: Context) {
     fun clearError() { _lastError.value = null }
 
     private fun onTransportState(s: ConnectionState) {
+        LogManager.i(TAG, "transport state → $s")
         when (s) {
             ConnectionState.CONNECTING -> {
                 _state.value = s
@@ -193,7 +205,7 @@ class ChatController private constructor(private val context: Context) {
 
     private suspend fun sendAuth(transport: WebTransportClient? = client) {
         val server = currentServer ?: run {
-            LogManager.e(TAG, "sendAuth: no current server")
+            LogManager.e(TAG, "sendAuth: no current server configured")
             _state.value = ConnectionState.ERROR
             return
         }
@@ -201,11 +213,11 @@ class ChatController private constructor(private val context: Context) {
         val frame = Protocol.buildAuth(password)
         val ok = transport?.send(frame) ?: false
         if (!ok) {
-            LogManager.e(TAG, "sendAuth failed (transport not ready)")
+            LogManager.e(TAG, "sendAuth FAILED — transport.send() returned false (state=${_state.value})")
             return
         }
         _state.value = ConnectionState.AUTHENTICATING
-        LogManager.i(TAG, "Auth sent (password length=${password.length})")
+        LogManager.i(TAG, "AUTH SENT → waiting for server response (timeout=${AUTH_TIMEOUT_MS}ms)")
         startAuthTimeout()
     }
 
@@ -214,11 +226,14 @@ class ChatController private constructor(private val context: Context) {
         cancelAuthTimeout()
         authTimeoutJob = scope.launch {
             delay(AUTH_TIMEOUT_MS)
-            if (_state.value == ConnectionState.CONNECTED ||
-                _state.value == ConnectionState.AUTHENTICATING
+            val currentState = _state.value
+            if (currentState == ConnectionState.CONNECTED ||
+                currentState == ConnectionState.AUTHENTICATING
             ) {
-                LogManager.e(TAG, "auth timeout after ${AUTH_TIMEOUT_MS}ms; marking ERROR")
+                LogManager.e(TAG, "AUTH TIMEOUT after ${AUTH_TIMEOUT_MS}ms — state=$currentState → ERROR")
                 _state.value = ConnectionState.ERROR
+            } else {
+                LogManager.d(TAG, "auth timeout fired but state=$currentState (already past auth), ignoring")
             }
         }
     }
@@ -226,6 +241,7 @@ class ChatController private constructor(private val context: Context) {
     private fun cancelAuthTimeout() {
         authTimeoutJob?.cancel()
         authTimeoutJob = null
+        LogManager.d(TAG, "auth timeout cancelled")
     }
 
     private fun scheduleReconnect() {
@@ -260,7 +276,10 @@ class ChatController private constructor(private val context: Context) {
         )
         val signature = myMlDsa65Private?.let { priv ->
             PqcCrypto.signMlDsa65(priv, innerJson)
-        } ?: byteArrayOf()
+        } ?: run {
+            LogManager.e(TAG, "ML-DSA-65 key not available; cannot sign outgoing message")
+            return false
+        }
         val signedInner = Protocol.buildInnerEnvelope(
             sender = clientName,
             signature = android.util.Base64.encodeToString(signature, android.util.Base64.NO_WRAP),
@@ -290,6 +309,16 @@ class ChatController private constructor(private val context: Context) {
     private fun handleIncoming(raw: ByteArray) {
         if (raw.isEmpty()) return
         val opcode = raw[0]
+        val opcodeName = when (opcode) {
+            Protocol.OP_AUTH_RESULT -> "AuthResult"
+            Protocol.OP_SYNC_RESPONSE -> "SyncResponse"
+            Protocol.OP_DATA -> "Data"
+            Protocol.OP_HEARTBEAT -> "Heartbeat"
+            Protocol.OP_KEY_EXCHANGE -> "KeyExchange"
+            Protocol.OP_NEW_CERT_HASH -> "NewCertHash"
+            else -> "0x%02x".format(opcode)
+        }
+        LogManager.d(TAG, "RX $opcodeName (${raw.size} bytes)")
         try {
             val r = Protocol.Reader(raw, 1)
             when (opcode) {
@@ -299,30 +328,54 @@ class ChatController private constructor(private val context: Context) {
                 Protocol.OP_HEARTBEAT -> onHeartbeat()
                 Protocol.OP_KEY_EXCHANGE -> onKeyExchange(r)
                 Protocol.OP_NEW_CERT_HASH -> { }
-                else -> LogManager.w(TAG, "unknown opcode 0x%02x".format(opcode))
+                else -> LogManager.w(TAG, "UNKNOWN opcode 0x%02x (${raw.size} bytes)".format(opcode))
             }
         } catch (e: Exception) {
-            LogManager.e(TAG, "bad frame opcode=0x%02x".format(opcode), e)
+            LogManager.e(TAG, "PARSE FAILED opcode=0x%02x: ${e.message}".format(opcode), e)
         }
     }
 
     private fun onAuthResult(r: Protocol.Reader) {
         val res = Protocol.parseAuthResult(r)
         if (!res.success) {
-            LogManager.e(TAG, "auth failed: ${res.errorMessage}")
+            LogManager.e(TAG, "AUTH REJECTED by server: ${res.errorMessage ?: "no reason"}")
             cancelAuthTimeout()
             _state.value = ConnectionState.ERROR
             _lastError.value = "Аутентификация отклонена сервером: ${res.errorMessage ?: "нет причины"}"
             return
         }
         cancelAuthTimeout()
-        LogManager.i(TAG, "auth success; publishing keys + requesting sync")
+        LogManager.i(TAG, "AUTH SUCCESS — publishing keys + requesting sync")
         _state.value = ConnectionState.AUTHENTICATING
         scope.launch {
-            myPublicKey?.let { pub -> client?.send(Protocol.buildKeyExchange(pub)) }
-            myMlDsa65Public?.let { pub -> client?.send(Protocol.buildKeyExchange(pub)) }
+            val kemOk = myPublicKey?.let { pub -> client?.send(Protocol.buildKeyExchange(pub)) } ?: false
+            LogManager.i(TAG, "KeyExchange ML-KEM sent (ok=$kemOk)")
+            val dsaOk = myMlDsa65Public?.let { pub -> client?.send(Protocol.buildKeyExchange(pub)) } ?: false
+            LogManager.i(TAG, "KeyExchange ML-DSA-65 sent (ok=$dsaOk)")
             val lastSeen = repo.lastSeenId(currentServer?.id ?: "")
-            client?.send(Protocol.buildSync(lastSeen))
+            val syncOk = client?.send(Protocol.buildSync(lastSeen)) ?: false
+            LogManager.i(TAG, "Sync request sent (ok=$syncOk, lastSeen=$lastSeen)")
+
+            // Single-peer: server excludes sender from key exchange relay, so we
+            // never receive our own key back.  Derive the group secret from our
+            // own ML-KEM key alone — this is correct for a single participant.
+            // If other peers connect later, onKeyExchange will add their keys and
+            // re-derive.
+            if (groupSecret == null && myPublicKey != null) {
+                val fp = fingerprint(myPublicKey!!)
+                peerPublicKeys[fp] = myPublicKey!!
+                LogManager.i(TAG, "single-peer: added own key to peerPublicKeys, deriving group secret")
+                recomputeGroupSecret()
+                if (groupSecret != null) {
+                    _state.value = ConnectionState.AUTHENTICATED
+                    _state.value = ConnectionState.READY
+                    LogManager.i(TAG, "READY (single-peer group secret derived)")
+                } else {
+                    LogManager.e(TAG, "deriveGroupKey failed for single-peer")
+                    _state.value = ConnectionState.ERROR
+                    _lastError.value = "Не удалось вывести групповый ключ"
+                }
+            }
         }
         startHeartbeat()
     }
@@ -336,19 +389,19 @@ class ChatController private constructor(private val context: Context) {
             kf.generatePublic(java.security.spec.X509EncodedKeySpec(key))
             val fp = fingerprint(key)
             peerMlDsa65Keys[fp] = key
-            LogManager.i(TAG, "KeyExchange: ML-DSA-65 pubkey received (peers=${peerMlDsa65Keys.size})")
+            LogManager.i(TAG, "KeyExchange ML-DSA-65 received (${key.size} bytes, peers=${peerMlDsa65Keys.size})")
             return
         } catch (_: Exception) { }
 
         val fp = fingerprint(key)
         peerPublicKeys[fp] = key
-        LogManager.i(TAG, "KeyExchange: ML-KEM pubkey received (peers=${peerPublicKeys.size})")
+        LogManager.i(TAG, "KeyExchange ML-KEM received (${key.size} bytes, peers=${peerPublicKeys.size})")
         recomputeGroupSecret()
         if (groupSecret != null) {
-            LogManager.i(TAG, "AUTHENTICATED (group secret established)")
+            LogManager.i(TAG, "GROUP SECRET ESTABLISHED — channel ready")
             _state.value = ConnectionState.AUTHENTICATED
             _state.value = ConnectionState.READY
-            LogManager.i(TAG, "READY: secure channel established, chat enabled")
+            LogManager.i(TAG, "READY — secure chat enabled")
         }
     }
 
@@ -446,17 +499,17 @@ class ChatController private constructor(private val context: Context) {
     }
 
     private fun onHeartbeat() {
-        scope.launch {
-            client?.send(Protocol.buildHeartbeat())
-        }
+        LogManager.d(TAG, "heartbeat received from server")
     }
 
     private fun startHeartbeat() {
         heartbeatJob?.cancel()
         heartbeatJob = scope.launch {
+            LogManager.i(TAG, "heartbeat started (interval=${HEARTBEAT_INTERVAL_MS}ms)")
             while (isActive) {
                 delay(HEARTBEAT_INTERVAL_MS)
-                client?.send(Protocol.buildHeartbeat())
+                val ok = client?.send(Protocol.buildHeartbeat()) ?: false
+                LogManager.d(TAG, "heartbeat sent (ok=$ok)")
             }
         }
     }

@@ -25,8 +25,6 @@ import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.flow.collect
 import kotlinx.coroutines.launch
-import java.util.concurrent.TimeUnit
-
 /**
  * Keeps the WebTransport connection alive while the app is in the background.
  * Delegates all protocol logic to [ChatController].
@@ -54,7 +52,7 @@ class WebTransportForegroundService : Service() {
     private fun acquireWakeLock() {
         val powerManager = getSystemService(Context.POWER_SERVICE) as PowerManager
         wakeLock = powerManager.newWakeLock(PowerManager.PARTIAL_WAKE_LOCK, "Impulse::WTLock")
-        wakeLock?.acquire(TimeUnit.HOURS.toMillis(12))
+        wakeLock?.acquire()
     }
 
     private fun releaseWakeLock() {

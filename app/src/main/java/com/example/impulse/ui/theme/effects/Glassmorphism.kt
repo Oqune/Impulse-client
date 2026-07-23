@@ -3,14 +3,14 @@ package com.example.impulse.ui.theme.effects
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.drawBehind
 import androidx.compose.ui.graphics.Color
-import com.example.impulse.ui.theme.ThemeConfig
+import com.example.impulse.ui.theme.ThemeSettings
 
 fun Modifier.glassBackground(
     backgroundColor: Color,
     blurRadius: Float = 20f,
     alpha: Float = 0.15f,
 ): Modifier {
-    if (!ThemeConfig.glassEnabled) return this
+    if (!ThemeSettings.glassEnabled) return this
     return this.then(drawBehind {
         drawRect(
             color = backgroundColor.copy(alpha = alpha),
