@@ -2,14 +2,15 @@ package com.example.impulse
 
 import android.content.Intent
 import android.os.Bundle
+import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
+import androidx.activity.enableEdgeToEdge
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.core.content.ContextCompat
 import androidx.fragment.app.FragmentActivity
 import com.example.impulse.data.ServerPreferences
 import com.example.impulse.ui.theme.ThemePreferences
-import com.example.impulse.service.TtlPurgeWorker
 import com.example.impulse.service.WebTransportForegroundService
 import com.example.impulse.ui.screens.BiometricLockScreen
 import com.example.impulse.ui.screens.MainScreen
@@ -19,12 +20,10 @@ import com.example.impulse.ui.theme.ThemeSettings
 class MainActivity : FragmentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        enableEdgeToEdge()
 
         val themePreferences = ThemePreferences(applicationContext)
         ThemeSettings.initialize(themePreferences)
-
-        // Schedule the periodic 72h TTL purge of the local message store.
-        TtlPurgeWorker.schedule(applicationContext)
 
         val serverPreferences = ServerPreferences(applicationContext)
 

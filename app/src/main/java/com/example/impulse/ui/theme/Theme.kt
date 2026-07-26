@@ -5,26 +5,32 @@ import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.SideEffect
-import androidx.compose.ui.graphics.toArgb
+import androidx.compose.runtime.remember
 import androidx.compose.ui.platform.LocalView
 import androidx.core.view.WindowCompat
 
 @Composable
 fun ImpulseTheme(
-    darkTheme: Boolean = when (ThemeSettings.themeMode) {
-        ThemeMode.LIGHT -> false
-        ThemeMode.DARK -> true
-        ThemeMode.OLED -> true
-        ThemeMode.SYSTEM -> isSystemInDarkTheme()
-    },
     content: @Composable () -> Unit
 ) {
+    val isSystemDark = isSystemInDarkTheme()
+    remember(isSystemDark) { ThemeSettings.setSystemDark(isSystemDark) }
+
+    val darkTheme = when (ThemeSettings.themeMode) {
+        ThemeMode.LIGHT -> false
+        ThemeMode.DARK -> true
+        ThemeMode.SYSTEM -> isSystemDark
+    }
+
     val preset = ThemeSettings.preset
-    val palettes = ThemePalettes[preset] ?: ThemePalettes[ThemePreset.CYBER_BLUE]!!
-    val isOled = ThemeSettings.isOLEDMode
+    val palettes = ThemePalettes[preset] ?: ThemePalettes[ThemePreset.NEON]!!
+    val oled = ThemeSettings.oledEnabled && darkTheme
+    val ultraContrast = ThemeSettings.ultraContrastEnabled
 
     val colors = when {
-        isOled -> palettes.oled
+        ultraContrast && darkTheme -> palettes.ultraContrast
+        ultraContrast && !darkTheme -> palettes.lightUltraContrast
+        oled -> palettes.oled
         darkTheme -> palettes.dark
         else -> palettes.light
     }
@@ -34,8 +40,10 @@ fun ImpulseTheme(
     if (!view.isInEditMode) {
         SideEffect {
             val window = (view.context as Activity).window
-            window.statusBarColor = colorScheme.background.toArgb()
-            WindowCompat.getInsetsController(window, view).isAppearanceLightStatusBars = !darkTheme
+            WindowCompat.getInsetsController(window, view).apply {
+                isAppearanceLightStatusBars = !darkTheme
+                isAppearanceLightNavigationBars = !darkTheme
+            }
         }
     }
 

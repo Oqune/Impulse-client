@@ -3,7 +3,6 @@ package com.example.impulse
 import android.app.Application
 import android.os.Build
 import android.util.Log
-import com.example.impulse.data.ServerPreferences
 import com.example.impulse.util.CrashLog
 import com.example.impulse.util.LogManager
 import com.example.impulse.service.TtlPurgeWorker
@@ -30,10 +29,7 @@ class ImpulseApplication : Application() {
 
     override fun onCreate() {
         super.onCreate()
-        // Honour the user's persisted "Вести логи" preference so the file-logging
-        // toggle survives process restarts.
-        val loggingEnabled = ServerPreferences(this).getLoggingEnabled()
-        LogManager.init(this, BuildConfig.DEBUG, loggingEnabled)
+        LogManager.init(this, BuildConfig.DEBUG)
         CrashLog.init(this)
         TtlPurgeWorker.schedule(this)
         installGlobalCrashHandler()

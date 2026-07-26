@@ -13,7 +13,7 @@ import android.os.PowerManager
 import android.util.Log
 import androidx.core.app.NotificationCompat
 import com.example.impulse.MainActivity
-import com.example.impulse.ChatController
+import com.example.impulse.ConnectionManager
 import com.example.impulse.data.ServerConfig
 import com.example.impulse.data.ServerPreferences
 import com.example.impulse.transport.ConnectionState
@@ -37,13 +37,13 @@ class WebTransportForegroundService : Service() {
     private var wakeLock: PowerManager.WakeLock? = null
     private var job: Job? = null
     private var serverPreferences: ServerPreferences? = null
-    private var chatController: ChatController? = null
+    private var connectionManager: com.example.impulse.ConnectionManager? = null
     private var notificationManager: NotificationManager? = null
 
     override fun onCreate() {
         super.onCreate()
         serverPreferences = ServerPreferences(this)
-        chatController = ChatController.getInstance(this)
+        connectionManager = com.example.impulse.ConnectionManager.getInstance(this)
         notificationManager = getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
         createNotificationChannel()
         acquireWakeLock()
@@ -134,8 +134,8 @@ class WebTransportForegroundService : Service() {
                 ?: NameGenerator.generate()
 
             if (savedServer != null) {
-                chatController?.connect(savedServer, savedClientName)
-                chatController?.state?.collect { state ->
+                connectionManager?.connect(savedServer, savedClientName)
+                connectionManager?.getController(savedServer)?.state?.collect { state ->
                     updateConnectionNotification(state)
                 }
             } else {
@@ -145,9 +145,14 @@ class WebTransportForegroundService : Service() {
     }
 
     private fun stopConnection() {
-        chatController?.disconnect()
         job?.cancel()
-        updateConnectionNotification(ConnectionState.DISCONNECTED)
+        job = null
+        try {
+            connectionManager?.disconnectAll()
+        } catch (_: Exception) {}
+        releaseWakeLock()
+        stopForeground(STOP_FOREGROUND_REMOVE)
+        stopSelf()
     }
 
     private fun updateConnectionNotification(state: ConnectionState) {
@@ -170,16 +175,13 @@ class WebTransportForegroundService : Service() {
     }
 
     override fun onDestroy() {
-        super.onDestroy()
         job?.cancel()
-        chatController?.disconnect()
+        job = null
+        try {
+            connectionManager?.disconnectAll()
+        } catch (_: Exception) {}
         releaseWakeLock()
-        if (Build.VERSION.SDK_INT >= 34) {
-            stopForeground(android.app.Service.STOP_FOREGROUND_REMOVE)
-        } else {
-            @Suppress("DEPRECATION")
-            stopForeground(true)
-        }
+        super.onDestroy()
     }
 
     override fun onBind(intent: Intent?): IBinder? = null

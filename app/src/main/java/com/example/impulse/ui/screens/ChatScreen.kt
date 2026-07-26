@@ -1,15 +1,21 @@
 package com.example.impulse.ui.screens
 
-import android.util.Log
+import androidx.compose.animation.*
+import androidx.compose.animation.core.tween
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.automirrored.filled.Send
 import androidx.compose.material.icons.filled.KeyboardArrowDown
+import androidx.compose.material.icons.filled.Link
+import androidx.compose.material.icons.filled.LinkOff
+import androidx.compose.material.icons.filled.DeleteSweep
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.runtime.snapshotFlow
@@ -20,10 +26,10 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.viewmodel.compose.viewModel
-import com.example.impulse.ChatController
 import com.example.impulse.data.MessageRepository
 import com.example.impulse.data.ServerConfig
 import com.example.impulse.transport.ConnectionState
+import com.example.impulse.ui.theme.*
 import androidx.compose.ui.platform.LocalContext
 import kotlinx.coroutines.launch
 import java.text.SimpleDateFormat
@@ -42,7 +48,7 @@ data class ChatMessage(
     val id: String = java.util.UUID.randomUUID().toString(),
     val sender: String,
     val content: String,
-    val timestamp: String = getCurrentTime(),
+    val timestamp: String = formatTimestamp(System.currentTimeMillis()),
     val timestampMillis: Long = System.currentTimeMillis(),
     val isOwn: Boolean = false,
     val isFullWidth: Boolean = false,
@@ -50,8 +56,12 @@ data class ChatMessage(
     val senderId: Int = 0
 )
 
-fun getCurrentTime(): String {
-    return SimpleDateFormat("HH:mm", Locale.getDefault()).format(Date())
+fun formatTimestamp(millis: Long): String {
+    return if (millis > 0) {
+        "[${SimpleDateFormat("HH:mm", Locale.getDefault()).format(Date(millis))}]"
+    } else {
+        "[--:--]"
+    }
 }
 
 // ============================================================================
@@ -136,21 +146,32 @@ fun FullWidthInfoMessage(message: ChatMessage) {
 fun ConnectionStatusIndicator(connectionState: ConnectionState) {
     val statusData = when (connectionState) {
         ConnectionState.DISCONNECTED ->
-            Triple("Отключено", MaterialTheme.colorScheme.outline, MaterialTheme.colorScheme.surfaceContainerHighest)
+            Triple("[OFFLINE]", MaterialTheme.colorScheme.outline, MaterialTheme.colorScheme.surfaceContainerHighest)
         ConnectionState.CONNECTING ->
-            Triple("Подключение...", MaterialTheme.colorScheme.tertiary, MaterialTheme.colorScheme.tertiaryContainer)
+            Triple("[CONNECTING...]", MaterialTheme.colorScheme.tertiary, MaterialTheme.colorScheme.tertiaryContainer)
         ConnectionState.CONNECTED ->
-            Triple("Аутентификация...", MaterialTheme.colorScheme.tertiary, MaterialTheme.colorScheme.tertiaryContainer)
+            Triple("[AUTH...]", MaterialTheme.colorScheme.tertiary, MaterialTheme.colorScheme.tertiaryContainer)
         ConnectionState.AUTHENTICATING ->
-            Triple("Аутентификация...", MaterialTheme.colorScheme.tertiary, MaterialTheme.colorScheme.tertiaryContainer)
+            Triple("[AUTH...]", MaterialTheme.colorScheme.tertiary, MaterialTheme.colorScheme.tertiaryContainer)
         ConnectionState.AUTHENTICATED ->
-            Triple("Установка защищённого канала...", MaterialTheme.colorScheme.tertiary, MaterialTheme.colorScheme.tertiaryContainer)
+            Triple("[ESTABLISHING...]", MaterialTheme.colorScheme.tertiary, MaterialTheme.colorScheme.tertiaryContainer)
         ConnectionState.READY ->
-            Triple("Подключено (PQ-E2EE)", MaterialTheme.colorScheme.primary, MaterialTheme.colorScheme.primaryContainer)
+            Triple("[ONLINE]", MaterialTheme.colorScheme.primary, MaterialTheme.colorScheme.primaryContainer)
         ConnectionState.ERROR ->
-            Triple("Ошибка / нужен QR", MaterialTheme.colorScheme.error, MaterialTheme.colorScheme.errorContainer)
+            Triple("[ERROR]", MaterialTheme.colorScheme.error, MaterialTheme.colorScheme.errorContainer)
     }
     val (statusText, statusColor, backgroundColor) = statusData
+
+    val animatedBgColor by animateColorAsState(
+        targetValue = backgroundColor.copy(alpha = 0.2f),
+        animationSpec = tween(300),
+        label = "status_bg"
+    )
+    val animatedTextColor by animateColorAsState(
+        targetValue = statusColor,
+        animationSpec = tween(300),
+        label = "status_text"
+    )
 
     Box(
         modifier = Modifier
@@ -158,18 +179,29 @@ fun ConnectionStatusIndicator(connectionState: ConnectionState) {
             .padding(vertical = 8.dp),
         contentAlignment = Alignment.Center
     ) {
-        Text(
-            text = statusText,
-            style = MaterialTheme.typography.labelMedium,
-            color = statusColor,
-            fontWeight = FontWeight.Medium,
-            modifier = Modifier
-                .background(
-                    color = backgroundColor.copy(alpha = 0.2f),
-                    shape = RoundedCornerShape(12.dp)
-                )
-                .padding(horizontal = 16.dp, vertical = 6.dp)
-        )
+        AnimatedContent(
+            targetState = statusText,
+            transitionSpec = {
+                (fadeIn(tween(200)) + scaleIn(initialScale = 0.9f, animationSpec = tween(200)))
+                    .togetherWith(
+                    fadeOut(tween(150)) + scaleOut(targetScale = 0.9f, animationSpec = tween(150))
+                    )
+            },
+            label = "status_text_anim"
+        ) { text ->
+            Text(
+                text = text,
+                style = MaterialTheme.typography.labelMedium,
+                color = animatedTextColor,
+                fontWeight = FontWeight.Medium,
+                modifier = Modifier
+                    .background(
+                        color = animatedBgColor,
+                        shape = RoundedCornerShape(12.dp)
+                    )
+                    .padding(horizontal = 16.dp, vertical = 6.dp)
+            )
+        }
     }
 }
 
@@ -233,7 +265,8 @@ fun MessageInputArea(
 
             FloatingActionButton(
                 onClick = onSendClick,
-                modifier = Modifier.size(46.dp),
+                modifier = Modifier
+                    .size(46.dp),
                 containerColor = if (canSend) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.surfaceVariant,
                 contentColor = if (canSend) MaterialTheme.colorScheme.onPrimary else MaterialTheme.colorScheme.onSurfaceVariant,
                 elevation = FloatingActionButtonDefaults.elevation(defaultElevation = 0.dp, pressedElevation = 0.dp)
@@ -254,12 +287,17 @@ fun BoxScope.ScrollToBottomButton(
     onClick: () -> Unit,
     modifier: Modifier = Modifier
 ) {
-    if (showButton) {
+    AnimatedVisibility(
+        visible = showButton,
+        enter = scaleIn(tween(200)) + fadeIn(tween(200)),
+        exit = scaleOut(tween(150)) + fadeOut(tween(150)),
+        modifier = modifier
+            .padding(end = 16.dp, bottom = 88.dp)
+            .size(48.dp)
+    ) {
         FloatingActionButton(
             onClick = onClick,
-            modifier = modifier
-                .padding(end = 16.dp, bottom = 88.dp)
-                .size(48.dp),
+            modifier = Modifier.size(48.dp),
             containerColor = MaterialTheme.colorScheme.primary,
             contentColor = MaterialTheme.colorScheme.onPrimary,
         ) {
@@ -331,14 +369,19 @@ private fun getTimestampColor(messageType: MessageType, isOwn: Boolean, sender: 
 fun ChatScreen(
     selectedServer: ServerConfig,
     clientName: String,
+    connectionManager: com.example.impulse.ConnectionManager,
+    onBack: (() -> Unit)? = null,
     modifier: Modifier = Modifier
 ) {
     var messageInput by remember { mutableStateOf("") }
     val listState = rememberLazyListState()
     var showScrollButton by remember { mutableStateOf(false) }
+    var showClearHistoryDialog by remember { mutableStateOf(false) }
 
     val context = LocalContext.current
-    val chatController = remember { ChatController.getInstance(context) }
+    val chatController = remember(selectedServer.id) {
+        connectionManager.getController(selectedServer)
+    }
     val repo = remember { MessageRepository(context) }
     val viewModel: com.example.impulse.ui.ChatViewModel = viewModel(
         factory = com.example.impulse.ui.ChatViewModelFactory(chatController, repo, selectedServer)
@@ -347,18 +390,21 @@ fun ChatScreen(
     val decrypted by viewModel.messages.collectAsState()
     val scope = rememberCoroutineScope()
 
-    // Map decrypted messages to the display model.
     val messages = remember(decrypted) {
         decrypted.map { dm ->
             ChatMessage(
+                id = dm.serverMsgId.toString(),
                 sender = dm.sender,
                 content = dm.plaintext,
                 isOwn = dm.isOwn,
+                timestamp = formatTimestamp(dm.timestamp),
                 timestampMillis = dm.timestamp,
                 messageType = MessageType.CONTENT
             )
         }
     }
+
+    var initialScrollDone by remember { mutableStateOf(false) }
 
     val isAtBottom by remember {
         derivedStateOf {
@@ -368,8 +414,9 @@ fun ChatScreen(
     }
 
     LaunchedEffect(messages.size) {
-        if (messages.isNotEmpty() && isAtBottom) {
+        if (messages.isNotEmpty() && (!initialScrollDone || isAtBottom)) {
             listState.scrollToItem(messages.lastIndex)
+            initialScrollDone = true
         }
     }
 
@@ -385,8 +432,6 @@ fun ChatScreen(
         if (messageInput.isNotBlank()) {
             val textToSend = messageInput
             messageInput = ""
-            // Optimistic local echo; the authoritative row arrives via the
-            // reactive store (upsert keyed by server id) and replaces this copy.
             scope.launch {
                 viewModel.send(textToSend)
             }
@@ -404,6 +449,98 @@ fun ChatScreen(
                     .fillMaxSize()
                     .imePadding()
             ) {
+                // Top bar with server name, back, and connect button
+                if (onBack != null) {
+                    Surface(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .statusBarsPadding(),
+                        color = MaterialTheme.colorScheme.surface,
+                        shadowElevation = 2.dp
+                    ) {
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(horizontal = 8.dp, vertical = 8.dp),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            IconButton(onClick = { onBack() }) {
+                                Icon(
+                                    imageVector = Icons.AutoMirrored.Filled.ArrowBack,
+                                    contentDescription = "Назад"
+                                )
+                            }
+                            Column(modifier = Modifier.weight(1f)) {
+                                Text(
+                                    text = selectedServer.name,
+                                    style = MaterialTheme.typography.titleMedium,
+                                    fontWeight = FontWeight.Bold
+                                )
+                                Text(
+                                    text = selectedServer.ipAddress,
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                                )
+                            }
+                            val isDisconnected = connectionState == ConnectionState.DISCONNECTED
+                            val isError = connectionState == ConnectionState.ERROR
+                            if (isDisconnected || isError) {
+                                IconButton(
+                                    onClick = { connectionManager.connect(selectedServer, clientName) },
+                                ) {
+                                    Icon(
+                                        imageVector = Icons.Default.Link,
+                                        contentDescription = "Подключить",
+                                        tint = MaterialTheme.colorScheme.primary
+                                    )
+                                }
+                            } else if (connectionState == ConnectionState.READY) {
+                                IconButton(
+                                    onClick = { connectionManager.disconnect(selectedServer.id) },
+                                ) {
+                                    Icon(
+                                        imageVector = Icons.Default.LinkOff,
+                                        contentDescription = "Отключить",
+                                        tint = MaterialTheme.colorScheme.error
+                                    )
+                                }
+                                IconButton(
+                                    onClick = { showClearHistoryDialog = true },
+                                ) {
+                                    Icon(
+                                        imageVector = Icons.Default.DeleteSweep,
+                                        contentDescription = "Сбросить историю",
+                                        tint = MaterialTheme.colorScheme.onSurfaceVariant
+                                    )
+                                }
+                            }
+                        }
+                    }
+                }
+
+                if (showClearHistoryDialog) {
+                    AlertDialog(
+                        onDismissRequest = { showClearHistoryDialog = false },
+                        title = { Text("Сбросить историю?") },
+                        text = { Text("Локальная история сообщений будет удалена. Сервер отправит актуальную историю заново.") },
+                        confirmButton = {
+                            TextButton(onClick = {
+                                showClearHistoryDialog = false
+                                scope.launch { viewModel.clearHistory() }
+                            }) {
+                                Text("Сбросить")
+                            }
+                        },
+                        dismissButton = {
+                            TextButton(onClick = { showClearHistoryDialog = false }) {
+                                Text("Отмена")
+                            }
+                        }
+                    )
+                }
+
+                ConnectionStatusIndicator(connectionState)
+
                 LazyColumn(
                     modifier = Modifier
                         .fillMaxWidth()
@@ -414,20 +551,14 @@ fun ChatScreen(
                     verticalArrangement = Arrangement.spacedBy(4.dp)
                 ) {
                     items(messages, key = { it.id }) { message ->
-                        androidx.compose.animation.AnimatedVisibility(
-                            visible = true,
-                            enter = androidx.compose.animation.fadeIn(
-                                animationSpec = androidx.compose.animation.core.tween(200)
-                            ) + androidx.compose.animation.slideInVertically(
-                                initialOffsetY = { it / 4 }
-                            ),
-                            exit = androidx.compose.animation.fadeOut()
-                        ) {
-                            if (message.isFullWidth) FullWidthInfoMessage(message)
-                            else ChatMessageItem(message)
+                        Box(modifier = Modifier.animateItem()) {
+                            if (message.isFullWidth) {
+                                FullWidthInfoMessage(message)
+                            } else {
+                                ChatMessageItem(message)
+                            }
                         }
                     }
-                    item { ConnectionStatusIndicator(connectionState) }
                 }
 
                 MessageInputArea(
@@ -435,16 +566,14 @@ fun ChatScreen(
                     onMessageChange = { messageInput = it },
                     onSendClick = onSendClick,
                     connectionState = connectionState,
-                    canSendMessages = connectionState == ConnectionState.READY
+                    canSendMessages = true,
                 )
             }
 
             ScrollToBottomButton(
                 showButton = showScrollButton,
                 onClick = onScrollToBottom,
-                modifier = Modifier
-                    .align(Alignment.BottomEnd)
-                    .imePadding()
+                modifier = Modifier.align(Alignment.BottomEnd)
             )
         }
     }

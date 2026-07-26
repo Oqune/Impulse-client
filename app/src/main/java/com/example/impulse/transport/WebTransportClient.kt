@@ -31,6 +31,7 @@ import java.net.URI
 import com.ditchoom.buffer.Default
 import java.util.concurrent.atomic.AtomicBoolean
 import kotlin.time.Duration.Companion.seconds
+import android.os.Build
 
 class WebTransportClient(
     private val context: Context,
@@ -89,7 +90,8 @@ class WebTransportClient(
         }
         if (_state.value != ConnectionState.CONNECTED &&
             _state.value != ConnectionState.AUTHENTICATING &&
-            _state.value != ConnectionState.AUTHENTICATED
+            _state.value != ConnectionState.AUTHENTICATED &&
+            _state.value != ConnectionState.READY
         ) {
             LogManager.w(TAG, "SEND BLOCKED: wrong state=${_state.value}")
             return false
@@ -130,6 +132,14 @@ class WebTransportClient(
     private fun startSession() {
         setState(ConnectionState.CONNECTING)
         val startTime = System.currentTimeMillis()
+
+        if (isEmulator()) {
+            LogManager.e(TAG, "ABORT: WebTransport requires a physical device (QUIC native libs unavailable on x86 emulators)")
+            cancelConnectTimeout()
+            setState(ConnectionState.ERROR)
+            return
+        }
+
         LogManager.i(TAG, "connecting to $currentHost:$currentPort${currentPath} " +
             "(pinnedHashes=${serverCertHashes.size})")
         connectionJob?.cancel()
@@ -179,6 +189,11 @@ class WebTransportClient(
                 }
             } catch (e: CancellationException) {
                 throw e
+            } catch (e: ExceptionInInitializerError) {
+                if (intentionalClose.get()) return@launch
+                LogManager.e(TAG, "QUIC library init failed (missing native libs): ${e.message}", e)
+                cancelConnectTimeout()
+                setState(ConnectionState.ERROR)
             } catch (e: WebTransportException) {
                 if (intentionalClose.get()) return@launch
                 LogManager.e(TAG, "WebTransportException: ${e.message}", e)
@@ -324,6 +339,19 @@ class WebTransportClient(
     companion object {
         private const val TAG = "WebTransportClient"
         private const val CONNECT_TIMEOUT_MS = 15_000L
+
+        private fun isEmulator(): Boolean {
+            return Build.HARDWARE.contains("goldfish", ignoreCase = true) ||
+                Build.HARDWARE.contains("ranchu", ignoreCase = true) ||
+                Build.MODEL.contains("google_sdk", ignoreCase = true) ||
+                Build.MODEL.contains("Emulator", ignoreCase = true) ||
+                Build.MODEL.contains("Android SDK built for x86", ignoreCase = true) ||
+                Build.FINGERPRINT.startsWith("generic", ignoreCase = true) ||
+                Build.FINGERPRINT.startsWith("unknown", ignoreCase = true) ||
+                Build.PRODUCT.contains("sdk", ignoreCase = true) ||
+                Build.PRODUCT.contains("emulator", ignoreCase = true) ||
+                Build.PRODUCT.contains("simulator", ignoreCase = true)
+        }
 
         /** Convert a 64-char lowercase/uppercase hex SHA-256 fingerprint into a
          *  [CertificateHash] pinning the server leaf cert (DER encoding). */

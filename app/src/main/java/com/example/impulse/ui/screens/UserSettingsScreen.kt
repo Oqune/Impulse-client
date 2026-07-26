@@ -8,15 +8,18 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.Edit
-import androidx.compose.material.icons.filled.Person
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
+import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
+import com.example.impulse.security.SecureStorage
 
 @Composable
 fun UserSettingsContent(
@@ -26,6 +29,14 @@ fun UserSettingsContent(
 ) {
     var showNameDialog by remember { mutableStateOf(false) }
     var tempName by remember { mutableStateOf(clientName) }
+    val context = LocalContext.current
+    val pubKeyHash = remember {
+        val pub = SecureStorage(context).getBytes(SecureStorage.KEY_PQ_PUBLIC)
+        if (pub != null) {
+            val md = java.security.MessageDigest.getInstance("SHA-256")
+            md.digest(pub).joinToString("") { "%02x".format(it) }.take(8)
+        } else ""
+    }
 
     Column(
         modifier = modifier
@@ -75,6 +86,14 @@ fun UserSettingsContent(
                         fontWeight = FontWeight.Bold,
                         color = MaterialTheme.colorScheme.onPrimaryContainer
                     )
+                    if (pubKeyHash.isNotEmpty()) {
+                        Text(
+                            text = pubKeyHash,
+                            style = MaterialTheme.typography.labelSmall,
+                            fontFamily = FontFamily.Monospace,
+                            color = MaterialTheme.colorScheme.onPrimaryContainer.copy(alpha = 0.5f)
+                        )
+                    }
                 }
             }
         }
@@ -99,8 +118,19 @@ fun UserSettingsContent(
                 Text(
                     text = clientName,
                     style = MaterialTheme.typography.bodyLarge,
-                    modifier = Modifier.padding(bottom = 12.dp)
+                    modifier = Modifier.padding(bottom = 4.dp)
                 )
+                if (pubKeyHash.isNotEmpty()) {
+                    Text(
+                        text = pubKeyHash,
+                        style = MaterialTheme.typography.labelSmall,
+                        fontFamily = FontFamily.Monospace,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        modifier = Modifier.padding(bottom = 12.dp)
+                    )
+                } else {
+                    Spacer(Modifier.height(12.dp))
+                }
 
                 Button(
                     onClick = {

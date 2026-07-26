@@ -1,10 +1,15 @@
 package com.example.impulse.ui.screens
 
-import android.widget.Toast
+import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.expandVertically
+import androidx.compose.animation.shrinkVertically
+import androidx.compose.foundation.BorderStroke
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
@@ -14,11 +19,16 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.text.font.FontFamily
+import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
+import com.example.impulse.ConnectionManager
 import com.example.impulse.data.ServerConfig
+import com.example.impulse.data.ServerPreferences
+import com.example.impulse.transport.ConnectionState
 import com.example.impulse.ui.theme.*
-import com.example.impulse.util.LogManager
-import kotlinx.coroutines.delay
 
 enum class SettingsSection {
     MAIN, SERVER, USER, APP
@@ -34,38 +44,45 @@ fun SettingsScreen(
     clientName: String,
     onClientNameChange: (String) -> Unit,
     availableServers: List<ServerConfig> = ServerConfig.builtInServers,
-    onServerDeleted: (ServerConfig) -> Unit = {}
+    onServerAdded: (ServerConfig) -> Unit = {},
+    onServerDeleted: (ServerConfig) -> Unit = {},
+    onVisibilityChanged: () -> Unit = {},
+    connectionManager: ConnectionManager? = null,
+    onScanQr: (ServerConfig) -> Unit = {},
 ) {
     val context = LocalContext.current
     var currentSection by remember { mutableStateOf(SettingsSection.MAIN) }
-    var showLogs by remember { mutableStateOf(false) }
+    var showAddServerDialog by remember { mutableStateOf(false) }
 
     fun goBack() {
-        when {
-            showLogs -> showLogs = false
-            currentSection != SettingsSection.MAIN -> currentSection = SettingsSection.MAIN
-        }
+        if (currentSection != SettingsSection.MAIN) currentSection = SettingsSection.MAIN
     }
 
-    val title = when {
-        showLogs -> "Логи"
-        currentSection == SettingsSection.SERVER -> "Сервер"
-        currentSection == SettingsSection.USER -> "Профиль"
-        currentSection == SettingsSection.APP -> "Приложение"
+    val title = when (currentSection) {
+        SettingsSection.SERVER -> "Серверы"
+        SettingsSection.USER -> "Профиль"
+        SettingsSection.APP -> "Приложение"
         else -> "Настройки"
     }
 
-    val showBack = currentSection != SettingsSection.MAIN || showLogs
+    val showBack = currentSection != SettingsSection.MAIN
 
     Box(modifier = modifier) {
         Scaffold(
             topBar = {
                 TopAppBar(
-                    title = { Text(title) },
+                    title = { Text(title, fontWeight = FontWeight.SemiBold) },
                     navigationIcon = {
                         if (showBack) {
                             IconButton(onClick = { goBack() }) {
                                 Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Назад")
+                            }
+                        }
+                    },
+                    actions = {
+                        if (currentSection == SettingsSection.SERVER) {
+                            IconButton(onClick = { showAddServerDialog = true }) {
+                                Icon(Icons.Default.Add, contentDescription = "Добавить сервер")
                             }
                         }
                     },
@@ -75,51 +92,162 @@ fun SettingsScreen(
                 )
             }
         ) { padding ->
-            if (showLogs) {
-                LogsContent(
-                    modifier = Modifier
-                        .fillMaxSize()
-                        .padding(padding)
+            when (currentSection) {
+                SettingsSection.MAIN -> {
+                    SettingsMainContent(
+                        modifier = Modifier
+                            .fillMaxSize()
+                            .padding(padding),
+                        onNavigateToServer = { currentSection = SettingsSection.SERVER },
+                        onNavigateToUser = { currentSection = SettingsSection.USER },
+                        onNavigateToApp = { currentSection = SettingsSection.APP },
+                    )
+                }
+                SettingsSection.SERVER -> {
+                    ServerListContent(
+                        modifier = Modifier
+                            .fillMaxSize()
+                            .padding(padding),
+                        availableServers = availableServers,
+                        connectionManager = connectionManager,
+                        onVisibilityChanged = onVisibilityChanged,
+                        onServerDeleted = onServerDeleted,
+                        onScanQr = onScanQr,
+                    )
+                }
+                SettingsSection.USER -> {
+                    UserSettingsContent(
+                        modifier = Modifier
+                            .fillMaxSize()
+                            .padding(padding),
+                        clientName = clientName,
+                        onClientNameChange = onClientNameChange
+                    )
+                }
+                SettingsSection.APP -> {
+                    AppSettingsContent(
+                        modifier = Modifier
+                            .fillMaxSize()
+                            .padding(padding)
+                    )
+                }
+            }
+        }
+
+        if (showAddServerDialog) {
+            AddServerDialog(
+                onDismiss = { showAddServerDialog = false },
+                onAdd = { server ->
+                    onServerAdded(server)
+                    showAddServerDialog = false
+                }
+            )
+        }
+    }
+}
+
+// ============================================================================
+// SERVER LIST — expandable per-server settings
+// ============================================================================
+
+@Composable
+private fun ServerListContent(
+    modifier: Modifier = Modifier,
+    availableServers: List<ServerConfig>,
+    connectionManager: ConnectionManager?,
+    onVisibilityChanged: () -> Unit,
+    onServerDeleted: (ServerConfig) -> Unit,
+    onScanQr: (ServerConfig) -> Unit = {},
+) {
+    val context = LocalContext.current
+    val serverPreferences = remember { ServerPreferences(context) }
+    val serverStates by connectionManager?.serverStates?.collectAsState() ?: remember { mutableStateOf(emptyMap<String, ConnectionManager.ServerStatus>()) }
+    var expandedServerId by remember { mutableStateOf<String?>(null) }
+
+    LazyColumn(
+        modifier = modifier.padding(horizontal = 16.dp),
+        verticalArrangement = Arrangement.spacedBy(8.dp),
+        contentPadding = PaddingValues(vertical = 12.dp)
+    ) {
+        items(availableServers, key = { it.id }) { server ->
+            val status = serverStates[server.id]
+            val isConnected = status?.state == ConnectionState.READY
+            val isConnecting = status?.state in listOf(
+                ConnectionState.CONNECTING, ConnectionState.CONNECTED,
+                ConnectionState.AUTHENTICATING, ConnectionState.AUTHENTICATED
+            )
+            val hasError = status?.state == ConnectionState.ERROR
+            val isExpanded = expandedServerId == server.id
+
+            Card(
+                modifier = Modifier.fillMaxWidth(),
+                shape = CardShape,
+                colors = CardDefaults.cardColors(
+                    containerColor = MaterialTheme.colorScheme.surfaceContainerHigh
                 )
-            } else {
-                when (currentSection) {
-                    SettingsSection.MAIN -> {
-                        SettingsMainContent(
-                            modifier = Modifier
-                                .fillMaxSize()
-                                .padding(padding),
-                            onNavigateToServer = { currentSection = SettingsSection.SERVER },
-                            onNavigateToUser = { currentSection = SettingsSection.USER },
-                            onNavigateToApp = { currentSection = SettingsSection.APP },
-                            onShowLogs = { showLogs = true },
+            ) {
+                Column {
+                    // Server header — tap to expand
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clickable {
+                                expandedServerId = if (isExpanded) null else server.id
+                            }
+                            .padding(16.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        StatusDot(
+                            color = when {
+                                isConnected -> MaterialTheme.colorScheme.primary
+                                isConnecting -> MaterialTheme.colorScheme.tertiary
+                                hasError -> MaterialTheme.colorScheme.error
+                                else -> MaterialTheme.colorScheme.outline
+                            },
+                            size = 10.dp,
+                        )
+
+                        Spacer(Modifier.width(12.dp))
+
+                        Column(modifier = Modifier.weight(1f)) {
+                            Text(
+                                text = server.name,
+                                style = MaterialTheme.typography.bodyLarge,
+                                fontWeight = FontWeight.Medium,
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis
+                            )
+                            Text(
+                                text = server.ipAddress,
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                        }
+
+                        Icon(
+                            if (isExpanded) Icons.Default.KeyboardArrowUp else Icons.Default.KeyboardArrowDown,
+                            contentDescription = null,
+                            tint = MaterialTheme.colorScheme.onSurfaceVariant
                         )
                     }
-                    SettingsSection.SERVER -> {
-                        ServerSettingsContent(
-                            modifier = Modifier
-                                .fillMaxSize()
-                                .padding(padding),
-                            selectedServer = selectedServer,
-                            onServerSelected = onServerSelected,
-                            availableServers = availableServers,
+
+                    // Expanded settings
+                    AnimatedVisibility(
+                        visible = isExpanded,
+                        enter = expandVertically(),
+                        exit = shrinkVertically()
+                    ) {
+                        ServerExpandableSettings(
+                            server = server,
+                            connectionManager = connectionManager,
+                            serverPreferences = serverPreferences,
+                            onVisibilityChanged = onVisibilityChanged,
                             onServerDeleted = onServerDeleted,
-                            onServerUpdated = onServerUpdated
-                        )
-                    }
-                    SettingsSection.USER -> {
-                        UserSettingsContent(
-                            modifier = Modifier
-                                .fillMaxSize()
-                                .padding(padding),
-                            clientName = clientName,
-                            onClientNameChange = onClientNameChange
-                        )
-                    }
-                    SettingsSection.APP -> {
-                        AppSettingsContent(
-                            modifier = Modifier
-                                .fillMaxSize()
-                                .padding(padding)
+                            onScanQr = onScanQr,
+                            onServerUpdated = { updated ->
+                                serverPreferences.updateCustomServer(updated)
+                            },
+                            modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp)
                         )
                     }
                 }
@@ -129,12 +257,392 @@ fun SettingsScreen(
 }
 
 @Composable
+private fun ServerExpandableSettings(
+    server: ServerConfig,
+    connectionManager: ConnectionManager?,
+    serverPreferences: ServerPreferences,
+    onVisibilityChanged: () -> Unit,
+    onServerDeleted: (ServerConfig) -> Unit,
+    onScanQr: (ServerConfig) -> Unit = {},
+    onServerUpdated: ((ServerConfig) -> Unit)? = null,
+    modifier: Modifier = Modifier,
+) {
+    val context = LocalContext.current
+    val certManager = remember { com.example.impulse.security.TrustedCertManager(context) }
+    var certVersion by remember { mutableIntStateOf(0) }
+
+    var autoConnect by remember(server.id) {
+        mutableStateOf(serverPreferences.getServerAutoConnect(server.id))
+    }
+    var autoReconnect by remember(server.id) {
+        mutableStateOf(serverPreferences.getServerAutoReconnect(server.id))
+    }
+    var isServerVisible by remember(server.id) {
+        mutableStateOf(serverPreferences.isServerVisible(server.id))
+    }
+
+    val isCustom = !server.id.startsWith("prod_") && !server.id.startsWith("local_")
+    var editName by remember(server.id) { mutableStateOf(server.name) }
+    var editAddress by remember(server.id) { mutableStateOf(server.ipAddress) }
+    var editPort by remember(server.id) { mutableStateOf(server.port.toString()) }
+    var editPassword by remember(server.id) { mutableStateOf(server.password) }
+    var addressError by remember(server.id) { mutableStateOf(false) }
+    var portError by remember(server.id) { mutableStateOf(false) }
+
+    val connectionState = if (connectionManager != null) {
+        val ctrl = connectionManager.getControllerOrNull(server.id)
+        ctrl?.state?.collectAsState()?.value ?: ConnectionState.DISCONNECTED
+    } else {
+        ConnectionState.DISCONNECTED
+    }
+
+    val certInfos = remember(server.id, certVersion) { certManager.getCertInfos(server.id) }
+    val isCertTrusted = remember(server.id, certVersion) { certManager.isTrusted(server.id) }
+
+    var certSectionOpen by remember { mutableStateOf(false) }
+    var connSectionOpen by remember { mutableStateOf(false) }
+    var addrSectionOpen by remember { mutableStateOf(false) }
+
+    Column(
+        modifier = modifier.fillMaxWidth(),
+        verticalArrangement = Arrangement.spacedBy(4.dp)
+    ) {
+        HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.3f))
+
+        // ── Section: Сертификаты ──
+        Column {
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .clickable { certSectionOpen = !certSectionOpen }
+                    .padding(vertical = 10.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Icon(
+                    if (isCertTrusted) Icons.Default.Shield else Icons.Default.Security,
+                    contentDescription = null,
+                    tint = if (isCertTrusted) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier.size(18.dp),
+                )
+                Spacer(Modifier.width(10.dp))
+                Text("Сертификаты", style = MaterialTheme.typography.bodyMedium, modifier = Modifier.weight(1f))
+                if (!isCertTrusted) {
+                    Surface(
+                        shape = RoundedCornerShape(6.dp),
+                        color = MaterialTheme.colorScheme.error.copy(alpha = 0.1f),
+                    ) {
+                        Text(
+                            "Нет",
+                            modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp),
+                            style = MaterialTheme.typography.labelSmall,
+                            color = MaterialTheme.colorScheme.error,
+                        )
+                    }
+                }
+                Spacer(Modifier.width(6.dp))
+                Icon(
+                    if (certSectionOpen) Icons.Default.KeyboardArrowUp else Icons.Default.KeyboardArrowDown,
+                    contentDescription = null,
+                    tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier.size(18.dp),
+                )
+            }
+            AnimatedVisibility(visible = certSectionOpen, enter = expandVertically(), exit = shrinkVertically()) {
+                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    // QR Scan button
+                    OutlinedButton(
+                        onClick = { onScanQr(server) },
+                        modifier = Modifier.fillMaxWidth(),
+                        shape = RoundedCornerShape(12.dp),
+                    ) {
+                        Icon(Icons.Default.QrCodeScanner, contentDescription = null, modifier = Modifier.size(16.dp))
+                        Spacer(Modifier.width(6.dp))
+                        Text("Сканировать QR-код", style = MaterialTheme.typography.labelMedium)
+                    }
+
+                    // Cert info
+                    if (certInfos.isNotEmpty()) {
+                        certInfos.forEach { info ->
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                verticalAlignment = Alignment.CenterVertically,
+                            ) {
+                                    Icon(
+                                        Icons.Default.Lock,
+                                        contentDescription = null,
+                                        tint = MaterialTheme.colorScheme.primary,
+                                        modifier = Modifier.size(14.dp),
+                                    )
+                                    Spacer(Modifier.width(8.dp))
+                                    Column(modifier = Modifier.weight(1f)) {
+                                        Text(
+                                            info.sha256Hex.take(20) + "...",
+                                            style = MaterialTheme.typography.labelSmall,
+                                            fontFamily = FontFamily.Monospace,
+                                            fontSize = 10.sp,
+                                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                        )
+                                        Text(
+                                            "Добавлен: ${java.text.SimpleDateFormat("dd.MM.yy HH:mm", java.util.Locale.getDefault()).format(java.util.Date(info.issuedAt))}",
+                                            style = MaterialTheme.typography.labelSmall,
+                                            fontSize = 9.sp,
+                                            color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.6f),
+                                        )
+                                    }
+                                    ShieldBadge(
+                                        text = "OK",
+                                        color = MaterialTheme.colorScheme.primary,
+                                    )
+                            }
+                        }
+                        // Forget button
+                        Text(
+                            "Удалить все сертификаты",
+                            style = MaterialTheme.typography.labelMedium,
+                            color = MaterialTheme.colorScheme.error,
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .clickable {
+                                    certManager.forget(server.id)
+                                    certVersion++
+                                }
+                                .padding(vertical = 4.dp)
+                        )
+                    } else {
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Icon(Icons.Default.Lock, contentDescription = null, tint = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.size(14.dp))
+                            Spacer(Modifier.width(8.dp))
+                            Text("Нет сертификатов. Отсканируйте QR-код с сервера.", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    }
+                }
+        }
+        }
+        }
+
+        // ── Section: Подключение и отображение ──
+        Column {
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .clickable { connSectionOpen = !connSectionOpen }
+                    .padding(vertical = 10.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Icon(
+                    Icons.Default.Link,
+                    contentDescription = null,
+                    tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier.size(18.dp),
+                )
+                Spacer(Modifier.width(10.dp))
+                Column(modifier = Modifier.weight(1f)) {
+                    Text("Подключение и отображение", style = MaterialTheme.typography.bodyMedium)
+                    Text(
+                        when {
+                            connectionState == ConnectionState.READY -> "Подключено"
+                            connectionState == ConnectionState.CONNECTING ||
+                            connectionState == ConnectionState.AUTHENTICATING ||
+                            connectionState == ConnectionState.AUTHENTICATED -> "Подключение..."
+                            connectionState == ConnectionState.ERROR -> "Ошибка"
+                            else -> "Отключено"
+                        },
+                        style = MaterialTheme.typography.labelSmall,
+                        color = when {
+                            connectionState == ConnectionState.READY -> MaterialTheme.colorScheme.primary
+                            connectionState == ConnectionState.ERROR -> MaterialTheme.colorScheme.error
+                            else -> MaterialTheme.colorScheme.onSurfaceVariant
+                        },
+                    )
+                }
+                Icon(
+                    if (connSectionOpen) Icons.Default.KeyboardArrowUp else Icons.Default.KeyboardArrowDown,
+                    contentDescription = null,
+                    tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier.size(18.dp),
+                )
+            }
+            AnimatedVisibility(visible = connSectionOpen, enter = expandVertically(), exit = shrinkVertically()) {
+                Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                    // Connect/disconnect
+                    if (connectionManager != null) {
+                        val isConnected = connectionState == ConnectionState.READY
+                        OutlinedButton(
+                            onClick = {
+                                if (isConnected) {
+                                    connectionManager.disconnect(server.id)
+                                } else {
+                                    connectionManager.connect(server, connectionManager.getController(server).clientName)
+                                }
+                            },
+                            modifier = Modifier.fillMaxWidth(),
+                            shape = RoundedCornerShape(12.dp)
+                        ) {
+                            Icon(
+                                if (isConnected) Icons.Default.LinkOff else Icons.Default.Link,
+                                contentDescription = null,
+                                modifier = Modifier.size(16.dp)
+                            )
+                            Spacer(Modifier.width(6.dp))
+                            Text(if (isConnected) "Отключить" else "Подключить", style = MaterialTheme.typography.labelMedium)
+                        }
+                    }
+
+                    ImpulseToggle(
+                        title = "Автоподключение",
+                        description = "Подключаться при запуске",
+                        checked = autoConnect,
+                        onCheckedChange = { enabled ->
+                            autoConnect = enabled
+                            serverPreferences.setServerAutoConnect(server.id, enabled)
+                        }
+                    )
+
+                    ImpulseToggle(
+                        title = "Автопереподключение",
+                        description = "Переподключаться при обрыве",
+                        checked = autoReconnect,
+                        onCheckedChange = { enabled ->
+                            autoReconnect = enabled
+                            serverPreferences.setServerAutoReconnect(server.id, enabled)
+                            connectionManager?.setServerAutoReconnect(server.id, enabled)
+                        }
+                    )
+
+                    HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.3f))
+
+                    ImpulseToggle(
+                        title = "Показывать в чатах",
+                        description = "Отображать в списке чатов",
+                        checked = isServerVisible,
+                        onCheckedChange = { enabled ->
+                            isServerVisible = enabled
+                            serverPreferences.setServerVisible(server.id, enabled)
+                            onVisibilityChanged()
+                        }
+                    )
+                }
+            }
+        }
+
+        // ── Section: Адрес и конфиг ──
+        if (isCustom && onServerUpdated != null) {
+            Column {
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .clickable { addrSectionOpen = !addrSectionOpen }
+                        .padding(vertical = 10.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Icon(
+                        Icons.Default.Settings,
+                        contentDescription = null,
+                        tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                        modifier = Modifier.size(18.dp),
+                    )
+                    Spacer(Modifier.width(10.dp))
+                    Text("Адрес и конфигурация", style = MaterialTheme.typography.bodyMedium, modifier = Modifier.weight(1f))
+                    Icon(
+                        if (addrSectionOpen) Icons.Default.KeyboardArrowUp else Icons.Default.KeyboardArrowDown,
+                        contentDescription = null,
+                        tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                        modifier = Modifier.size(18.dp),
+                    )
+                }
+                AnimatedVisibility(visible = addrSectionOpen, enter = expandVertically(), exit = shrinkVertically()) {
+                    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                        OutlinedTextField(
+                            value = editName,
+                            onValueChange = { editName = it },
+                            label = { Text("Название") },
+                            singleLine = true,
+                            modifier = Modifier.fillMaxWidth(),
+                            shape = RoundedCornerShape(12.dp),
+                            textStyle = MaterialTheme.typography.bodyMedium,
+                        )
+                        OutlinedTextField(
+                            value = editAddress,
+                            onValueChange = { editAddress = it; addressError = false },
+                            label = { Text("IP / Домен") },
+                            singleLine = true,
+                            modifier = Modifier.fillMaxWidth(),
+                            shape = RoundedCornerShape(12.dp),
+                            textStyle = MaterialTheme.typography.bodyMedium,
+                            isError = addressError,
+                            supportingText = if (addressError) {{ Text("Неверный формат") }} else null,
+                        )
+                        OutlinedTextField(
+                            value = editPort,
+                            onValueChange = { editPort = it.filter { c -> c.isDigit() }; portError = false },
+                            label = { Text("Порт") },
+                            singleLine = true,
+                            modifier = Modifier.fillMaxWidth(),
+                            shape = RoundedCornerShape(12.dp),
+                            textStyle = MaterialTheme.typography.bodyMedium,
+                            isError = portError,
+                            supportingText = if (portError) {{ Text("1-65535") }} else null,
+                        )
+                        OutlinedTextField(
+                            value = editPassword,
+                            onValueChange = { editPassword = it },
+                            label = { Text("Пароль (опционально)") },
+                            singleLine = true,
+                            modifier = Modifier.fillMaxWidth(),
+                            shape = RoundedCornerShape(12.dp),
+                            textStyle = MaterialTheme.typography.bodyMedium,
+                        )
+                        OutlinedButton(
+                            onClick = {
+                                val portInt = editPort.toIntOrNull()
+                                addressError = editAddress.isBlank()
+                                portError = portInt == null || portInt !in 1..65535
+                                if (!addressError && !portError && editName.isNotBlank()) {
+                                    val updated = server.copy(
+                                        name = editName.trim(),
+                                        ipAddress = editAddress.trim(),
+                                        port = portInt!!,
+                                        password = editPassword.trim()
+                                    )
+                                    onServerUpdated(updated)
+                                }
+                            },
+                            modifier = Modifier.fillMaxWidth(),
+                            shape = RoundedCornerShape(12.dp)
+                        ) {
+                            Text("Сохранить")
+                        }
+
+                        HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.3f))
+
+                        Text(
+                            "Удалить сервер",
+                            style = MaterialTheme.typography.bodyMedium,
+                            color = MaterialTheme.colorScheme.error,
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .clickable {
+                                    onServerDeleted(server)
+                                    onVisibilityChanged()
+                                }
+                                .padding(vertical = 4.dp)
+                        )
+                    }
+                }
+            }
+        }
+    }
+}
+
+// ============================================================================
+// MAIN SETTINGS
+// ============================================================================
+
+@Composable
 private fun SettingsMainContent(
     modifier: Modifier = Modifier,
     onNavigateToServer: () -> Unit,
     onNavigateToUser: () -> Unit,
     onNavigateToApp: () -> Unit,
-    onShowLogs: () -> Unit,
 ) {
     DecorativeBackground(
         modifier = modifier,
@@ -143,20 +651,22 @@ private fun SettingsMainContent(
         Column(
             modifier = Modifier
                 .fillMaxWidth()
-                .padding(horizontal = 20.dp)
+                .padding(horizontal = 20.dp, vertical = 24.dp)
                 .verticalScroll(rememberScrollState()),
             horizontalAlignment = Alignment.CenterHorizontally,
             verticalArrangement = Arrangement.spacedBy(14.dp)
         ) {
-            Spacer(Modifier.height(8.dp))
 
             Text(
                 text = "Настройки",
-                style = MaterialTheme.typography.headlineMedium
+                style = MaterialTheme.typography.headlineMedium,
+                fontWeight = FontWeight.Bold,
+                textAlign = androidx.compose.ui.text.style.TextAlign.Center,
+                modifier = Modifier.fillMaxWidth()
             )
 
             ImpulseMenuCard(
-                title = "Сервер",
+                title = "Серверы",
                 icon = Icons.Default.Build,
                 onClick = onNavigateToServer
             )
@@ -172,125 +682,90 @@ private fun SettingsMainContent(
                 icon = Icons.Default.Settings,
                 onClick = onNavigateToApp
             )
-
-            OutlinedButton(
-                onClick = onShowLogs,
-                modifier = Modifier.fillMaxWidth(),
-                shape = ButtonShape,
-            ) {
-                Icon(Icons.Default.Info, contentDescription = null)
-                Spacer(Modifier.width(8.dp))
-                Text("Логи")
-            }
         }
     }
 }
 
+// ============================================================================
+// ADD SERVER DIALOG
+// ============================================================================
+
 @Composable
-private fun LogsContent(
-    modifier: Modifier = Modifier,
+private fun AddServerDialog(
+    onDismiss: () -> Unit,
+    onAdd: (ServerConfig) -> Unit,
 ) {
-    val context = LocalContext.current
-    var filter by remember { mutableStateOf("ALL") }
-    var allLogs by remember { mutableStateOf<List<String>>(emptyList()) }
-    var lastRefreshVersion by remember { mutableIntStateOf(0) }
+    var name by remember { mutableStateOf("") }
+    var address by remember { mutableStateOf("") }
+    var port by remember { mutableStateOf("4433") }
+    var password by remember { mutableStateOf("") }
+    var addressError by remember { mutableStateOf(false) }
+    var portError by remember { mutableStateOf(false) }
 
-    LaunchedEffect(Unit) {
-        while (true) {
-            allLogs = LogManager.readLast(1000)
-            lastRefreshVersion++
-            delay(1000L)
-        }
-    }
-    val filtered = remember(filter, allLogs) {
-        if (filter == "ALL") allLogs else allLogs.filter { it.contains("[$filter]") }
-    }
-
-    fun minimalLine(raw: String): String {
-        val timeMatch = Regex("""\[(\d{2}:\d{2}:\d{2})""").find(raw)
-        val time = timeMatch?.groupValues?.get(1) ?: ""
-        val level = when {
-            raw.contains("[ERROR]") -> "ERR"
-            raw.contains("[WARN]")  -> "WRN"
-            raw.contains("[INFO]")  -> "INF"
-            raw.contains("[DEBUG]") -> "DBG"
-            else -> ""
-        }
-        val msgStart = raw.indexOf("]", raw.indexOf("]", raw.indexOf("]") + 1) + 1)
-        val msg = if (msgStart > 0) raw.substring(msgStart + 1).trim() else raw
-        return if (time.isNotEmpty()) "$time $level  $msg" else msg
-    }
-
-    Column(modifier = modifier.padding(horizontal = 16.dp)) {
-        // Header row: filters + actions
-        ImpulseCard(modifier = Modifier.padding(bottom = 12.dp)) {
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                verticalAlignment = Alignment.CenterVertically,
-            ) {
-                listOf("ALL", "ERROR", "WARN", "INFO").forEach { level ->
-                    FilterChip(
-                        selected = filter == level,
-                        onClick = { filter = level },
-                        label = { Text(level, style = MaterialTheme.typography.labelSmall) },
-                        shape = ChipShape,
-                    )
-                }
-                Spacer(Modifier.weight(1f))
-                ImpulseIconButton(
-                    icon = Icons.Default.Share,
-                    contentDescription = "Экспорт",
-                    onClick = {
-                        val fileName = LogManager.exportToDownloads(context)
-                        Toast.makeText(
-                            context,
-                            if (fileName != null) "Экспорт: $fileName" else "Нет записей",
-                            Toast.LENGTH_SHORT
-                        ).show()
-                    },
-                    tint = MaterialTheme.colorScheme.primary,
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("Новый сервер") },
+        text = {
+            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                OutlinedTextField(
+                    value = name,
+                    onValueChange = { name = it },
+                    label = { Text("Название") },
+                    singleLine = true,
+                    modifier = Modifier.fillMaxWidth(),
+                    shape = RoundedCornerShape(12.dp),
                 )
-                ImpulseIconButton(
-                    icon = Icons.Default.Delete,
-                    contentDescription = "Очистить",
-                    onClick = {
-                        LogManager.clear()
-                        Toast.makeText(context, "Логи очищены", Toast.LENGTH_SHORT).show()
-                    },
-                    tint = MaterialTheme.colorScheme.error,
+                OutlinedTextField(
+                    value = address,
+                    onValueChange = { address = it; addressError = false },
+                    label = { Text("IP / Домен") },
+                    singleLine = true,
+                    modifier = Modifier.fillMaxWidth(),
+                    shape = RoundedCornerShape(12.dp),
+                    isError = addressError,
+                    supportingText = if (addressError) {{ Text("Неверный формат") }} else null,
+                )
+                OutlinedTextField(
+                    value = port,
+                    onValueChange = { port = it.filter { c -> c.isDigit() }; portError = false },
+                    label = { Text("Порт") },
+                    singleLine = true,
+                    modifier = Modifier.fillMaxWidth(),
+                    shape = RoundedCornerShape(12.dp),
+                    isError = portError,
+                    supportingText = if (portError) {{ Text("1-65535") }} else null,
+                )
+                OutlinedTextField(
+                    value = password,
+                    onValueChange = { password = it },
+                    label = { Text("Пароль (опционально)") },
+                    singleLine = true,
+                    modifier = Modifier.fillMaxWidth(),
+                    shape = RoundedCornerShape(12.dp),
                 )
             }
-        }
-
-        // Log list
-        ImpulseCard(modifier = Modifier.weight(1f)) {
-            if (filtered.isEmpty()) {
-                Box(
-                    modifier = Modifier.fillMaxSize(),
-                    contentAlignment = Alignment.Center
-                ) {
-                    Text(
-                        "Нет записей",
-                        style = MaterialTheme.typography.bodyMedium,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant
-                    )
+        },
+        confirmButton = {
+            TextButton(onClick = {
+                val portInt = port.toIntOrNull()
+                addressError = address.isBlank()
+                portError = portInt == null || portInt !in 1..65535
+                if (!addressError && !portError && name.isNotBlank()) {
+                    onAdd(ServerConfig(
+                        name = name.trim(),
+                        ipAddress = address.trim(),
+                        port = portInt!!,
+                        description = "",
+                        password = password.trim(),
+                    ))
                 }
-            } else {
-                LazyColumn(
-                    modifier = Modifier.fillMaxSize(),
-                    contentPadding = PaddingValues(vertical = 4.dp)
-                ) {
-                    items(filtered) { line ->
-                        val color = when {
-                            line.contains("[ERROR]") -> MaterialTheme.colorScheme.error
-                            line.contains("[WARN]")  -> MaterialTheme.colorScheme.tertiary
-                            line.contains("[INFO]")  -> MaterialTheme.colorScheme.primary
-                            else -> MaterialTheme.colorScheme.onSurfaceVariant
-                        }
-                        ImpulseLogLine(text = minimalLine(line), color = color)
-                    }
-                }
+            }) {
+                Text("Добавить")
             }
-        }
-    }
+        },
+        dismissButton = {
+            TextButton(onClick = onDismiss) { Text("Отмена") }
+        },
+        shape = RoundedCornerShape(16.dp),
+    )
 }

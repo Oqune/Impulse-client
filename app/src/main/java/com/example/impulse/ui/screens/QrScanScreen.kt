@@ -24,14 +24,10 @@ import android.view.Surface
 import android.view.TextureView
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
-import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.core.*
-import androidx.compose.animation.fadeIn
-import androidx.compose.animation.fadeOut
-import androidx.compose.animation.scaleIn
-import androidx.compose.animation.scaleOut
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -42,19 +38,18 @@ import androidx.compose.material.icons.filled.CheckCircle
 import androidx.compose.material.icons.filled.ContentPaste
 import androidx.compose.material.icons.filled.FlashlightOff
 import androidx.compose.material.icons.filled.FlashlightOn
+import androidx.compose.material.icons.filled.Link
+import androidx.compose.material.icons.filled.LinkOff
 import androidx.compose.material3.*
-import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
-import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.drawscope.Stroke
-import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.text.font.FontWeight
@@ -63,6 +58,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.viewinterop.AndroidView
 import androidx.core.content.ContextCompat
+import com.example.impulse.ui.theme.*
 import com.example.impulse.util.LogManager
 import com.google.mlkit.vision.barcode.BarcodeScanning
 import com.google.mlkit.vision.barcode.BarcodeScanner
@@ -74,21 +70,6 @@ import java.util.concurrent.Executors
 import java.util.concurrent.Semaphore
 import kotlin.math.abs
 
-/**
- * QR-code scanning screen used for TOFU: the server displays a QR encoding its
- * certificate hash; scanning it stores the hash in [com.example.impulse.security.TrustedCertManager]
- * so the WebTransport layer can pin it.
- *
- * Expected QR payload format: `impulse-cert:<hex-sha256-hash>`
- *
- * Uses the framework Camera2 API for the camera preview (no CameraX, so the APK
- * does not bundle CameraX's unaligned native library) together with the
- * standalone ML Kit Barcode library for decoding.
- *
- * UI: a Fluent / Material 3 layout with a gradient hero header, a centered
- * square scanner with an animated reticle, a status line, and a bottom control
- * bar (flashlight + manual entry with clipboard paste and live validation).
- */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun QrScanScreen(
@@ -107,10 +88,9 @@ fun QrScanScreen(
     var torchOn by remember { mutableStateOf(false) }
     var showManualEntry by remember { mutableStateOf(false) }
     var manualHash by remember { mutableStateOf("") }
+    var scanError by remember { mutableStateOf<String?>(null) }
     var manualError by remember { mutableStateOf<String?>(null) }
-    // Live validation state for the manual entry field.
     val manualValid = remember(manualHash) { parseCertHash(manualHash) != null }
-    // Holds the active camera controller so the flashlight button can reach it.
     var activeController by remember { mutableStateOf<Camera2Controller?>(null) }
 
     val permissionLauncher = rememberLauncherForActivityResult(
@@ -124,248 +104,255 @@ fun QrScanScreen(
     Scaffold(
         topBar = {
             TopAppBar(
-                title = { Text("Подключение к серверу") },
+                title = { },
                 navigationIcon = {
                     IconButton(onClick = onBack) {
                         Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Назад")
                     }
                 },
                 colors = TopAppBarDefaults.topAppBarColors(
-                    containerColor = MaterialTheme.colorScheme.surface
+                    containerColor = Color.Transparent
                 )
             )
         },
         containerColor = MaterialTheme.colorScheme.background
     ) { padding ->
-        Column(
+        Box(
             modifier = Modifier
                 .fillMaxSize()
                 .padding(padding)
-                .navigationBarsPadding()
+                .navigationBarsPadding(),
+            contentAlignment = Alignment.Center,
         ) {
-            // ---- Top hero (≈30%): gradient background, logo, instruction ----
-            Box(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .weight(0.3f)
-                    .background(
-                        Brush.verticalGradient(
-                            listOf(
-                                MaterialTheme.colorScheme.primary.copy(alpha = 0.22f),
-                                MaterialTheme.colorScheme.primary.copy(alpha = 0.05f)
-                            )
-                        )
-                    )
-                    .padding(24.dp),
-                contentAlignment = Alignment.Center
-            ) {
-                Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                    Surface(
-                        modifier = Modifier.size(64.dp),
-                        shape = RoundedCornerShape(20.dp),
-                        color = MaterialTheme.colorScheme.primaryContainer,
-                        tonalElevation = 2.dp
-                    ) {
-                        Box(contentAlignment = Alignment.Center) {
-                            Text(
-                                "🔒",
-                                fontSize = 32.sp,
-                                modifier = Modifier.align(Alignment.Center)
-                            )
-                        }
-                    }
-                    Spacer(Modifier.height(12.dp))
-                    Text(
-                        "Отсканируйте QR-код\nс экрана сервера",
-                        style = MaterialTheme.typography.titleMedium,
-                        fontWeight = FontWeight.SemiBold,
-                        textAlign = TextAlign.Center,
-                        color = MaterialTheme.colorScheme.onBackground
-                    )
-                    Spacer(Modifier.height(4.dp))
-                    Text(
-                        "Формат: impulse-cert:<64 hex>",
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant
-                    )
-                }
-            }
-
-            // ---- Bottom scanning area (≈70%) ----
             Column(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .weight(0.7f)
-                    .padding(horizontal = 24.dp, vertical = 16.dp),
-                horizontalAlignment = Alignment.CenterHorizontally
+                    .padding(horizontal = 24.dp)
+                    .verticalScroll(rememberScrollState()),
+                horizontalAlignment = Alignment.CenterHorizontally,
             ) {
-                if (hasCameraPermission) {
-                    val textureView = remember { TextureView(context) }
-                    val controller = remember {
-                        Camera2Controller(context, textureView) { raw ->
-                            // Guard against stale callbacks firing after the
-                            // composable left composition (e.g. quick tab switch
-                            // from QR to Settings). The controller's stop() sets
-                            // isActive=false synchronously, but in-flight ML Kit
-                            // tasks may complete after that.
-                            if (scanned == null) {
-                                LogManager.d("QrScan", "raw detected: '$raw'")
-                                val hash = parseCertHash(raw)
-                                if (hash != null) {
-                                    scanned = hash
-                                    LogManager.i("QrScan", "cert scanned (short=${LogManager.shortHash(hash)})")
-                                    onCertScanned(hash)
-                                } else {
-                                    LogManager.w("QrScan", "parseCertHash rejected raw value")
+                Spacer(Modifier.height(12.dp))
+
+                // ── Header ──────────────────────────────────────────────
+                Text(
+                    "Подключение к серверу",
+                    style = MaterialTheme.typography.titleLarge,
+                    color = MaterialTheme.colorScheme.onBackground,
+                    textAlign = TextAlign.Center,
+                )
+                Spacer(Modifier.height(4.dp))
+                Text(
+                    "Отсканируйте QR-код с экрана сервера",
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    textAlign = TextAlign.Center,
+                )
+
+                Spacer(Modifier.height(24.dp))
+
+                // ── Camera card ─────────────────────────────────────────
+                Card(
+                    modifier = Modifier.fillMaxWidth(),
+                    shape = RoundedCornerShape(24.dp),
+                    colors = CardDefaults.cardColors(
+                        containerColor = MaterialTheme.colorScheme.surfaceContainerHigh,
+                    ),
+                ) {
+                    Column(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalAlignment = Alignment.CenterHorizontally,
+                    ) {
+                        // Camera preview
+                        Box(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .aspectRatio(1f),
+                            contentAlignment = Alignment.Center,
+                        ) {
+                            if (hasCameraPermission) {
+                                val textureView = remember { TextureView(context) }
+                                val controller = remember {
+                                    Camera2Controller(context, textureView) { raw ->
+                                        if (scanned == null) {
+                                            LogManager.d("QrScan", "raw detected: '$raw'")
+                                            val hash = parseCertHash(raw)
+                                            if (hash != null) {
+                                                scanned = hash
+                                                scanError = null
+                                                LogManager.i("QrScan", "cert scanned (short=${LogManager.shortHash(hash)})")
+                                                onCertScanned(hash)
+                                            } else {
+                                                scanError = "Невалидный QR-код"
+                                                LogManager.w("QrScan", "parseCertHash rejected: '$raw'")
+                                            }
+                                        }
+                                    }
+                                }
+                                DisposableEffect(Unit) {
+                                    try { controller.start() } catch (e: Exception) {
+                                        LogManager.e("QrScan", "camera start failed", e)
+                                        hasCameraPermission = false
+                                    }
+                                    onDispose { try { controller.stop() } catch (_: Exception) {} }
+                                }
+                                LaunchedEffect(controller) { activeController = controller }
+
+                                AndroidView(
+                                    factory = { textureView },
+                                    modifier = Modifier
+                                        .fillMaxSize()
+                                        .clip(RoundedCornerShape(topStart = 24.dp, topEnd = 24.dp))
+                                )
+                                ScanOverlay(
+                                    modifier = Modifier.fillMaxSize(),
+                                    scanned = scanned != null,
+                                )
+                            } else {
+                                // No camera permission
+                                Column(
+                                    modifier = Modifier
+                                        .fillMaxSize()
+                                        .background(MaterialTheme.colorScheme.surfaceContainerHigh),
+                                    horizontalAlignment = Alignment.CenterHorizontally,
+                                    verticalArrangement = Arrangement.Center,
+                                ) {
+                                    Icon(
+                                        Icons.Filled.FlashlightOff,
+                                        contentDescription = null,
+                                        tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                                        modifier = Modifier.size(40.dp)
+                                    )
+                                    Spacer(Modifier.height(12.dp))
+                                    Text(
+                                        "Нет доступа к камере",
+                                        style = MaterialTheme.typography.bodyLarge,
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                    )
+                                    Spacer(Modifier.height(12.dp))
+                                    Button(onClick = { permissionLauncher.launch(Manifest.permission.CAMERA) }) {
+                                        Text("Разрешить")
+                                    }
                                 }
                             }
                         }
-                    }
-                    DisposableEffect(Unit) {
-                        try {
-                            controller.start()
-                        } catch (e: Exception) {
-                            LogManager.e("QrScan", "camera start failed", e)
-                            hasCameraPermission = false
-                        }
-                        onDispose {
-                            // Sync teardown: camera/session/scanner close() calls
-                            // are non-blocking (async to camera service). The old
-                            // async pattern let ML Kit callbacks fire *after* the
-                            // composable left composition, crashing on disposed
-                            // state access when switching QR -> Settings quickly.
-                            try { controller.stop() } catch (_: Exception) {}
-                        }
-                    }
-                    // Expose the controller to the flashlight button below.
-                    LaunchedEffect(controller) { activeController = controller }
 
-                    Box(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .aspectRatio(1f)
-                            .clip(RoundedCornerShape(24.dp))
-                            .background(Color.Black),
-                        contentAlignment = Alignment.Center
-                    ) {
-                        AndroidView(
-                            factory = { textureView },
-                            modifier = Modifier.fillMaxSize()
-                        )
-                        ScanOverlay(
-                            modifier = Modifier.fillMaxSize(),
-                            scanned = scanned != null
-                        )
-                    }
-                } else {
-                    // Camera unavailable / denied — friendly fallback.
-                    Box(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .aspectRatio(1f)
-                            .clip(RoundedCornerShape(24.dp))
-                            .background(MaterialTheme.colorScheme.errorContainer.copy(alpha = 0.15f)),
-                        contentAlignment = Alignment.Center
-                    ) {
-                        Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                            Icon(
-                                Icons.Filled.FlashlightOff,
-                                contentDescription = null,
-                                tint = MaterialTheme.colorScheme.error,
-                                modifier = Modifier.size(40.dp)
-                            )
-                            Spacer(Modifier.height(12.dp))
+                        // ── Status ──────────────────────────────────────
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(horizontal = 20.dp, vertical = 16.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.Center,
+                        ) {
+                            val statusText = when {
+                                scanned != null -> "Код найден"
+                                !hasCameraPermission -> "Камера недоступна"
+                                else -> "Поиск кода..."
+                            }
+                            val statusColor = when {
+                                scanned != null -> MaterialTheme.colorScheme.primary
+                                !hasCameraPermission -> MaterialTheme.colorScheme.error
+                                else -> MaterialTheme.colorScheme.onSurfaceVariant
+                            }
+                            if (scanned != null) {
+                                Icon(
+                                    Icons.Filled.CheckCircle,
+                                    contentDescription = null,
+                                    tint = statusColor,
+                                    modifier = Modifier.size(16.dp)
+                                )
+                                Spacer(Modifier.width(6.dp))
+                            }
                             Text(
-                                "Нет доступа к камере",
-                                style = MaterialTheme.typography.titleMedium,
-                                color = MaterialTheme.colorScheme.onSurface
+                                statusText,
+                                style = MaterialTheme.typography.bodyMedium,
+                                fontWeight = FontWeight.Medium,
+                                color = statusColor,
                             )
+                        }
+
+                        // ── Error banner ────────────────────────────────
+                        if (scanError != null) {
+                            Surface(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .padding(horizontal = 16.dp),
+                                shape = RoundedCornerShape(12.dp),
+                                color = MaterialTheme.colorScheme.errorContainer,
+                            ) {
+                                Row(
+                                    modifier = Modifier.padding(12.dp),
+                                    verticalAlignment = Alignment.CenterVertically,
+                                ) {
+                                    Text(
+                                        text = scanError!!,
+                                        style = MaterialTheme.typography.bodySmall,
+                                        color = MaterialTheme.colorScheme.onErrorContainer,
+                                        modifier = Modifier.weight(1f),
+                                    )
+                                    TextButton(onClick = { scanError = null }) {
+                                        Text("OK")
+                                    }
+                                }
+                            }
                             Spacer(Modifier.height(12.dp))
-                            Button(onClick = { permissionLauncher.launch(Manifest.permission.CAMERA) }) {
-                                Text("Разрешить")
+                        }
+
+                        // ── Action buttons ──────────────────────────────
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(horizontal = 16.dp, vertical = 12.dp),
+                            horizontalArrangement = Arrangement.spacedBy(12.dp),
+                        ) {
+                            OutlinedButton(
+                                onClick = {
+                                    torchOn = !torchOn
+                                    activeController?.setTorch(torchOn)
+                                },
+                                modifier = Modifier.weight(1f),
+                                enabled = hasCameraPermission,
+                                shape = RoundedCornerShape(14.dp),
+                            ) {
+                                Icon(
+                                    imageVector = if (torchOn) Icons.Filled.FlashlightOn else Icons.Filled.FlashlightOff,
+                                    contentDescription = null,
+                                    modifier = Modifier.size(18.dp),
+                                )
+                                Spacer(Modifier.width(6.dp))
+                                Text(if (torchOn) "Вкл" else "Фонарик")
+                            }
+                            Button(
+                                onClick = { showManualEntry = true },
+                                modifier = Modifier.weight(1f),
+                                shape = RoundedCornerShape(14.dp),
+                            ) {
+                                Text("Вручную")
                             }
                         }
+
+                        Spacer(Modifier.height(8.dp))
                     }
                 }
 
-                // ---- Status line ----
-                val status = when {
-                    scanned != null -> "Код найден!"
-                    !hasCameraPermission -> "Ошибка сканирования"
-                    else -> "Поиск кода..."
-                }
-                val statusColor = when {
-                    scanned != null -> MaterialTheme.colorScheme.primary
-                    !hasCameraPermission -> MaterialTheme.colorScheme.error
-                    else -> MaterialTheme.colorScheme.onSurfaceVariant
-                }
-                Row(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .padding(vertical = 12.dp),
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.Center
-                ) {
-                    if (scanned != null) {
-                        Icon(
-                            Icons.Filled.CheckCircle,
-                            contentDescription = null,
-                            tint = statusColor,
-                            modifier = Modifier.size(18.dp)
-                        )
-                        Spacer(Modifier.width(6.dp))
-                    }
-                    Text(
-                        status,
-                        style = MaterialTheme.typography.bodyMedium,
-                        fontWeight = FontWeight.Medium,
-                        color = statusColor
-                    )
-                }
+                Spacer(Modifier.height(24.dp))
 
-                // ---- Bottom control bar ----
-                Row(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .navigationBarsPadding(),
-                    horizontalArrangement = Arrangement.spacedBy(12.dp)
-                ) {
-                    OutlinedButton(
-                        onClick = {
-                            torchOn = !torchOn
-                            activeController?.setTorch(torchOn)
-                        },
-                        modifier = Modifier.weight(1f),
-                        enabled = hasCameraPermission
-                    ) {
-                        Icon(
-                            imageVector = if (torchOn) Icons.Filled.FlashlightOn else Icons.Filled.FlashlightOff,
-                            contentDescription = null
-                        )
-                        Spacer(Modifier.width(8.dp))
-                        Text(if (torchOn) "Фонарик вкл" else "Фонарик")
-                    }
-                    Button(
-                        onClick = { showManualEntry = true },
-                        modifier = Modifier.weight(1f)
-                    ) {
-                        Text("Ввести вручную")
-                    }
-                }
-
-                Spacer(Modifier.height(16.dp))
+                // ── Format hint ─────────────────────────────────────────
+                Text(
+                    "impulse-cert:<64 hex>",
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.5f),
+                    fontFamily = androidx.compose.ui.text.font.FontFamily.Monospace,
+                )
             }
         }
     }
 
-    // Manual hash entry dialog (fallback when the QR cannot be read).
+    // Manual hash entry dialog
     if (showManualEntry) {
         ManualEntryDialog(
             value = manualHash,
-            onValueChange = {
-                manualHash = it
-                manualError = null
-            },
+            onValueChange = { manualHash = it; manualError = null },
             isValid = manualValid,
             error = manualError,
             onPaste = {
@@ -379,7 +366,7 @@ fun QrScanScreen(
             onConfirm = {
                 val hash = parseCertHash(manualHash)
                 if (hash == null) {
-                    manualError = "Ожидается формат impulse-cert:<64 hex>"
+                    manualError = "Ожидается impulse-cert:<64 hex>"
                 } else {
                     showManualEntry = false
                     if (scanned == null) {
@@ -409,7 +396,7 @@ private fun ManualEntryDialog(
         text = {
             Column {
                 Text(
-                    "Введите хеш в формате impulse-cert:<64 hex-символа>.",
+                    "Введите хеш в формате impulse-cert:<64 hex>.",
                     style = MaterialTheme.typography.bodyMedium,
                     color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
@@ -438,10 +425,7 @@ private fun ManualEntryDialog(
             }
         },
         confirmButton = {
-            TextButton(
-                onClick = onConfirm,
-                enabled = isValid
-            ) { Text("Сохранить") }
+            TextButton(onClick = onConfirm, enabled = isValid) { Text("Сохранить") }
         },
         dismissButton = {
             TextButton(onClick = onDismiss) { Text("Отмена") }
@@ -449,15 +433,10 @@ private fun ManualEntryDialog(
     )
 }
 
-/**
- * Fluent scanning overlay drawn on top of the camera preview: a dark scrim with
- * a rounded-rect "window" cut out, a glowing animated scan line sweeping through
- * the window, corner brackets, and a centered instruction label.
- */
 @Composable
 private fun ScanOverlay(modifier: Modifier = Modifier, scanned: Boolean) {
     val density = LocalDensity.current
-    val windowSize = 260.dp
+    val windowSize = 220.dp
     val windowPx = with(density) { windowSize.toPx() }
 
     val infinite = rememberInfiniteTransition()
@@ -471,7 +450,7 @@ private fun ScanOverlay(modifier: Modifier = Modifier, scanned: Boolean) {
     )
     val glow by infinite.animateFloat(
         initialValue = 0.35f,
-        targetValue = 0.7f,
+        targetValue = 0.65f,
         animationSpec = infiniteRepeatable(
             animation = tween(durationMillis = 1400, easing = FastOutSlowInEasing),
             repeatMode = RepeatMode.Reverse
@@ -486,29 +465,30 @@ private fun ScanOverlay(modifier: Modifier = Modifier, scanned: Boolean) {
             val top = (h - windowPx) / 2f
             val right = left + windowPx
             val bottom = top + windowPx
-            val radius = 28.dp.toPx()
+            val radius = 20.dp.toPx()
 
-            val scrimColor = Color.Black.copy(alpha = 0.55f)
+            // Dimmed scrim around the window
+            val scrimColor = Color.Black.copy(alpha = 0.50f)
             drawRect(scrimColor, topLeft = Offset(0f, 0f), size = Size(w, top))
             drawRect(scrimColor, topLeft = Offset(0f, bottom), size = Size(w, h - bottom))
             drawRect(scrimColor, topLeft = Offset(0f, top), size = Size(left, windowPx))
             drawRect(scrimColor, topLeft = Offset(right, top), size = Size(w - right, windowPx))
 
-            val accent = Color(0xFF4F8CFF)
-            val stroke = 3.dp.toPx()
+            val accent = if (scanned) Color(0xFF3DDC84) else Color(0xFF4F8CFF)
+            val stroke = 2.dp.toPx()
+            val cornerLen = 24.dp.toPx()
 
-            val cornerLen = 28.dp.toPx()
-            val bracketColor = if (scanned) Color(0xFF3DDC84) else accent
+            // Corner brackets
             fun drawCorner(cx: Float, cy: Float, dx: Float, dy: Float) {
                 drawLine(
-                    color = bracketColor,
+                    color = accent,
                     start = Offset(cx, cy + dy * cornerLen),
                     end = Offset(cx, cy),
                     strokeWidth = stroke,
                     cap = StrokeCap.Round
                 )
                 drawLine(
-                    color = bracketColor,
+                    color = accent,
                     start = Offset(cx, cy),
                     end = Offset(cx + dx * cornerLen, cy),
                     strokeWidth = stroke,
@@ -520,33 +500,29 @@ private fun ScanOverlay(modifier: Modifier = Modifier, scanned: Boolean) {
             drawCorner(left, bottom, 1f, -1f)
             drawCorner(right, bottom, -1f, -1f)
 
+            // Subtle border glow
             drawRoundRect(
-                color = bracketColor.copy(alpha = glow),
+                color = accent.copy(alpha = glow),
                 topLeft = Offset(left, top),
                 size = Size(windowPx, windowPx),
                 cornerRadius = androidx.compose.ui.geometry.CornerRadius(radius, radius),
                 style = Stroke(width = stroke)
             )
 
+            // Scan line
             if (!scanned) {
                 val lineY = top + scanProgress * windowPx
                 drawLine(
-                    color = accent.copy(alpha = 0.9f),
+                    color = accent.copy(alpha = 0.8f),
                     start = Offset(left + 8.dp.toPx(), lineY),
                     end = Offset(right - 8.dp.toPx(), lineY),
-                    strokeWidth = 2.dp.toPx()
+                    strokeWidth = 1.5.dp.toPx()
                 )
                 drawLine(
-                    color = accent.copy(alpha = 0.25f),
-                    start = Offset(left + 8.dp.toPx(), lineY - 10.dp.toPx()),
-                    end = Offset(right - 8.dp.toPx(), lineY - 10.dp.toPx()),
-                    strokeWidth = 10.dp.toPx()
-                )
-                drawLine(
-                    color = accent.copy(alpha = 0.25f),
-                    start = Offset(left + 8.dp.toPx(), lineY + 10.dp.toPx()),
-                    end = Offset(right - 8.dp.toPx(), lineY + 10.dp.toPx()),
-                    strokeWidth = 10.dp.toPx()
+                    color = accent.copy(alpha = 0.15f),
+                    start = Offset(left + 8.dp.toPx(), lineY - 8.dp.toPx()),
+                    end = Offset(right - 8.dp.toPx(), lineY - 8.dp.toPx()),
+                    strokeWidth = 8.dp.toPx()
                 )
             }
         }
@@ -580,6 +556,7 @@ private class Camera2Controller(
 
     @Volatile private var isActive = false
     @Volatile private var stopped = true
+    private var retryCount = 0
 
     private var previewSize: CameraSize? = null
 
@@ -708,11 +685,13 @@ private class Camera2Controller(
             override fun onDisconnected(camera: CameraDevice) {
                 camera.close()
                 cameraDevice = null
+                scheduleRetry()
             }
             override fun onError(camera: CameraDevice, error: Int) {
                 LogManager.e("QrScan", "camera onError error=$error")
                 camera.close()
                 cameraDevice = null
+                scheduleRetry()
             }
         }, handler)
     }
@@ -742,6 +721,7 @@ private class Camera2Controller(
                             return
                         }
                         captureSession = session
+                        retryCount = 0
                         val request = device.createCaptureRequest(CameraDevice.TEMPLATE_PREVIEW).apply {
                             addTarget(surface)
                             addTarget(readerSurface)
@@ -790,7 +770,10 @@ private class Camera2Controller(
     fun stop() {
         isActive = false
         stopped = true
-        scanner.close()
+        // scanner.close() MUST happen on the background thread AFTER the
+        // imageReader is closed and the capture session is torn down — otherwise
+        // an in-flight scanner.process() call (on pool-7-thread) touches freed
+        // native memory in libbarhopper_v3.so → SIGSEGV.
         val handler = backgroundHandler
         if (handler != null) {
             val latch = java.util.concurrent.CountDownLatch(1)
@@ -802,13 +785,10 @@ private class Camera2Controller(
                     cameraDevice = null
                     imageReader?.close()
                     imageReader = null
+                    scanner.close()
                 } catch (e: Exception) {
                     LogManager.e("QrScan", "stop camera cleanup failed", e)
                 } finally {
-                    // Quit the looper from within the handler thread so any
-                    // pending Camera2 framework callbacks are drained first.
-                    // This avoids "Handler on a dead thread" IllegalStateException
-                    // when the framework tries to deliver a message after quit.
                     backgroundThread?.quitSafely()
                     backgroundThread = null
                     backgroundHandler = null
@@ -825,6 +805,7 @@ private class Camera2Controller(
                 cameraDevice = null
                 imageReader?.close()
                 imageReader = null
+                scanner.close()
             } catch (e: Exception) {
                 LogManager.e("QrScan", "stop failed", e)
             }
@@ -850,6 +831,23 @@ private class Camera2Controller(
         } else {
             (sensorOrientation - surfaceRotationDegrees + 360) % 360
         }
+    }
+
+    private fun scheduleRetry() {
+        if (!isActive || stopped || retryCount >= 3) return
+        retryCount++
+        val delayMs = retryCount * 1000L
+        LogManager.i("QrScan", "camera retry $retryCount in ${delayMs}ms")
+        backgroundHandler?.postDelayed({
+            if (!isActive || stopped) return@postDelayed
+            try {
+                captureSession?.close()
+                captureSession = null
+                imageReader?.close()
+                imageReader = null
+            } catch (_: Exception) {}
+            openCamera()
+        }, delayMs)
     }
 
     fun setTorch(enabled: Boolean) {

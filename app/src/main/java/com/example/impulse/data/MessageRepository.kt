@@ -45,6 +45,13 @@ class MessageRepository(context: Context) {
 
     suspend fun clearServer(serverId: String) = dao.clearServer(serverId)
 
+    /** Removes stale optimistic placeholders (negative server_msg_id). */
+    suspend fun clearTempMessages(serverId: String): Int {
+        val removed = dao.clearTempMessages(serverId)
+        if (removed > 0) LogManager.i("MessageRepository", "Cleaned up $removed temp messages for $serverId")
+        return removed
+    }
+
     /**
      * Deletes messages older than the TTL. Returns the number of rows removed.
      * Should be called periodically (e.g. on connect and every few hours).

@@ -11,7 +11,7 @@ import kotlinx.coroutines.launch
 import kotlinx.serialization.Serializable
 
 enum class ThemeMode {
-    LIGHT, DARK, SYSTEM, OLED
+    LIGHT, DARK, SYSTEM
 }
 
 @Serializable
@@ -67,22 +67,24 @@ object ThemeSettings {
     private var _fontScale by mutableStateOf(1.0f)
     val fontScale: Float get() = _fontScale
 
-    private var _preset by mutableStateOf(ThemePreset.CYBER_BLUE)
+    private var _preset by mutableStateOf(ThemePreset.NEON)
     val preset: ThemePreset get() = _preset
 
-    private var _glowEnabled by mutableStateOf(false)
-    val glowEnabled: Boolean get() = _glowEnabled
+    private var _oledEnabled by mutableStateOf(false)
+    val oledEnabled: Boolean get() = _oledEnabled
 
-    private var _glitchEnabled by mutableStateOf(false)
-    val glitchEnabled: Boolean get() = _glitchEnabled
+    private var _ultraContrastEnabled by mutableStateOf(false)
+    val ultraContrastEnabled: Boolean get() = _ultraContrastEnabled
 
-    private var _glassEnabled by mutableStateOf(false)
-    val glassEnabled: Boolean get() = _glassEnabled
+    val isDarkActive: Boolean
+        get() = when (_themeMode) {
+            ThemeMode.DARK -> true
+            ThemeMode.SYSTEM -> _isSystemDark
+            ThemeMode.LIGHT -> false
+        }
 
-    private var _terminalCursorEnabled by mutableStateOf(false)
-    val terminalCursorEnabled: Boolean get() = _terminalCursorEnabled
-
-    val isOLEDMode: Boolean get() = _themeMode == ThemeMode.OLED
+    private var _isSystemDark = false
+    fun setSystemDark(dark: Boolean) { _isSystemDark = dark }
 
     fun initialize(themePreferences: ThemePreferences) {
         preferences = themePreferences
@@ -91,14 +93,8 @@ object ThemeSettings {
         scope.launch { themePreferences.fontSizeFlow.collect { _fontSize = it } }
         scope.launch { themePreferences.fontScaleFlow.collect { _fontScale = it } }
         scope.launch { themePreferences.themePresetFlow.collect { _preset = it } }
-        scope.launch {
-            themePreferences.effectsFlow.collect { effects ->
-                _glowEnabled = effects.glow
-                _glitchEnabled = effects.glitches
-                _glassEnabled = effects.glass
-                _terminalCursorEnabled = effects.terminalCursor
-            }
-        }
+        scope.launch { themePreferences.oledFlow.collect { _oledEnabled = it } }
+        scope.launch { themePreferences.ultraContrastFlow.collect { _ultraContrastEnabled = it } }
     }
 
     fun setThemeMode(mode: ThemeMode) { _themeMode = mode; preferences?.saveThemeMode(mode) }
@@ -107,11 +103,17 @@ object ThemeSettings {
     fun setFontScale(scale: Float) { _fontScale = scale.coerceIn(0.8f, 1.4f); preferences?.saveFontScale(_fontScale) }
     fun setThemePreset(preset: ThemePreset) { _preset = preset; preferences?.saveThemePreset(preset) }
 
-    fun setEffects(effects: EffectsConfig) {
-        _glowEnabled = effects.glow
-        _glitchEnabled = effects.glitches
-        _glassEnabled = effects.glass
-        _terminalCursorEnabled = effects.terminalCursor
-        preferences?.saveEffects(effects)
+    fun setOledEnabled(enabled: Boolean) {
+        _oledEnabled = enabled
+        if (enabled) _ultraContrastEnabled = false
+        preferences?.saveOled(enabled)
+        if (enabled) preferences?.saveUltraContrast(false)
+    }
+
+    fun setUltraContrastEnabled(enabled: Boolean) {
+        _ultraContrastEnabled = enabled
+        if (enabled) _oledEnabled = false
+        preferences?.saveUltraContrast(enabled)
+        if (enabled) preferences?.saveOled(false)
     }
 }

@@ -15,6 +15,7 @@ import androidx.room.PrimaryKey
  *  - [ciphertext]: AES-256-GCM output (IV || ciphertext) – never plaintext.
  *  - [iv]        : kept separately for clarity (also embedded in [ciphertext]).
  *  - [timestamp] : epoch millis; used for the 72h TTL cleanup.
+ *  - [isOwn]     : whether this message was sent by the local user.
  */
 @Entity(
     tableName = "messages",
@@ -30,7 +31,8 @@ data class MessageEntity(
     @ColumnInfo(name = "sender") val sender: String,
     @ColumnInfo(name = "ciphertext") val ciphertext: ByteArray,
     @ColumnInfo(name = "iv") val iv: ByteArray,
-    @ColumnInfo(name = "timestamp") val timestamp: Long = System.currentTimeMillis()
+    @ColumnInfo(name = "timestamp") val timestamp: Long = System.currentTimeMillis(),
+    @ColumnInfo(name = "is_own", defaultValue = "0") val isOwn: Boolean = false
 ) {
     override fun equals(other: Any?): Boolean {
         if (this === other) return true

@@ -10,18 +10,6 @@ import com.example.impulse.util.LogManager
 import kotlinx.coroutines.flow.*
 import kotlinx.coroutines.launch
 
-/**
- * MVVM bridge between the chat UI and the data/transport layers.
- *
- * Exposes:
- *  - [messages]: a reactive stream of decrypted messages for the current server,
- *    sourced from [MessageRepository.observe] (Room) and kept in sync with live
- *    inbound messages via [ChatController.addMessageListener].
- *  - [connectionState]: the live transport state.
- *
- * The UI only collects these flows; all crypto, persistence and transport
- * concerns stay behind the controller/repository boundaries.
- */
 class ChatViewModel(
     private val chatController: ChatController,
     private val repository: MessageRepository,
@@ -33,32 +21,50 @@ class ChatViewModel(
     private val _messages = MutableStateFlow<List<ChatController.DecryptedMessage>>(emptyList())
     val messages: StateFlow<List<ChatController.DecryptedMessage>> = _messages.asStateFlow()
 
-    private val liveListener: (ChatController.DecryptedMessage) -> Unit = { dm ->
-        _messages.value = (_messages.value + dm)
-            .distinctBy { it.serverMsgId }
-            .sortedBy { it.timestamp }
+    // Optimistic (temp) messages not yet echoed back by the server.
+    // Keyed by (sender + plaintext) so we can deduplicate when the real
+    // message arrives via the DB observer.
+    private val pendingOptimistic = mutableListOf<ChatController.DecryptedMessage>()
+
+    private fun mergeAndSort(
+        dbMessages: List<ChatController.DecryptedMessage>
+    ): List<ChatController.DecryptedMessage> {
+        // Drop pending entries whose real counterpart is now in the DB
+        val dbIds = dbMessages.map { it.serverMsgId }.toSet()
+        pendingOptimistic.removeAll { pending ->
+            // Remove if the real message arrived, or if a DB entry matches by sender+content
+            pending.serverMsgId in dbIds ||
+                dbMessages.any { it.sender == pending.sender && it.plaintext == pending.plaintext }
+        }
+        return (dbMessages + pendingOptimistic).distinctBy { it.serverMsgId }.sortedBy { kotlin.math.abs(it.serverMsgId) }
+    }
+
+    private val optimisticListener: (ChatController.DecryptedMessage) -> Unit = { dm ->
+        if (dm.serverMsgId < 0) {
+            // Optimistic placeholder — show immediately, will be replaced when
+            // the server echoes the real message back.
+            pendingOptimistic.add(dm)
+            _messages.value = mergeAndSort(_messages.value)
+        }
     }
 
     init {
-        // Seed from the local store, then keep it live.
+        // DB observer: the authoritative source for all persisted messages.
         viewModelScope.launch {
             repository.observe(server.id)
                 .map { entities ->
-                    // Only show rows we can currently decrypt (group secret ready).
-                    // The controller decrypts on the fly; rows that fail stay hidden
-                    // until the secret is established (they re-appear via the listener).
                     entities.mapNotNull { entity -> chatController.decryptEntity(entity) }
                 }
-                    .catch { e ->
-                        // A Room/DB error must never cancel the UI stream. Log it and
-                        // keep the last known list so the chat stays usable.
-                        LogManager.e("ChatViewModel", "observe failed", e)
-                    }
-                .collect { _messages.value = it }
+                .catch { e ->
+                    LogManager.e("ChatViewModel", "observe failed", e)
+                }
+                .collect { dbMessages ->
+                    _messages.value = mergeAndSort(dbMessages)
+                }
         }
 
-        // Live inbound / outbound messages pushed by the controller.
-        chatController.addMessageListener(liveListener)
+        // Optimistic listener: instant UI feedback for sent messages.
+        chatController.addMessageListener(optimisticListener)
     }
 
     /** Sends a chat message; returns true if it was accepted by the transport. */
@@ -67,8 +73,14 @@ class ChatViewModel(
         return chatController.sendChat(text)
     }
 
+    /** Clears local message history for this server and re-syncs from the server. */
+    suspend fun clearHistory() {
+        pendingOptimistic.clear()
+        chatController.clearHistory()
+    }
+
     override fun onCleared() {
-        chatController.removeMessageListener(liveListener)
+        chatController.removeMessageListener(optimisticListener)
         super.onCleared()
     }
 }

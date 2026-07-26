@@ -1,70 +1,47 @@
 package com.example.impulse.ui.screens
 
+import androidx.compose.animation.*
+import androidx.compose.animation.core.tween
 import androidx.compose.foundation.background
-import androidx.compose.foundation.layout.Box
-import androidx.compose.foundation.layout.Row
-import androidx.compose.foundation.layout.Spacer
-import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.layout.navigationBarsPadding
-import androidx.compose.foundation.layout.size
-import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.foundation.clickable
+import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.Email
 import androidx.compose.material.icons.filled.Home
-import androidx.compose.material.icons.filled.QrCode
+import androidx.compose.material.icons.automirrored.filled.List
 import androidx.compose.material.icons.filled.Settings
-import androidx.compose.material3.ExperimentalMaterial3Api
-import androidx.compose.material3.Icon
-import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.NavigationBar
-import androidx.compose.material3.NavigationBarItem
-import androidx.compose.material3.Scaffold
-import androidx.compose.material3.Text
-import androidx.compose.material3.TopAppBar
-import androidx.compose.runtime.Composable
-import androidx.compose.runtime.collectAsState
-import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableIntStateOf
-import androidx.compose.runtime.mutableStateOf
-import androidx.compose.runtime.remember
-import androidx.compose.runtime.setValue
+import androidx.compose.material3.*
+import androidx.compose.runtime.*
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.graphics.vector.ImageVector
-import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.shadow
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
-import com.example.impulse.ChatController
+import androidx.compose.ui.zIndex
+import com.example.impulse.ConnectionManager
 import com.example.impulse.data.ServerConfig
 import com.example.impulse.data.ServerPreferences
-import com.example.impulse.security.TrustedCertManager
-import com.example.impulse.transport.ConnectionState
+import com.example.impulse.ui.theme.*
 import com.example.impulse.util.NameGenerator
-import androidx.compose.ui.platform.LocalContext
 
-/** A navigation tab in the bottom bar: [title] label and [icon] for the tab button. */
-data class TabItem(val title: String, val icon: ImageVector)
-
-@OptIn(ExperimentalMaterial3Api::class)
+@OptIn(ExperimentalAnimationApi::class)
 @Composable
 fun MainScreen() {
     val context = LocalContext.current
-    var selectedItem by remember { mutableIntStateOf(0) }
+    var selectedItem by rememberSaveable { mutableIntStateOf(0) }
     var selectedServer by remember { mutableStateOf(ServerConfig.defaultServer) }
     var clientName by remember { mutableStateOf("") }
     var availableServers by remember { mutableStateOf(ServerConfig.builtInServers) }
-    var showQrScan by remember { mutableStateOf(false) }
+    var activeChatServer by remember { mutableStateOf<ServerConfig?>(null) }
+    var qrScanServer by remember { mutableStateOf<ServerConfig?>(null) }
+    var visibilityRefreshTrigger by remember { mutableIntStateOf(0) }
 
-    val items = listOf(
-        TabItem("Главная", Icons.Default.Home),
-        TabItem("Чат", Icons.Default.Email),
-        TabItem("QR", Icons.Default.QrCode),
-        TabItem("Настройки", Icons.Default.Settings)
-    )
+    val connectionManager = remember { ConnectionManager.getInstance(context) }
 
-    val chatController = remember { ChatController.getInstance(context) }
-    val connectionState by chatController.state.collectAsState()
-
-    androidx.compose.runtime.LaunchedEffect(Unit) {
+    LaunchedEffect(Unit) {
         val serverPreferences = ServerPreferences(context)
         val customServers = serverPreferences.getCustomServers()
         val savedServer = serverPreferences.getSelectedServer()
@@ -74,138 +51,214 @@ fun MainScreen() {
         if (savedServer != null) selectedServer = savedServer
         clientName = savedClientName.ifBlank { NameGenerator.generate() }
 
-        chatController.setAutoReconnect(serverPreferences.getAutoReconnect())
+        for (server in availableServers) {
+            val ar = serverPreferences.getServerAutoReconnect(server.id)
+            if (ar) {
+                val ctrl = connectionManager.getController(server)
+                ctrl.setAutoReconnect(true)
+            }
+        }
 
-        if (serverPreferences.getAutoConnect() && savedServer != null && clientName.isNotBlank()) {
-            chatController.connect(savedServer, clientName)
+        for (server in availableServers) {
+            if (serverPreferences.getServerAutoConnect(server.id) && clientName.isNotBlank()) {
+                connectionManager.connect(server, clientName)
+            }
         }
     }
 
-    if (showQrScan) {
-        val currentServer = selectedServer
-        QrScanScreen(
-            serverId = currentServer.id,
-            onCertScanned = { hash ->
-                val certManager = TrustedCertManager(context)
-                certManager.trustHash(currentServer.id, hash)
-                com.example.impulse.util.LogManager.i("MainScreen", "QR scan stored cert for server=${currentServer.id}")
-                showQrScan = false
-                chatController.connect(currentServer, clientName)
-            },
-            onBack = { showQrScan = false }
-        )
-        return
-    }
+    val navItems = listOf(
+        Triple(Icons.Default.Home, "Главная", 0),
+        Triple(Icons.AutoMirrored.Filled.List, "Чаты", 1),
+        Triple(Icons.Default.Settings, "Настройки", 2),
+    )
 
-    val showTopBar = selectedItem != 3
+    val navSelectedColor = MaterialTheme.colorScheme.primary
+    val navUnselectedColor = MaterialTheme.colorScheme.onSurfaceVariant
 
-    Scaffold(
-        topBar = {
-            if (showTopBar) {
-                TopAppBar(
-                    title = { Text("Impulse") },
-                    actions = {
-                        val (label, color) = when (connectionState) {
-                            ConnectionState.DISCONNECTED -> "Отключено" to MaterialTheme.colorScheme.outline
-                            ConnectionState.CONNECTING -> "Подключение…" to MaterialTheme.colorScheme.tertiary
-                            ConnectionState.CONNECTED -> "Аутентификация…" to MaterialTheme.colorScheme.tertiary
-                            ConnectionState.AUTHENTICATING -> "Аутентификация…" to MaterialTheme.colorScheme.tertiary
-                            ConnectionState.AUTHENTICATED -> "Канал…" to MaterialTheme.colorScheme.tertiary
-                            ConnectionState.READY -> "PQ-E2EE" to MaterialTheme.colorScheme.primary
-                            ConnectionState.ERROR -> "Ошибка" to MaterialTheme.colorScheme.error
-                        }
-                        Row(
-                            verticalAlignment = Alignment.CenterVertically,
-                            modifier = Modifier.padding(end = 16.dp)
-                        ) {
+    Box(modifier = Modifier.fillMaxSize()) {
+        // Grid background visible under everything
+        DecorativeBackground(modifier = Modifier.fillMaxSize()) {}
+
+        // Main content
+        Scaffold(
+            modifier = Modifier.fillMaxSize(),
+            containerColor = MaterialTheme.colorScheme.surface.copy(alpha = 0f),
+            contentColor = MaterialTheme.colorScheme.onSurface,
+            bottomBar = {
+                Box(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .navigationBarsPadding()
+                        .padding(horizontal = 20.dp, vertical = 12.dp)
+                        .shadow(
+                            elevation = 8.dp,
+                            shape = RoundedCornerShape(20.dp),
+                            ambientColor = MaterialTheme.colorScheme.primary.copy(alpha = 0.06f),
+                            spotColor = MaterialTheme.colorScheme.primary.copy(alpha = 0.06f),
+                        )
+                        .clip(RoundedCornerShape(20.dp))
+                        .background(MaterialTheme.colorScheme.surface)
+                        .zIndex(1f),
+                ) {
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .height(60.dp)
+                            .padding(horizontal = 8.dp),
+                        horizontalArrangement = Arrangement.SpaceEvenly,
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        navItems.forEachIndexed { index, (icon, label, _) ->
+                            val isSelected = selectedItem == index
                             Box(
                                 modifier = Modifier
-                                    .size(10.dp)
-                                    .background(color, CircleShape)
-                            )
-                            Spacer(Modifier.size(8.dp))
-                            Text(label, style = MaterialTheme.typography.labelMedium, color = color)
+                                    .weight(1f)
+                                    .height(48.dp)
+                                    .clip(RoundedCornerShape(14.dp))
+                                    .background(
+                                        if (isSelected) MaterialTheme.colorScheme.primary.copy(alpha = 0.12f)
+                                        else Color.Transparent
+                                    )
+                                    .clickable { selectedItem = index },
+                                contentAlignment = Alignment.Center,
+                            ) {
+                                Column(
+                                    horizontalAlignment = Alignment.CenterHorizontally,
+                                    verticalArrangement = Arrangement.Center,
+                                ) {
+                                    Icon(
+                                        icon,
+                                        contentDescription = label,
+                                        tint = if (isSelected) navSelectedColor else navUnselectedColor,
+                                        modifier = Modifier.size(22.dp),
+                                    )
+                                    if (isSelected) {
+                                        Spacer(Modifier.height(2.dp))
+                                        Box(
+                                            modifier = Modifier
+                                                .size(4.dp)
+                                                .clip(RoundedCornerShape(2.dp))
+                                                .background(MaterialTheme.colorScheme.primary)
+                                        )
+                                    }
+                                }
+                            }
                         }
                     }
-                )
+                }
             }
-        },
-        bottomBar = {
-            NavigationBar(
-                modifier = Modifier.navigationBarsPadding(),
-                containerColor = androidx.compose.material3.MaterialTheme.colorScheme.surface,
-                tonalElevation = 0.1.dp
-            ) {
-                items.forEachIndexed { index, item ->
-                    NavigationBarItem(
-                        icon = { Icon(item.icon, contentDescription = item.title) },
-                        label = {
-                            Text(
-                                text = item.title,
-                                textAlign = TextAlign.Center,
-                                fontSize = androidx.compose.material3.MaterialTheme.typography.labelMedium.fontSize
-                            )
+        ) { innerPadding ->
+            Crossfade(
+                targetState = selectedItem,
+                animationSpec = tween(durationMillis = 250),
+                label = "tab_crossfade"
+            ) { tab ->
+                when (tab) {
+                    0 -> HomeScreen(
+                        clientName = clientName,
+                        availableServers = availableServers,
+                        connectionManager = connectionManager,
+                        modifier = Modifier.padding(innerPadding)
+                    )
+                    1 -> ChatListScreen(
+                        connectionManager = connectionManager,
+                        availableServers = availableServers,
+                        clientName = clientName,
+                        onServerSelected = { server ->
+                            activeChatServer = server
+                            selectedServer = server
                         },
-                        selected = selectedItem == index,
-                        onClick = { selectedItem = index }
+                        visibilityRefreshTrigger = visibilityRefreshTrigger,
+                        modifier = Modifier.padding(innerPadding)
+                    )
+                    2 -> SettingsScreen(
+                        selectedServer = selectedServer,
+                        onServerSelected = { newServer ->
+                            selectedServer = newServer
+                            ServerPreferences(context).saveSelectedServer(newServer)
+                            val customServers = ServerPreferences(context).getCustomServers()
+                            availableServers = ServerConfig.builtInServers + customServers
+                        },
+                        onServerUpdated = { updatedServer ->
+                            val customServers = ServerPreferences(context).getCustomServers()
+                            availableServers = ServerConfig.builtInServers + customServers
+                            if (selectedServer.id == updatedServer.id) selectedServer = updatedServer
+                        },
+                        clientName = clientName,
+                        onClientNameChange = { newName ->
+                            clientName = newName
+                            ServerPreferences(context).saveClientName(newName)
+                        },
+                        availableServers = availableServers,
+                        onServerAdded = { newServer ->
+                            ServerPreferences(context).addCustomServer(newServer)
+                            val customServers = ServerPreferences(context).getCustomServers()
+                            availableServers = ServerConfig.builtInServers + customServers
+                        },
+                        onServerDeleted = { deletedServer ->
+                            val customServers = ServerPreferences(context).getCustomServers()
+                            availableServers = ServerConfig.builtInServers + customServers
+                            if (selectedServer == deletedServer) {
+                                selectedServer = availableServers.firstOrNull() ?: ServerConfig.defaultServer
+                                ServerPreferences(context).saveSelectedServer(selectedServer)
+                            }
+                        },
+                        onVisibilityChanged = { visibilityRefreshTrigger++ },
+                        connectionManager = connectionManager,
+                        onScanQr = { server -> qrScanServer = server },
+                        modifier = Modifier.padding(bottom = innerPadding.calculateBottomPadding())
                     )
                 }
             }
         }
-    ) { innerPadding ->
-        when (selectedItem) {
-            0 -> HomeScreen(
-                clientName = clientName,
-                selectedServer = selectedServer,
-                modifier = Modifier.padding(innerPadding)
-            )
-            1 -> ChatScreen(
-                selectedServer = selectedServer,
-                clientName = clientName,
-                modifier = Modifier.padding(innerPadding)
-            )
-2 -> {
-                val currentServer = selectedServer
-                QrScanScreen(
-                    serverId = currentServer.id,
-                    onCertScanned = { hash ->
-                        val certManager = TrustedCertManager(context)
-                        certManager.trustHash(currentServer.id, hash)
-                        chatController.connect(currentServer, clientName)
-                        selectedItem = 0
-                    },
-                    onBack = { selectedItem = 0 }
+
+        // Chat screen overlay (slides in from right)
+        AnimatedVisibility(
+            visible = activeChatServer != null,
+            enter = slideInHorizontally(
+                animationSpec = tween(300),
+                initialOffsetX = { it }
+            ) + fadeIn(tween(250)),
+            exit = slideOutHorizontally(
+                animationSpec = tween(250),
+                targetOffsetX = { it }
+            ) + fadeOut(tween(200)),
+            modifier = Modifier.fillMaxSize().zIndex(3f)
+        ) {
+            activeChatServer?.let { server ->
+                ChatScreen(
+                    selectedServer = server,
+                    clientName = clientName,
+                    connectionManager = connectionManager,
+                    onBack = { activeChatServer = null },
+                    modifier = Modifier
                 )
             }
-            3 -> SettingsScreen(
-                selectedServer = selectedServer,
-                onServerSelected = { newServer ->
-                    selectedServer = newServer
-                    ServerPreferences(context).saveSelectedServer(newServer)
-                    val customServers = ServerPreferences(context).getCustomServers()
-                    availableServers = ServerConfig.builtInServers + customServers
-                },
-                onServerUpdated = { updatedServer ->
-                    val customServers = ServerPreferences(context).getCustomServers()
-                    availableServers = ServerConfig.builtInServers + customServers
-                    if (selectedServer.id == updatedServer.id) selectedServer = updatedServer
-                },
-                clientName = clientName,
-                onClientNameChange = { newName ->
-                    clientName = newName
-                    ServerPreferences(context).saveClientName(newName)
-                },
-                availableServers = availableServers,
-                onServerDeleted = { deletedServer ->
-                    val customServers = ServerPreferences(context).getCustomServers()
-                    availableServers = ServerConfig.builtInServers + customServers
-                    if (selectedServer == deletedServer) {
-                        selectedServer = availableServers.firstOrNull() ?: ServerConfig.defaultServer
-                        ServerPreferences(context).saveSelectedServer(selectedServer)
-                    }
-                },
-                modifier = Modifier.padding(bottom = innerPadding.calculateBottomPadding())
-            )
+        }
+
+        // QR scan overlay (slides in from bottom)
+        AnimatedVisibility(
+            visible = qrScanServer != null,
+            enter = slideInVertically(
+                animationSpec = tween(300),
+                initialOffsetY = { it }
+            ) + fadeIn(tween(250)),
+            exit = slideOutVertically(
+                animationSpec = tween(250),
+                targetOffsetY = { it }
+            ) + fadeOut(tween(200)),
+            modifier = Modifier.fillMaxSize().zIndex(4f)
+        ) {
+            qrScanServer?.let { server ->
+                val certManager = remember { com.example.impulse.security.TrustedCertManager(context) }
+                QrScanScreen(
+                    serverId = server.id,
+                    onCertScanned = { hash ->
+                        certManager.trustHash(server.id, hash)
+                    },
+                    onBack = { qrScanServer = null }
+                )
+            }
         }
     }
 }

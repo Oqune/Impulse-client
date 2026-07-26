@@ -15,11 +15,13 @@ class ServerPreferences(context: Context) {
     companion object {
         private const val CUSTOM_SERVERS_KEY = "custom_servers"
         private const val SELECTED_SERVER_KEY = "selected_server"
+        private const val HIDDEN_SERVERS_KEY = "hidden_servers"
         private const val AUTO_CONNECT_KEY = "auto_connect"
         private const val AUTO_RECONNECT_KEY = "auto_reconnect"
+        private const val SERVER_AUTO_CONNECT_PREFIX = "server_auto_connect_"
+        private const val SERVER_AUTO_RECONNECT_PREFIX = "server_auto_reconnect_"
         private const val BIOMETRIC_ENABLED_KEY = "biometric_enabled"
         private const val CLIENT_NAME_KEY = "client_name"
-        private const val LOGGING_ENABLED_KEY = "logging_enabled"
     }
 
     fun getCustomServers(): List<ServerConfig> {
@@ -71,6 +73,9 @@ class ServerPreferences(context: Context) {
         val current = getCustomServers().toMutableList()
         current.removeAll { it.id == server.id }
         saveCustomServers(current)
+        val hidden = getHiddenServers().toMutableSet()
+        hidden.remove(server.id)
+        saveHiddenServers(hidden)
     }
 
     fun updateCustomServer(updatedServer: ServerConfig) {
@@ -124,6 +129,22 @@ class ServerPreferences(context: Context) {
         prefs.edit().putBoolean(AUTO_RECONNECT_KEY, enabled).apply()
     }
 
+    fun getServerAutoConnect(serverId: String): Boolean {
+        return prefs.getBoolean("$SERVER_AUTO_CONNECT_PREFIX$serverId", false)
+    }
+
+    fun setServerAutoConnect(serverId: String, enabled: Boolean) {
+        prefs.edit().putBoolean("$SERVER_AUTO_CONNECT_PREFIX$serverId", enabled).apply()
+    }
+
+    fun getServerAutoReconnect(serverId: String): Boolean {
+        return prefs.getBoolean("$SERVER_AUTO_RECONNECT_PREFIX$serverId", false)
+    }
+
+    fun setServerAutoReconnect(serverId: String, enabled: Boolean) {
+        prefs.edit().putBoolean("$SERVER_AUTO_RECONNECT_PREFIX$serverId", enabled).apply()
+    }
+
     fun getBiometricEnabled(): Boolean {
         return prefs.getBoolean(BIOMETRIC_ENABLED_KEY, false)
     }
@@ -140,17 +161,33 @@ class ServerPreferences(context: Context) {
         prefs.edit().putString(CLIENT_NAME_KEY, name).apply()
     }
 
-    /**
-     * User-controlled master switch for on-disk file logging. When disabled,
-     * [LogManager] will not write (or will stop writing) the rotating log files.
-     * Logcat output in debug builds is unaffected. Defaults to true so the
-     * existing debug behaviour is preserved.
-     */
-    fun getLoggingEnabled(): Boolean {
-        return prefs.getBoolean(LOGGING_ENABLED_KEY, true)
+    fun getHiddenServers(): Set<String> {
+        val json = prefs.getString(HIDDEN_SERVERS_KEY, null) ?: return emptySet()
+        return try {
+            val jsonArray = JSONArray(json)
+            val set = mutableSetOf<String>()
+            for (i in 0 until jsonArray.length()) {
+                set.add(jsonArray.getString(i))
+            }
+            set
+        } catch (e: Exception) {
+            emptySet()
+        }
     }
 
-    fun saveLoggingEnabled(enabled: Boolean) {
-        prefs.edit().putBoolean(LOGGING_ENABLED_KEY, enabled).apply()
+    fun saveHiddenServers(serverIds: Set<String>) {
+        val jsonArray = JSONArray()
+        serverIds.forEach { jsonArray.put(it) }
+        prefs.edit().putString(HIDDEN_SERVERS_KEY, jsonArray.toString()).apply()
+    }
+
+    fun isServerVisible(serverId: String): Boolean {
+        return serverId !in getHiddenServers()
+    }
+
+    fun setServerVisible(serverId: String, visible: Boolean) {
+        val current = getHiddenServers().toMutableSet()
+        if (visible) current.remove(serverId) else current.add(serverId)
+        saveHiddenServers(current)
     }
 }

@@ -40,4 +40,8 @@ interface MessageDao {
     /** Removes all messages for a single server. */
     @Query("DELETE FROM messages WHERE server_id = :serverId")
     suspend fun clearServer(serverId: String)
+
+    /** Removes optimistic placeholder rows (negative server_msg_id). */
+    @Query("DELETE FROM messages WHERE server_id = :serverId AND server_msg_id < 0")
+    suspend fun clearTempMessages(serverId: String): Int
 }

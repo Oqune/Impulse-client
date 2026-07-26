@@ -22,10 +22,8 @@ class ThemePreferences(context: Context) {
         private const val FONT_SIZE_KEY = "font_size"
         private const val FONT_SCALE_KEY = "font_scale"
         private const val THEME_PRESET_KEY = "theme_preset"
-        private const val EFFECTS_GLOW_KEY = "effects_glow"
-        private const val EFFECTS_GLITCH_KEY = "effects_glitch"
-        private const val EFFECTS_GLASS_KEY = "effects_glass"
-        private const val EFFECTS_CURSOR_KEY = "effects_cursor"
+        private const val OLED_KEY = "oled_enabled"
+        private const val ULTRA_CONTRAST_KEY = "ultra_contrast_enabled"
     }
 
     private val _themeModeFlow = MutableStateFlow(getThemeMode())
@@ -43,8 +41,11 @@ class ThemePreferences(context: Context) {
     private val _themePresetFlow = MutableStateFlow(getThemePreset())
     val themePresetFlow: StateFlow<ThemePreset> = _themePresetFlow.asStateFlow()
 
-    private val _effectsFlow = MutableStateFlow(getEffects())
-    val effectsFlow: StateFlow<EffectsConfig> = _effectsFlow.asStateFlow()
+    private val _oledFlow = MutableStateFlow(getOled())
+    val oledFlow: StateFlow<Boolean> = _oledFlow.asStateFlow()
+
+    private val _ultraContrastFlow = MutableStateFlow(getUltraContrast())
+    val ultraContrastFlow: StateFlow<Boolean> = _ultraContrastFlow.asStateFlow()
 
     private fun getThemeMode(): ThemeMode {
         val themeModeString = prefs.getString(THEME_MODE_KEY, ThemeMode.SYSTEM.name)
@@ -73,22 +74,16 @@ class ThemePreferences(context: Context) {
     }
 
     private fun getThemePreset(): ThemePreset {
-        val name = prefs.getString(THEME_PRESET_KEY, ThemePreset.CYBER_BLUE.name)
+        val name = prefs.getString(THEME_PRESET_KEY, ThemePreset.NEON.name)
         return try {
-            ThemePreset.valueOf(name ?: ThemePreset.CYBER_BLUE.name)
+            ThemePreset.valueOf(name ?: ThemePreset.NEON.name)
         } catch (e: IllegalArgumentException) {
-            ThemePreset.CYBER_BLUE
+            ThemePreset.NEON
         }
     }
 
-    private fun getEffects(): EffectsConfig {
-        return EffectsConfig(
-            glow = prefs.getBoolean(EFFECTS_GLOW_KEY, false),
-            glitches = prefs.getBoolean(EFFECTS_GLITCH_KEY, false),
-            glass = prefs.getBoolean(EFFECTS_GLASS_KEY, false),
-            terminalCursor = prefs.getBoolean(EFFECTS_CURSOR_KEY, false),
-        )
-    }
+    private fun getOled(): Boolean = prefs.getBoolean(OLED_KEY, false)
+    private fun getUltraContrast(): Boolean = prefs.getBoolean(ULTRA_CONTRAST_KEY, false)
 
     fun saveThemeMode(themeMode: ThemeMode) {
         prefs.edit().putString(THEME_MODE_KEY, themeMode.name).apply()
@@ -124,13 +119,13 @@ class ThemePreferences(context: Context) {
         _themePresetFlow.value = preset
     }
 
-    fun saveEffects(effects: EffectsConfig) {
-        prefs.edit()
-            .putBoolean(EFFECTS_GLOW_KEY, effects.glow)
-            .putBoolean(EFFECTS_GLITCH_KEY, effects.glitches)
-            .putBoolean(EFFECTS_GLASS_KEY, effects.glass)
-            .putBoolean(EFFECTS_CURSOR_KEY, effects.terminalCursor)
-            .apply()
-        _effectsFlow.value = effects
+    fun saveOled(enabled: Boolean) {
+        prefs.edit().putBoolean(OLED_KEY, enabled).apply()
+        _oledFlow.value = enabled
+    }
+
+    fun saveUltraContrast(enabled: Boolean) {
+        prefs.edit().putBoolean(ULTRA_CONTRAST_KEY, enabled).apply()
+        _ultraContrastFlow.value = enabled
     }
 }
