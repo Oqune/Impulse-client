@@ -51,6 +51,8 @@ object Protocol {
     const val OP_HEARTBEAT: Byte = 0x06
     const val OP_NEW_CERT_HASH: Byte = 0x07
     const val OP_KEY_EXCHANGE: Byte = 0x08
+    const val OP_KEY_EXCHANGE_KEM: Byte = 0x09
+    const val OP_KEY_EXCHANGE_DSA: Byte = 0x0A
 
     // ======================================================================
     // Binary writer / reader helpers
@@ -364,7 +366,7 @@ object Protocol {
         if (offset >= data.size) throw ProtocolException("frameLength: empty")
         val opcode = data[offset]
         return when (opcode) {
-            OP_AUTH, OP_DATA, OP_KEY_EXCHANGE -> {
+            OP_AUTH, OP_KEY_EXCHANGE, OP_KEY_EXCHANGE_KEM, OP_KEY_EXCHANGE_DSA -> {
                 if (data.size - offset < 5) throw ProtocolException("frameLength: incomplete $opcode")
                 val payloadLen = ((data[offset + 1].toInt() and 0xFF)) or
                     ((data[offset + 2].toInt() and 0xFF) shl 8) or
@@ -372,6 +374,16 @@ object Protocol {
                     ((data[offset + 4].toInt() and 0xFF) shl 24)
                 if (payloadLen < 0 || payloadLen > MAX_PAYLOAD_BYTES * 2) throw ProtocolException("frameLength: $opcode len=$payloadLen out of range")
                 1 + 4 + payloadLen
+            }
+            OP_DATA -> {
+                // Server→client Data: opcode(1) + id(u64=8) + timestamp(u64=8) + len(u32=4) + payload
+                if (data.size - offset < 21) throw ProtocolException("frameLength: incomplete OP_DATA (need 21, have ${data.size - offset})")
+                val payloadLen = ((data[offset + 17].toInt() and 0xFF)) or
+                    ((data[offset + 18].toInt() and 0xFF) shl 8) or
+                    ((data[offset + 19].toInt() and 0xFF) shl 16) or
+                    ((data[offset + 20].toInt() and 0xFF) shl 24)
+                if (payloadLen < 0 || payloadLen > MAX_PAYLOAD_BYTES * 2) throw ProtocolException("frameLength: OP_DATA len=$payloadLen out of range")
+                1 + 8 + 8 + 4 + payloadLen
             }
             OP_SYNC -> 1 + 8
             OP_HEARTBEAT -> 1 + 8

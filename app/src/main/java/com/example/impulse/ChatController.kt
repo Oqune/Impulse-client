@@ -24,7 +24,7 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.CoroutineExceptionHandler
 import java.util.concurrent.ConcurrentHashMap
 
-class ChatController private constructor(private val context: Context) {
+class ChatController(private val context: Context) {
 
     private val scope = CoroutineScope(
         SupervisorJob() + Dispatchers.IO + CoroutineExceptionHandler { _, e ->
@@ -36,11 +36,21 @@ class ChatController private constructor(private val context: Context) {
     private val repo = MessageRepository(context)
 
     private var client: WebTransportClient? = null
-    private var currentServer: ServerConfig? = null
-    private var clientName: String = ""
+    var currentServer: ServerConfig? = null
+        private set
+    var clientName: String = ""
+        private set
 
     private var myPrivateKey: ByteArray? = null
     private var myPublicKey: ByteArray? = null
+
+    val publicKeyHash: String
+        get() {
+            val pub = myPublicKey ?: return ""
+            val md = java.security.MessageDigest.getInstance("SHA-256")
+            val digest = md.digest(pub)
+            return digest.joinToString("") { "%02x".format(it) }.take(8)
+        }
 
     private var myMlDsa65Private: ByteArray? = null
     private var myMlDsa65Public: ByteArray? = null
@@ -116,6 +126,7 @@ class ChatController private constructor(private val context: Context) {
         reconnectJob = null
         currentServer = server
         clientName = name
+        LogManager.i(TAG, "connect: server=${server.id} name='$name' state=$cur")
         ensureKeyPair()
         _lastError.value = null
 
@@ -154,10 +165,11 @@ class ChatController private constructor(private val context: Context) {
         client = wtClient
         scope.launch {
             try {
-                val removed = repo.purgeExpired()
-                LogManager.i(TAG, "purged $removed expired messages on connect")
+                val purged = repo.purgeExpired()
+                val tempCleaned = repo.clearTempMessages(server.id)
+                LogManager.i(TAG, "purged $purged expired + $tempCleaned temp messages on connect")
             } catch (e: Exception) {
-                LogManager.w(TAG, "purgeExpired failed (non-fatal)", e)
+                LogManager.w(TAG, "cleanup failed (non-fatal)", e)
             }
         }
         LogManager.i(TAG, "connecting to ${server.name}")
@@ -184,6 +196,18 @@ class ChatController private constructor(private val context: Context) {
 
     fun clearError() { _lastError.value = null }
 
+    /** Clears all local messages for the current server and re-syncs from the server. */
+    suspend fun clearHistory() {
+        val serverId = currentServer?.id ?: return
+        LogManager.i(TAG, "clearHistory: clearing local messages for server=$serverId")
+        repo.clearServer(serverId)
+        // Re-request sync from the server to repopulate history
+        if (_state.value == ConnectionState.READY) {
+            val syncOk = client?.send(Protocol.buildSync(0)) ?: false
+            LogManager.i(TAG, "clearHistory: sync request sent (ok=$syncOk)")
+        }
+    }
+
     private fun onTransportState(s: ConnectionState) {
         LogManager.i(TAG, "transport state → $s")
         when (s) {
@@ -195,6 +219,8 @@ class ChatController private constructor(private val context: Context) {
                 _state.value = s
             }
             ConnectionState.ERROR -> {
+                heartbeatJob?.cancel()
+                heartbeatJob = null
                 _state.value = s
                 cancelAuthTimeout()
                 scheduleReconnect()
@@ -289,19 +315,11 @@ class ChatController private constructor(private val context: Context) {
         val frame = Protocol.buildData(blob)
         val ok = client?.send(frame) ?: false
         if (ok) {
-            val tempId = -System.currentTimeMillis()
-            scope.launch {
-                repo.upsert(
-                    MessageEntity(
-                        serverId = currentServer?.id ?: "",
-                        serverMsgId = tempId,
-                        sender = clientName,
-                        ciphertext = blob,
-                        iv = byteArrayOf(),
-                        timestamp = System.currentTimeMillis()
-                    )
-                )
-            }
+            // Emit optimistic placeholder to UI listeners only (NOT persisted to DB).
+            // The real message will arrive via onData → DB observer replaces it.
+            val tempId = -(System.currentTimeMillis())
+            val msg = DecryptedMessage(tempId, clientName, plaintext, true, System.currentTimeMillis())
+            synchronized(listeners) { listeners.forEach { it(msg) } }
         }
         return ok
     }
@@ -315,6 +333,8 @@ class ChatController private constructor(private val context: Context) {
             Protocol.OP_DATA -> "Data"
             Protocol.OP_HEARTBEAT -> "Heartbeat"
             Protocol.OP_KEY_EXCHANGE -> "KeyExchange"
+            Protocol.OP_KEY_EXCHANGE_KEM -> "KeyExchangeKem"
+            Protocol.OP_KEY_EXCHANGE_DSA -> "KeyExchangeDsa"
             Protocol.OP_NEW_CERT_HASH -> "NewCertHash"
             else -> "0x%02x".format(opcode)
         }
@@ -345,9 +365,25 @@ class ChatController private constructor(private val context: Context) {
             return
         }
         cancelAuthTimeout()
-        LogManager.i(TAG, "AUTH SUCCESS — publishing keys + requesting sync")
+        LogManager.i(TAG, "AUTH SUCCESS — publishing keys + requesting sync (clientName='$clientName')")
         _state.value = ConnectionState.AUTHENTICATING
         scope.launch {
+            // Derive group secret FIRST so sync response can be decrypted immediately
+            if (groupSecret == null && myPublicKey != null) {
+                val fp = fingerprint(myPublicKey!!)
+                peerPublicKeys[fp] = myPublicKey!!
+                LogManager.i(TAG, "single-peer: added own key to peerPublicKeys, deriving group secret")
+                recomputeGroupSecret()
+                if (groupSecret != null) {
+                    LogManager.i(TAG, "group secret derived, now sending keys + sync")
+                } else {
+                    LogManager.e(TAG, "deriveGroupKey failed for single-peer")
+                    _state.value = ConnectionState.ERROR
+                    _lastError.value = "Не удалось вывести групповый ключ"
+                    return@launch
+                }
+            }
+
             val kemOk = myPublicKey?.let { pub -> client?.send(Protocol.buildKeyExchange(pub)) } ?: false
             LogManager.i(TAG, "KeyExchange ML-KEM sent (ok=$kemOk)")
             val dsaOk = myMlDsa65Public?.let { pub -> client?.send(Protocol.buildKeyExchange(pub)) } ?: false
@@ -356,25 +392,10 @@ class ChatController private constructor(private val context: Context) {
             val syncOk = client?.send(Protocol.buildSync(lastSeen)) ?: false
             LogManager.i(TAG, "Sync request sent (ok=$syncOk, lastSeen=$lastSeen)")
 
-            // Single-peer: server excludes sender from key exchange relay, so we
-            // never receive our own key back.  Derive the group secret from our
-            // own ML-KEM key alone — this is correct for a single participant.
-            // If other peers connect later, onKeyExchange will add their keys and
-            // re-derive.
-            if (groupSecret == null && myPublicKey != null) {
-                val fp = fingerprint(myPublicKey!!)
-                peerPublicKeys[fp] = myPublicKey!!
-                LogManager.i(TAG, "single-peer: added own key to peerPublicKeys, deriving group secret")
-                recomputeGroupSecret()
-                if (groupSecret != null) {
-                    _state.value = ConnectionState.AUTHENTICATED
-                    _state.value = ConnectionState.READY
-                    LogManager.i(TAG, "READY (single-peer group secret derived)")
-                } else {
-                    LogManager.e(TAG, "deriveGroupKey failed for single-peer")
-                    _state.value = ConnectionState.ERROR
-                    _lastError.value = "Не удалось вывести групповый ключ"
-                }
+            if (groupSecret != null) {
+                _state.value = ConnectionState.AUTHENTICATED
+                _state.value = ConnectionState.READY
+                LogManager.i(TAG, "READY")
             }
         }
         startHeartbeat()
@@ -388,14 +409,18 @@ class ChatController private constructor(private val context: Context) {
             val kf = java.security.KeyFactory.getInstance("Dilithium", "BCPQC")
             kf.generatePublic(java.security.spec.X509EncodedKeySpec(key))
             val fp = fingerprint(key)
+            val wasNew = !peerMlDsa65Keys.containsKey(fp)
             peerMlDsa65Keys[fp] = key
             LogManager.i(TAG, "KeyExchange ML-DSA-65 received (${key.size} bytes, peers=${peerMlDsa65Keys.size})")
+            if (wasNew) reSendOwnKeys()
             return
         } catch (_: Exception) { }
 
         val fp = fingerprint(key)
+        val wasNew = !peerPublicKeys.containsKey(fp)
         peerPublicKeys[fp] = key
         LogManager.i(TAG, "KeyExchange ML-KEM received (${key.size} bytes, peers=${peerPublicKeys.size})")
+        if (wasNew) reSendOwnKeys()
         recomputeGroupSecret()
         if (groupSecret != null) {
             LogManager.i(TAG, "GROUP SECRET ESTABLISHED — channel ready")
@@ -405,10 +430,17 @@ class ChatController private constructor(private val context: Context) {
         }
     }
 
+    private fun reSendOwnKeys() {
+        scope.launch {
+            val kemOk = myPublicKey?.let { pub -> client?.send(Protocol.buildKeyExchange(pub)) } ?: false
+            val dsaOk = myMlDsa65Public?.let { pub -> client?.send(Protocol.buildKeyExchange(pub)) } ?: false
+            LogManager.i(TAG, "Re-broadcast own keys (kem=$kemOk dsa=$dsaOk)")
+        }
+    }
+
     private fun recomputeGroupSecret() {
         if (myPublicKey == null) return
-        val allKeys = ArrayList<ByteArray>(peerPublicKeys.values)
-        allKeys.add(myPublicKey!!)
+        val allKeys = ArrayList(peerPublicKeys.values)
         try {
             groupSecret = PqcCrypto.deriveGroupKey(allKeys)
             LogManager.i(TAG, "group secret derived from ${allKeys.size} keys")
@@ -448,6 +480,7 @@ class ChatController private constructor(private val context: Context) {
         }
         val isOwn = env.sender == clientName
         val realId = frame.serverMsgId
+        LogManager.d(TAG, "onData: sender='${env.sender}' clientName='$clientName' isOwn=$isOwn id=$realId")
         scope.launch {
             repo.upsert(
                 MessageEntity(
@@ -456,7 +489,8 @@ class ChatController private constructor(private val context: Context) {
                     sender = env.sender,
                     ciphertext = frame.payload,
                     iv = byteArrayOf(),
-                    timestamp = if (frame.timestamp != 0L) frame.timestamp else System.currentTimeMillis()
+                    timestamp = if (frame.timestamp != 0L) frame.timestamp else System.currentTimeMillis(),
+                    isOwn = isOwn
                 )
             )
         }
@@ -481,6 +515,7 @@ class ChatController private constructor(private val context: Context) {
             }
             val env = Protocol.parseInnerEnvelope(innerBytes) ?: continue
             val isOwn = env.sender == clientName
+            LogManager.d(TAG, "onSyncResponse: msgId=${m.id} sender='${env.sender}' clientName='$clientName' isOwn=$isOwn")
             scope.launch {
                 repo.upsert(
                     MessageEntity(
@@ -489,7 +524,8 @@ class ChatController private constructor(private val context: Context) {
                         sender = env.sender,
                         ciphertext = m.payload,
                         iv = byteArrayOf(),
-                        timestamp = m.timestamp
+                        timestamp = m.timestamp,
+                        isOwn = isOwn
                     )
                 )
             }
@@ -508,9 +544,12 @@ class ChatController private constructor(private val context: Context) {
             LogManager.i(TAG, "heartbeat started (interval=${HEARTBEAT_INTERVAL_MS}ms)")
             while (isActive) {
                 delay(HEARTBEAT_INTERVAL_MS)
-                val ok = client?.send(Protocol.buildHeartbeat()) ?: false
+                if (!isActive) break
+                val c = client ?: break
+                val ok = c.send(Protocol.buildHeartbeat())
                 LogManager.d(TAG, "heartbeat sent (ok=$ok)")
             }
+            LogManager.i(TAG, "heartbeat loop exited")
         }
     }
 
@@ -522,11 +561,16 @@ class ChatController private constructor(private val context: Context) {
             LogManager.w(TAG, "decryptEntity failed for ${entity.serverMsgId}", ex)
             return null
         } ?: return null
+        val recomputedIsOwn = env.sender == clientName
+        if (recomputedIsOwn != entity.isOwn) {
+            LogManager.w(TAG, "decryptEntity: isOwn mismatch for msgId=${entity.serverMsgId}: " +
+                "stored=${entity.isOwn} recomputed=$recomputedIsOwn sender='${env.sender}' clientName='$clientName'")
+        }
         return DecryptedMessage(
             serverMsgId = entity.serverMsgId,
             sender = env.sender,
             plaintext = env.content,
-            isOwn = env.sender == clientName,
+            isOwn = entity.isOwn,
             timestamp = entity.timestamp
         )
     }
@@ -545,7 +589,7 @@ class ChatController private constructor(private val context: Context) {
                 serverMsgId = e.serverMsgId,
                 sender = env.sender,
                 plaintext = env.content,
-                isOwn = env.sender == clientName,
+                isOwn = e.isOwn,
                 timestamp = e.timestamp
             )
         }
@@ -556,13 +600,5 @@ class ChatController private constructor(private val context: Context) {
         private const val HEARTBEAT_INTERVAL_MS = 30_000L
         private const val AUTH_TIMEOUT_MS = 15_000L
         private const val RECONNECT_DELAY_MS = 5_000L
-
-        @Volatile
-        private var INSTANCE: ChatController? = null
-
-        fun getInstance(context: Context): ChatController =
-            INSTANCE ?: synchronized(this) {
-                INSTANCE ?: ChatController(context.applicationContext).also { INSTANCE = it }
-            }
     }
 }
