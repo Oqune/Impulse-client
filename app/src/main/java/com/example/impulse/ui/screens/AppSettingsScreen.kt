@@ -6,9 +6,6 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
-import androidx.compose.foundation.lazy.grid.GridCells
-import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
-import androidx.compose.foundation.lazy.grid.itemsIndexed
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -22,12 +19,11 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
-import androidx.compose.ui.text.style.TextAlign
-import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import com.example.impulse.data.ServerPreferences
 import com.example.impulse.ui.theme.*
@@ -40,7 +36,7 @@ fun AppSettingsContent(
     val serverPreferences = remember { ServerPreferences(context) }
 
     var selectedTheme by remember { mutableStateOf(ThemeSettings.themeMode) }
-    var selectedPreset by remember { mutableStateOf(ThemeSettings.preset) }
+    var hue by remember { mutableFloatStateOf(ThemeSettings.hue) }
     var fontScale by remember { mutableStateOf(ThemeSettings.fontScale) }
     var oledEnabled by remember { mutableStateOf(ThemeSettings.oledEnabled) }
     var ultraContrastEnabled by remember { mutableStateOf(ThemeSettings.ultraContrastEnabled) }
@@ -52,8 +48,6 @@ fun AppSettingsContent(
     }
 
     var biometricEnabled by remember { mutableStateOf(serverPreferences.getBiometricEnabled()) }
-
-    val presets = ThemePreset.entries
 
     Column(
         modifier = modifier
@@ -160,27 +154,96 @@ fun AppSettingsContent(
             }
         }
 
-        // ── Theme presets — Grid ────────────────────────────────────
+        // ── Hue slider ──────────────────────────────────────────────
         ImpulseCard {
-            ImpulseSection(title = "Тема") {
-                LazyVerticalGrid(
-                    columns = GridCells.Fixed(2),
+            ImpulseSection(title = "Оттенок") {
+                val previewColor = hslToColor(hue, 0.88f, 0.58f)
+                val shiftedHue = if (isDarkActive) hue + 8f else hue - 6f
+                val previewBg = hslToColor(shiftedHue, 0.35f, if (isDarkActive) 0.06f else 0.96f)
+
+                // Preview row
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    // Background swatch
+                    Box(
+                        modifier = Modifier
+                            .size(40.dp)
+                            .clip(RoundedCornerShape(10.dp))
+                            .background(previewBg)
+                            .border(1.dp, MaterialTheme.colorScheme.outlineVariant, RoundedCornerShape(10.dp))
+                    )
+                    // Primary color swatch
+                    Box(
+                        modifier = Modifier
+                            .size(40.dp)
+                            .clip(RoundedCornerShape(10.dp))
+                            .background(previewColor)
+                            .border(1.dp, MaterialTheme.colorScheme.outlineVariant, RoundedCornerShape(10.dp))
+                    )
+                    // Secondary / surface
+                    Box(
+                        modifier = Modifier
+                            .size(40.dp)
+                            .clip(RoundedCornerShape(10.dp))
+                            .background(previewColor.copy(alpha = 0.18f))
+                            .border(1.dp, MaterialTheme.colorScheme.outlineVariant, RoundedCornerShape(10.dp))
+                    )
+                    Spacer(Modifier.weight(1f))
+                    Text(
+                        text = "${"%.0f".format(hue)}°",
+                        style = MaterialTheme.typography.labelMedium,
+                        color = MaterialTheme.colorScheme.primary,
+                    )
+                }
+
+                Spacer(Modifier.height(10.dp))
+
+                // Rainbow slider
+                Box(
                     modifier = Modifier
                         .fillMaxWidth()
-                        .height(((presets.size + 1) / 2 * 118).dp),
-                    horizontalArrangement = Arrangement.spacedBy(10.dp),
-                    verticalArrangement = Arrangement.spacedBy(10.dp),
-                    userScrollEnabled = false,
+                        .height(36.dp)
+                        .clip(RoundedCornerShape(18.dp))
+                        .background(
+                            Brush.horizontalGradient(
+                                colors = (0..360 step 10).map { hslToColor(it.toFloat(), 0.85f, 0.55f) }
+                            )
+                        ),
+                    contentAlignment = Alignment.CenterStart,
                 ) {
-                    itemsIndexed(presets) { _, preset ->
-                        ThemePresetCard(
-                            preset = preset,
-                            isSelected = preset == selectedPreset,
-                            isDark = isDarkActive,
-                            onClick = {
-                                selectedPreset = preset
-                                ThemeSettings.setThemePreset(preset)
-                            }
+                    Slider(
+                        value = hue,
+                        onValueChange = {
+                            hue = it
+                            ThemeSettings.setHue(it)
+                        },
+                        valueRange = 0f..360f,
+                        modifier = Modifier.fillMaxSize(),
+                        colors = SliderDefaults.colors(
+                            thumbColor = Color.White,
+                            activeTrackColor = Color.Transparent,
+                            inactiveTrackColor = Color.Transparent,
+                        ),
+                    )
+                }
+
+                Spacer(Modifier.height(4.dp))
+
+                // Hue labels
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                ) {
+                    listOf("0°" to "Красный", "60°" to "Жёлтый", "120°" to "Зелёный",
+                        "180°" to "Голубой", "240°" to "Синий", "300°" to "Розовый"
+                    ).forEach { (deg, _) ->
+                        Text(
+                            text = deg,
+                            style = MaterialTheme.typography.labelSmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.5f),
                         )
                     }
                 }
@@ -261,93 +324,4 @@ private enum class ThemeModeData(
     LIGHT(ThemeMode.LIGHT, Icons.Default.LightMode, "Светлая"),
     DARK(ThemeMode.DARK, Icons.Default.DarkMode, "Тёмная"),
     SYSTEM(ThemeMode.SYSTEM, Icons.Default.PhoneAndroid, "Система"),
-}
-
-// ── Theme preset card (2-column grid) ───────────────────────────────
-
-@Composable
-private fun ThemePresetCard(
-    preset: ThemePreset,
-    isSelected: Boolean,
-    isDark: Boolean,
-    onClick: () -> Unit,
-) {
-    val previewPrimary = if (isDark) preset.previewPrimary else preset.previewPrimaryLight
-    val previewSecondary = if (isDark) preset.previewSecondary else preset.previewSecondaryLight
-    val previewBg = if (isDark) preset.previewBg else preset.previewBgLight
-
-    val borderColor by animateColorAsState(
-        targetValue = if (isSelected) previewPrimary else MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f),
-        label = "card_border"
-    )
-
-    Card(
-        modifier = Modifier
-            .fillMaxWidth()
-            .height(108.dp),
-        shape = RoundedCornerShape(14.dp),
-        border = BorderStroke(
-            width = if (isSelected) 2.dp else 1.dp,
-            color = borderColor,
-        ),
-        colors = CardDefaults.cardColors(
-            containerColor = if (isSelected)
-                previewPrimary.copy(alpha = 0.10f)
-            else
-                MaterialTheme.colorScheme.surfaceContainerHigh
-        ),
-        onClick = onClick,
-    ) {
-        Column(
-            modifier = Modifier
-                .fillMaxSize()
-                .padding(12.dp),
-            verticalArrangement = Arrangement.SpaceBetween,
-        ) {
-            // Color swatches: bg, secondary, primary
-            Row(
-                horizontalArrangement = Arrangement.spacedBy((-4).dp)
-            ) {
-                Box(
-                    modifier = Modifier
-                        .size(26.dp)
-                        .clip(CircleShape)
-                        .background(previewBg)
-                        .border(1.dp, MaterialTheme.colorScheme.outlineVariant, CircleShape)
-                )
-                Box(
-                    modifier = Modifier
-                        .size(26.dp)
-                        .clip(CircleShape)
-                        .background(previewSecondary)
-                        .border(1.dp, MaterialTheme.colorScheme.outlineVariant, CircleShape)
-                )
-                Box(
-                    modifier = Modifier
-                        .size(26.dp)
-                        .clip(CircleShape)
-                        .background(previewPrimary)
-                        .border(1.dp, MaterialTheme.colorScheme.outlineVariant, CircleShape)
-                )
-            }
-
-            Column {
-                Text(
-                    text = preset.displayName,
-                    style = MaterialTheme.typography.bodySmall,
-                    fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Medium,
-                    color = if (isSelected) previewPrimary else MaterialTheme.colorScheme.onSurface,
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis,
-                )
-                if (isSelected) {
-                    Text(
-                        text = "Выбрана",
-                        style = MaterialTheme.typography.labelSmall,
-                        color = previewPrimary.copy(alpha = 0.7f),
-                    )
-                }
-            }
-        }
-    }
 }

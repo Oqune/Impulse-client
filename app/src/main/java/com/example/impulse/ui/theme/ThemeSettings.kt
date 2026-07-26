@@ -70,6 +70,9 @@ object ThemeSettings {
     private var _preset by mutableStateOf(ThemePreset.NEON)
     val preset: ThemePreset get() = _preset
 
+    private var _hue by mutableStateOf(140f)
+    val hue: Float get() = _hue
+
     private var _oledEnabled by mutableStateOf(false)
     val oledEnabled: Boolean get() = _oledEnabled
 
@@ -93,6 +96,7 @@ object ThemeSettings {
         scope.launch { themePreferences.fontSizeFlow.collect { _fontSize = it } }
         scope.launch { themePreferences.fontScaleFlow.collect { _fontScale = it } }
         scope.launch { themePreferences.themePresetFlow.collect { _preset = it } }
+        scope.launch { themePreferences.hueFlow.collect { _hue = it } }
         scope.launch { themePreferences.oledFlow.collect { _oledEnabled = it } }
         scope.launch { themePreferences.ultraContrastFlow.collect { _ultraContrastEnabled = it } }
     }
@@ -102,6 +106,7 @@ object ThemeSettings {
     fun setFontSize(size: FontSize) { _fontSize = size; preferences?.saveFontSize(size) }
     fun setFontScale(scale: Float) { _fontScale = scale.coerceIn(0.8f, 1.4f); preferences?.saveFontScale(_fontScale) }
     fun setThemePreset(preset: ThemePreset) { _preset = preset; preferences?.saveThemePreset(preset) }
+    fun setHue(hue: Float) { _hue = hue.coerceIn(0f, 360f); preferences?.saveHue(_hue) }
 
     fun setOledEnabled(enabled: Boolean) {
         _oledEnabled = enabled

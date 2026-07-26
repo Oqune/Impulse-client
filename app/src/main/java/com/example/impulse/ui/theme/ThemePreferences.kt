@@ -22,6 +22,7 @@ class ThemePreferences(context: Context) {
         private const val FONT_SIZE_KEY = "font_size"
         private const val FONT_SCALE_KEY = "font_scale"
         private const val THEME_PRESET_KEY = "theme_preset"
+        private const val HUE_KEY = "theme_hue"
         private const val OLED_KEY = "oled_enabled"
         private const val ULTRA_CONTRAST_KEY = "ultra_contrast_enabled"
     }
@@ -40,6 +41,9 @@ class ThemePreferences(context: Context) {
 
     private val _themePresetFlow = MutableStateFlow(getThemePreset())
     val themePresetFlow: StateFlow<ThemePreset> = _themePresetFlow.asStateFlow()
+
+    private val _hueFlow = MutableStateFlow(getHue())
+    val hueFlow: StateFlow<Float> = _hueFlow.asStateFlow()
 
     private val _oledFlow = MutableStateFlow(getOled())
     val oledFlow: StateFlow<Boolean> = _oledFlow.asStateFlow()
@@ -82,6 +86,8 @@ class ThemePreferences(context: Context) {
         }
     }
 
+    private fun getHue(): Float = prefs.getFloat(HUE_KEY, 140f)
+
     private fun getOled(): Boolean = prefs.getBoolean(OLED_KEY, false)
     private fun getUltraContrast(): Boolean = prefs.getBoolean(ULTRA_CONTRAST_KEY, false)
 
@@ -117,6 +123,11 @@ class ThemePreferences(context: Context) {
     fun saveThemePreset(preset: ThemePreset) {
         prefs.edit().putString(THEME_PRESET_KEY, preset.name).apply()
         _themePresetFlow.value = preset
+    }
+
+    fun saveHue(hue: Float) {
+        prefs.edit().putFloat(HUE_KEY, hue).apply()
+        _hueFlow.value = hue
     }
 
     fun saveOled(enabled: Boolean) {

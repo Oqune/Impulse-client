@@ -195,6 +195,63 @@ private fun Color.lighten(fraction: Float): Color {
     return Color(r, g, b, alpha)
 }
 
+// ── Hue-based palette generation ──────────────────────────────────────
+
+fun hslToColor(hue: Float, saturation: Float, lightness: Float): Color {
+    val h = ((hue % 360f) + 360f) % 360f
+    val c = (1f - kotlin.math.abs(2f * lightness - 1f)) * saturation
+    val x = c * (1f - kotlin.math.abs((h / 60f) % 2f - 1f))
+    val m = lightness - c / 2f
+    val (r, g, b) = when {
+        h < 60f -> Triple(c, x, 0f)
+        h < 120f -> Triple(x, c, 0f)
+        h < 180f -> Triple(0f, c, x)
+        h < 240f -> Triple(0f, x, c)
+        h < 300f -> Triple(x, 0f, c)
+        else -> Triple(c, 0f, x)
+    }
+    return Color(r + m, g + m, b + m)
+}
+
+private fun backgroundFromHue(hue: Float, isDark: Boolean): Color {
+    if (!isDark) return Color(0xFFF4F5F7)
+    return hslToColor(hue, 0.35f, 0.06f)
+}
+
+fun generatePaletteFromHue(hue: Float, isDark: Boolean): PaletteTriple {
+    // ── Hue shift based on brightness deviation from neutral ──
+    // More "vibrant" hues (yellow, cyan) shift more; muted hues shift less
+    val shiftedHue = if (isDark) {
+        // Dark mode: shift +delta (warmer direction)
+        val delta = (kotlin.math.abs(0.5f - 0.5f) * 12f).coerceAtMost(10f)
+        hue + delta
+    } else {
+        // Light mode: shift -delta (cooler direction)
+        val delta = (kotlin.math.abs(0.5f - 0.5f) * 10f).coerceAtMost(8f)
+        hue - delta
+    }
+
+    val darkPrimary = hslToColor(shiftedHue, 0.88f, 0.58f)
+    val darkBg = backgroundFromHue(shiftedHue, true)
+    val lightPrimary = hslToColor(shiftedHue, 0.72f, 0.38f)
+    val lightBg = backgroundFromHue(shiftedHue, false)
+
+    // OLED: slightly darker cards on pure black
+    val oledPrimary = hslToColor(shiftedHue, 0.90f, 0.55f)
+
+    // Ultra contrast: max saturation
+    val ucPrimary = hslToColor(shiftedHue, 0.95f, 0.60f)
+    val ucLightPrimary = hslToColor(shiftedHue, 0.80f, 0.32f)
+
+    return PaletteTriple(
+        dark = dark(darkPrimary, darkBg),
+        light = light(lightPrimary, lightBg),
+        oled = oled(oledPrimary),
+        ultraContrast = ultraContrast(ucPrimary),
+        lightUltraContrast = lightUltraContrast(ucLightPrimary),
+    )
+}
+
 // ── Palettes ────────────────────────────────────────────────────────────
 
 val ThemePalettes: Map<ThemePreset, PaletteTriple> = mapOf(

@@ -22,10 +22,10 @@ fun ImpulseTheme(
         ThemeMode.SYSTEM -> isSystemDark
     }
 
-    val preset = ThemeSettings.preset
-    val palettes = ThemePalettes[preset] ?: ThemePalettes[ThemePreset.NEON]!!
-    val oled = ThemeSettings.oledEnabled && darkTheme
-    val ultraContrast = ThemeSettings.ultraContrastEnabled
+      val preset = ThemeSettings.preset
+      val palettes = generatePaletteFromHue(ThemeSettings.hue, darkTheme)
+      val oled = ThemeSettings.oledEnabled && darkTheme
+      val ultraContrast = ThemeSettings.ultraContrastEnabled
 
     val colors = when {
         ultraContrast && darkTheme -> palettes.ultraContrast
