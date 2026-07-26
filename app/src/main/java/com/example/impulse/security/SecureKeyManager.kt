@@ -107,9 +107,13 @@ object SecureKeyManager {
 
     /** Signs [data] with the ML-DSA-65 private key. */
     fun signDsa(data: ByteArray): ByteArray {
-        val priv = dsaKeyPair?.privateEncoded
+        val priv = dsaKeyPair?.privateEncoded?.clone()
             ?: throw IllegalStateException("DSA key pair not generated")
-        return PqcCrypto.signMlDsa65(priv, data)
+        return try {
+            PqcCrypto.signMlDsa65(priv, data)
+        } finally {
+            priv.fill(0)
+        }
     }
 
     /** Verifies an ML-DSA-65 [signature] over [data] using [publicKey]. */

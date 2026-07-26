@@ -51,7 +51,7 @@ class WebTransportForegroundService : Service() {
     private fun acquireWakeLock() {
         val powerManager = getSystemService(Context.POWER_SERVICE) as PowerManager
         wakeLock = powerManager.newWakeLock(PowerManager.PARTIAL_WAKE_LOCK, "Impulse::WTLock")
-        wakeLock?.acquire(30 * 60 * 1000L) // 30-minute timeout to prevent indefinite battery drain
+        wakeLock?.acquire(45 * 60 * 1000L) // 45-minute timeout, re-acquired on each startConnection
     }
 
     private fun releaseWakeLock() {

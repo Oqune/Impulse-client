@@ -77,7 +77,7 @@ class ChatViewModel(
 
     /** Clears local message history for this server and re-syncs from the server. */
     suspend fun clearHistory() {
-        pendingOptimistic.clear()
+        optimisticMutex.withLock { pendingOptimistic.clear() }
         chatController.clearHistory()
     }
 
