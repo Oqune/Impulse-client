@@ -14,8 +14,10 @@ import javax.crypto.spec.SecretKeySpec
 
 object SecureKeyManager {
 
-    private var kemKeyPair: PqcCrypto.KeyPair? = null
-    private var dsaKeyPair: PqcCrypto.MlDsa65KeyPair? = null
+    @Volatile private var kemKeyPair: PqcCrypto.KeyPair? = null
+    @Volatile private var dsaKeyPair: PqcCrypto.MlDsa65KeyPair? = null
+
+    private val initLock = Any()
 
     private const val PBKDF2_ITERATIONS = 100_000
     private const val AES_KEY_LENGTH = 256
@@ -26,26 +28,30 @@ object SecureKeyManager {
     private const val BACKUP_FILENAME = "key_backup.enc"
 
     fun ensureKeyPair(context: Context) {
-        val secure = SecureStorage(context)
-        val kemPriv = secure.getBytes(SecureStorage.KEY_KEM_PRIVATE)
-        val kemPub = secure.getBytes(SecureStorage.KEY_KEM_PUBLIC)
-        if (kemPriv != null && kemPub != null) {
-            kemKeyPair = PqcCrypto.KeyPair(kemPriv, kemPub)
-        } else {
-            val kp = PqcCrypto.generateKeyPair()
-            kemKeyPair = kp
-            secure.putBytes(SecureStorage.KEY_KEM_PRIVATE, kp.privateEncoded)
-            secure.putBytes(SecureStorage.KEY_KEM_PUBLIC, kp.publicEncoded)
-        }
-        val dsaPriv = secure.getBytes(SecureStorage.KEY_DSA_PRIVATE)
-        val dsaPub = secure.getBytes(SecureStorage.KEY_DSA_PUBLIC)
-        if (dsaPriv != null && dsaPub != null) {
-            dsaKeyPair = PqcCrypto.MlDsa65KeyPair(dsaPriv, dsaPub)
-        } else {
-            val dsa = PqcCrypto.generateMlDsa65KeyPair()
-            dsaKeyPair = dsa
-            secure.putBytes(SecureStorage.KEY_DSA_PRIVATE, dsa.privateEncoded)
-            secure.putBytes(SecureStorage.KEY_DSA_PUBLIC, dsa.publicEncoded)
+        if (kemKeyPair != null && dsaKeyPair != null) return
+        synchronized(initLock) {
+            if (kemKeyPair != null && dsaKeyPair != null) return
+            val secure = SecureStorage(context)
+            val kemPriv = secure.getBytes(SecureStorage.KEY_KEM_PRIVATE)
+            val kemPub = secure.getBytes(SecureStorage.KEY_KEM_PUBLIC)
+            if (kemPriv != null && kemPub != null) {
+                kemKeyPair = PqcCrypto.KeyPair(kemPriv, kemPub)
+            } else {
+                val kp = PqcCrypto.generateKeyPair()
+                kemKeyPair = kp
+                secure.putBytes(SecureStorage.KEY_KEM_PRIVATE, kp.privateEncoded)
+                secure.putBytes(SecureStorage.KEY_KEM_PUBLIC, kp.publicEncoded)
+            }
+            val dsaPriv = secure.getBytes(SecureStorage.KEY_DSA_PRIVATE)
+            val dsaPub = secure.getBytes(SecureStorage.KEY_DSA_PUBLIC)
+            if (dsaPriv != null && dsaPub != null) {
+                dsaKeyPair = PqcCrypto.MlDsa65KeyPair(dsaPriv, dsaPub)
+            } else {
+                val dsa = PqcCrypto.generateMlDsa65KeyPair()
+                dsaKeyPair = dsa
+                secure.putBytes(SecureStorage.KEY_DSA_PRIVATE, dsa.privateEncoded)
+                secure.putBytes(SecureStorage.KEY_DSA_PUBLIC, dsa.publicEncoded)
+            }
         }
     }
 

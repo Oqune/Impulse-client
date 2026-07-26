@@ -103,24 +103,24 @@ class ChatController(private val context: Context) {
     }
 
     fun connect(server: ServerConfig, name: String) {
-        val cur = _state.value
-        if (cur == ConnectionState.CONNECTING ||
-            cur == ConnectionState.CONNECTED ||
-            cur == ConnectionState.AUTHENTICATING ||
-            cur == ConnectionState.AUTHENTICATED ||
-            cur == ConnectionState.READY
-        ) {
-            LogManager.w(TAG, "connect ignored: already active (state=$cur)")
-            return
-        }
         synchronized(lock) {
+            val cur = _state.value
+            if (cur == ConnectionState.CONNECTING ||
+                cur == ConnectionState.CONNECTED ||
+                cur == ConnectionState.AUTHENTICATING ||
+                cur == ConnectionState.AUTHENTICATED ||
+                cur == ConnectionState.READY
+            ) {
+                LogManager.w(TAG, "connect ignored: already active (state=$cur)")
+                return
+            }
             userDisconnect = false
             reconnectJob?.cancel()
             reconnectJob = null
             currentServer = server
             clientName = name
         }
-        LogManager.i(TAG, "connect: server=${server.id} name='$name' state=$cur")
+        LogManager.i(TAG, "connect: server=${server.id} name='$name'")
         ensureKeyPair()
         _lastError.value = null
 
@@ -174,12 +174,20 @@ class ChatController(private val context: Context) {
             reconnectJob = null
             heartbeatJob?.cancel()
             heartbeatJob = null
+            authTimeoutJob?.cancel()
+            authTimeoutJob = null
             client?.disconnect()
             client = null
         }
         synchronized(pendingMessagesLock) { pendingMessages.clear() }
         _state.value = ConnectionState.DISCONNECTED
         _lastError.value = null
+    }
+
+    /** Release all resources. Call when this controller will never be used again. */
+    fun destroy() {
+        disconnect()
+        scope.cancel()
     }
 
     fun clearError() { _lastError.value = null }
@@ -416,11 +424,13 @@ class ChatController(private val context: Context) {
                         val sigBytes = runCatching {
                             android.util.Base64.decode(env.signature, android.util.Base64.NO_WRAP)
                         }.getOrNull()
-                        if (sigBytes != null && sigBytes.isNotEmpty()) {
-                            if (!keyManager.verifyDsa(dsaPub, canonical, sigBytes)) {
-                                LogManager.w(TAG, "ML-DSA-65 signature verification failed for msg $realId from ${env.sender}")
-                                return@launch
-                            }
+                        if (sigBytes == null || sigBytes.isEmpty()) {
+                            LogManager.w(TAG, "REJECT msg $realId from ${env.sender}: missing ML-DSA-65 signature")
+                            return@launch
+                        }
+                        if (!keyManager.verifyDsa(dsaPub, canonical, sigBytes)) {
+                            LogManager.w(TAG, "ML-DSA-65 signature verification FAILED for msg $realId from ${env.sender}")
+                            return@launch
                         }
 
                         repo.upsert(
@@ -493,11 +503,13 @@ class ChatController(private val context: Context) {
                 val sigBytes = runCatching {
                     android.util.Base64.decode(pending.env.signature, android.util.Base64.NO_WRAP)
                 }.getOrNull()
-                if (sigBytes != null && sigBytes.isNotEmpty()) {
-                    if (!keyManager.verifyDsa(dsaPub, canonical, sigBytes)) {
-                        LogManager.w(TAG, "ML-DSA-65 signature verification failed for pending msg ${pending.serverMsgId}")
-                        return@launch
-                    }
+                if (sigBytes == null || sigBytes.isEmpty()) {
+                    LogManager.w(TAG, "REJECT pending msg ${pending.serverMsgId}: missing ML-DSA-65 signature")
+                    return@launch
+                }
+                if (!keyManager.verifyDsa(dsaPub, canonical, sigBytes)) {
+                    LogManager.w(TAG, "ML-DSA-65 signature verification FAILED for pending msg ${pending.serverMsgId}")
+                    return@launch
                 }
 
                 repo.upsert(
@@ -523,12 +535,12 @@ class ChatController(private val context: Context) {
 
     /**
      * Decrypts a per-recipient blob from a sync response or stored message.
-     * Returns (senderFingerprint, plaintext, isOwn, sender) or null on failure.
+     * Returns (senderFingerprint, sender, content, signature) or null on failure.
      */
     private fun decryptPerRecipientBlob(
         payload: ByteArray,
         serverId: String
-    ): Triple<String, String, String>? {
+    ): Quad<String, String, String, String>? {
         val pr = Protocol.Reader(payload)
 
         val senderPubHash = pr.readBytes(32)
@@ -548,7 +560,7 @@ class ChatController(private val context: Context) {
                 try {
                     val innerBytes = PqcCrypto.aesDecrypt(sharedSecret, ciphertext)
                     val env = Protocol.parseInnerEnvelope(innerBytes) ?: return null
-                    return Triple(senderFingerprint, env.sender, env.content)
+                    return Quad(senderFingerprint, env.sender, env.content, env.signature)
                 } finally {
                     sharedSecret.fill(0)
                 }
@@ -556,6 +568,8 @@ class ChatController(private val context: Context) {
         }
         return null
     }
+
+    private data class Quad<out A, out B, out C, out D>(val first: A, val second: B, val third: C, val fourth: D)
 
     private fun onSyncResponse(r: Protocol.Reader) {
         val resp = Protocol.parseSyncResponse(r)
@@ -567,21 +581,18 @@ class ChatController(private val context: Context) {
                 LogManager.w(TAG, "SyncResponse decrypt failed for ${m.id}")
                 continue
             }
-            val (senderFingerprint, sender, content) = result
+            val (senderFingerprint, sender, content, signature) = result
             val isOwn = sender == clientName
             LogManager.d(TAG, "onSyncResponse: msgId=${m.id} sender='$sender' isOwn=$isOwn")
 
             scope.launch {
-                // Sync response messages don't carry per-message signatures in the
-                // per-recipient envelope format. The signature was verified on initial
-                // receipt. We require the sender's DSA key to be present before storing.
                 val dsaPub = keyRepo.getDsaPublicKey(serverId, senderFingerprint)
                 if (dsaPub == null) {
                     LogManager.w(TAG, "DSA key missing for sync msg from $senderFingerprint, queuing")
                     val pending = PendingMessage(
                         serverMsgId = m.id,
                         senderFingerprint = senderFingerprint,
-                        env = Protocol.InnerEnvelope(sender, "", content),
+                        env = Protocol.InnerEnvelope(sender, signature, content),
                         ciphertext = m.payload,
                         timestamp = m.timestamp,
                         isOwn = isOwn
@@ -590,6 +601,20 @@ class ChatController(private val context: Context) {
                         pendingMessages.getOrPut(senderFingerprint) { mutableListOf() }.add(pending)
                     }
                     sendKeyExchangeRequest(senderFingerprint)
+                    return@launch
+                }
+
+                // Verify signature on sync response messages too
+                val canonical = Protocol.buildInnerEnvelope(sender, "", content)
+                val sigBytes = runCatching {
+                    android.util.Base64.decode(signature, android.util.Base64.NO_WRAP)
+                }.getOrNull()
+                if (sigBytes == null || sigBytes.isEmpty()) {
+                    LogManager.w(TAG, "REJECT sync msg ${m.id} from $senderFingerprint: missing ML-DSA-65 signature")
+                    return@launch
+                }
+                if (!keyManager.verifyDsa(dsaPub, canonical, sigBytes)) {
+                    LogManager.w(TAG, "ML-DSA-65 signature verification FAILED for sync msg ${m.id} from $sender")
                     return@launch
                 }
 
@@ -636,7 +661,7 @@ class ChatController(private val context: Context) {
         val serverId = currentServer?.id ?: return null
         return try {
             val result = decryptPerRecipientBlob(entity.ciphertext, serverId) ?: return null
-            val (_, sender, content) = result
+            val (_, sender, content, _) = result
             DecryptedMessage(
                 serverMsgId = entity.serverMsgId,
                 sender = sender,
@@ -655,7 +680,7 @@ class ChatController(private val context: Context) {
         return entities.mapNotNull { e ->
             try {
                 val result = decryptPerRecipientBlob(e.ciphertext, serverId) ?: return@mapNotNull null
-                val (_, sender, content) = result
+                val (_, sender, content, _) = result
                 DecryptedMessage(
                     serverMsgId = e.serverMsgId,
                     sender = sender,

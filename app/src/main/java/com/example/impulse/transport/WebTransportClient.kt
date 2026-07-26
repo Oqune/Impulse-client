@@ -292,8 +292,10 @@ class WebTransportClient(
             dispatch(frame)
         }
         if (pos > 0) {
+            val remaining = bytes.size - pos
+            System.arraycopy(bytes, pos, bytes, 0, remaining)
             acc.reset()
-            acc.write(bytes, pos, bytes.size - pos)
+            acc.write(bytes, 0, remaining)
         }
     }
 

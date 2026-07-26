@@ -91,11 +91,12 @@ class ConnectionManager private constructor(private val context: Context) {
         observerJobs.remove(serverId)
         observerJobs["error_$serverId"]?.cancel()
         observerJobs.remove("error_$serverId")
-        controllers[serverId]?.disconnect()
+        controllers[serverId]?.destroy()
         controllers.remove(serverId)
         refreshStates()
     }
 
+    @Synchronized
     fun getState(serverId: String): ConnectionState {
         return controllers[serverId]?.state?.value ?: ConnectionState.DISCONNECTED
     }

@@ -9,6 +9,8 @@ import com.example.impulse.transport.ConnectionState
 import com.example.impulse.util.LogManager
 import kotlinx.coroutines.flow.*
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 
 class ChatViewModel(
     private val chatController: ChatController,
@@ -25,26 +27,25 @@ class ChatViewModel(
     // Keyed by (sender + plaintext) so we can deduplicate when the real
     // message arrives via the DB observer.
     private val pendingOptimistic = mutableListOf<ChatController.DecryptedMessage>()
+    private val optimisticMutex = Mutex()
 
-    private fun mergeAndSort(
+    private suspend fun mergeAndSort(
         dbMessages: List<ChatController.DecryptedMessage>
-    ): List<ChatController.DecryptedMessage> {
-        // Drop pending entries whose real counterpart is now in the DB
+    ): List<ChatController.DecryptedMessage> = optimisticMutex.withLock {
         val dbIds = dbMessages.map { it.serverMsgId }.toSet()
         pendingOptimistic.removeAll { pending ->
-            // Remove if the real message arrived, or if a DB entry matches by sender+content
             pending.serverMsgId in dbIds ||
                 dbMessages.any { it.sender == pending.sender && it.plaintext == pending.plaintext }
         }
-        return (dbMessages + pendingOptimistic).distinctBy { it.serverMsgId }.sortedBy { kotlin.math.abs(it.serverMsgId) }
+        (dbMessages + pendingOptimistic).distinctBy { it.serverMsgId }.sortedBy { kotlin.math.abs(it.serverMsgId) }
     }
 
     private val optimisticListener: (ChatController.DecryptedMessage) -> Unit = { dm ->
         if (dm.serverMsgId < 0) {
-            // Optimistic placeholder — show immediately, will be replaced when
-            // the server echoes the real message back.
-            pendingOptimistic.add(dm)
-            _messages.value = mergeAndSort(_messages.value)
+            viewModelScope.launch {
+                optimisticMutex.withLock { pendingOptimistic.add(dm) }
+                _messages.value = mergeAndSort(_messages.value)
+            }
         }
     }
 
