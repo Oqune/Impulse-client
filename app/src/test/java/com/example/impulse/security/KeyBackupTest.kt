@@ -10,10 +10,9 @@ class KeyBackupTest {
 
     @Test
     fun pbkdf2_producesConsistentKeyFromSameInputs() {
-        val password = "testPassword123".toCharArray()
         val salt = ByteArray(16) { it.toByte() }
-        val key1 = SecureKeyManager.pbkdf2(password, salt, 10_000, 256)
-        val key2 = SecureKeyManager.pbkdf2(password, salt, 10_000, 256)
+        val key1 = SecureKeyManager.pbkdf2("testPassword123".toCharArray(), salt, 10_000, 256)
+        val key2 = SecureKeyManager.pbkdf2("testPassword123".toCharArray(), salt, 10_000, 256)
         assertArrayEquals("same password+salt must produce same key", key1, key2)
         assertEquals(32, key1.size)
     }
@@ -28,11 +27,10 @@ class KeyBackupTest {
 
     @Test
     fun pbkdf2_differentSaltsProduceDifferentKeys() {
-        val password = "testPassword".toCharArray()
         val salt1 = ByteArray(16) { 0x01 }
         val salt2 = ByteArray(16) { 0x02 }
-        val key1 = SecureKeyManager.pbkdf2(password, salt1, 10_000, 256)
-        val key2 = SecureKeyManager.pbkdf2(password, salt2, 10_000, 256)
+        val key1 = SecureKeyManager.pbkdf2("testPassword".toCharArray(), salt1, 10_000, 256)
+        val key2 = SecureKeyManager.pbkdf2("testPassword".toCharArray(), salt2, 10_000, 256)
         assertTrue("different salts must produce different keys", !key1.contentEquals(key2))
     }
 

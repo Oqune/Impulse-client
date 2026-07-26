@@ -249,6 +249,7 @@ object SecureKeyManager {
         resolver.delete(file, null, null)
 
         kemPriv.fill(0)
+        kemPub.fill(0)
         encrypted.fill(0)
         aesKey.fill(0)
 
@@ -265,6 +266,7 @@ object SecureKeyManager {
         val spec = PBEKeySpec(password, salt, iterations, keyLengthBits)
         val secret = factory.generateSecret(spec)
         spec.clearPassword()
+        password.fill('\u0000')
         return secret.encoded
     }
 

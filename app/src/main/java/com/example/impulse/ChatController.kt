@@ -174,7 +174,7 @@ class ChatController(private val context: Context) {
             heartbeatJob = null
             authTimeoutJob?.cancel()
             authTimeoutJob = null
-            client?.disconnect()
+            client?.destroy()
             client = null
         }
         synchronized(pendingMessagesLock) { pendingMessages.clear() }

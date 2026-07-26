@@ -1,9 +1,11 @@
-# BouncyCastle PQC (ML-KEM, ML-DSA) — reflection-based provider registration
-# Only keep the PQC provider classes actually used at runtime
--keep class org.bouncycastle.pqc.jcajce.provider.** { *; }
--keep class org.bouncycastle.pqc.jcajce.spec.** { *; }
--keep class org.bouncycastle.pqc.crypto.** { *; }
--keep class org.bouncycastle.jcajce.provider.** { *; }
+# BouncyCastle PQC — only keep the PQC provider and algorithm classes used
+# (ML-KEM-768 via Kyber, ML-DSA-65 via Dilithium)
+-keep class org.bouncycastle.pqc.jcajce.provider.BouncyCastlePQCProvider { *; }
+-keep class org.bouncycastle.pqc.jcajce.spec.KyberParameterSpec { *; }
+-keep class org.bouncycastle.pqc.jcajce.spec.DilithiumParameterSpec { *; }
+-keep class org.bouncycastle.pqc.jcajce.SecretKeyWithEncapsulation { *; }
+-keep class org.bouncycastle.pqc.jcajce.spec.KEMGenerateSpec { *; }
+-keep class org.bouncycastle.pqc.jcajce.spec.KEMExtractSpec { *; }
 -dontwarn org.bouncycastle.**
 
 # Room DAOs and entities
@@ -31,8 +33,8 @@
 -dontwarn com.ditchoom.**
 
 # ML Kit — reflection-based barcode scanning initialization
--keep class com.google.mlkit.** { *; }
--dontwarn com.google.mlkit.**
+-keep class com.google.mlkit.vision.barcode.** { *; }
+-dontwarn com.google.mlkit.vision.**
 
 # Stack traces
 -keepattributes SourceFile,LineNumberTable

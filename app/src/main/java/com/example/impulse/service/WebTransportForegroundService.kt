@@ -10,14 +10,14 @@ import android.content.Intent
 import android.os.Build
 import android.os.IBinder
 import android.os.PowerManager
-import android.util.Log
-import androidx.core.app.NotificationCompat
+import com.example.impulse.util.LogManager
+import com.example.impulse.util.NameGenerator
 import com.example.impulse.MainActivity
 import com.example.impulse.ConnectionManager
 import com.example.impulse.data.ServerPreferences
 import com.example.impulse.transport.ConnectionState
 import com.example.impulse.ui.theme.ThemeSettings
-import com.example.impulse.util.NameGenerator
+import androidx.core.app.NotificationCompat
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
@@ -115,7 +115,7 @@ class WebTransportForegroundService : Service() {
                 "Отключено", "Фоновое подключение неактивно", false
             ))
         } catch (e: Exception) {
-            Log.e(TAG, "startForeground failed", e)
+            LogManager.e(TAG, "startForeground failed", e)
         }
         when (intent?.action ?: "START") {
             "START" -> startConnection()
@@ -125,6 +125,7 @@ class WebTransportForegroundService : Service() {
     }
 
     private fun startConnection() {
+        job?.cancel()
         job = SupervisorJob()
         scope = CoroutineScope(Dispatchers.IO + job!!)
         scope?.launch {

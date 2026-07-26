@@ -315,9 +315,9 @@ object Protocol {
                 '\t' -> sb.append("\\t")
                 in ' '..'~' -> sb.append(c) // printable ASCII
                 else -> {
-                    // Emit \uXXXX for non-printable / non-ASCII to stay strict.
+                    // Non-printable or non-ASCII characters: emit as-is (UTF-8).
                     if (c < ' ') sb.append("\\u%04x".format(c.code))
-                    else sb.append(c) // UTF-8 bytes are preserved as-is
+                    else sb.append(c) // preserve UTF-8 bytes
                 }
             }
         }

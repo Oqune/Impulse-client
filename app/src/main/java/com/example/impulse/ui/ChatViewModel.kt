@@ -33,9 +33,10 @@ class ChatViewModel(
         dbMessages: List<ChatController.DecryptedMessage>
     ): List<ChatController.DecryptedMessage> = optimisticMutex.withLock {
         val dbIds = dbMessages.map { it.serverMsgId }.toSet()
+        val dbContentKeys = dbMessages.map { it.sender to it.plaintext }.toSet()
         pendingOptimistic.removeAll { pending ->
             pending.serverMsgId in dbIds ||
-                dbMessages.any { it.sender == pending.sender && it.plaintext == pending.plaintext }
+                (pending.sender to pending.plaintext) in dbContentKeys
         }
         (dbMessages + pendingOptimistic).distinctBy { it.serverMsgId }.sortedBy { kotlin.math.abs(it.serverMsgId) }
     }

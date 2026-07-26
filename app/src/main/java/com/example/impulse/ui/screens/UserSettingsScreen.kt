@@ -31,7 +31,7 @@ fun UserSettingsContent(
     var tempName by remember { mutableStateOf(clientName) }
     val context = LocalContext.current
     val pubKeyHash = remember {
-        val pub = SecureStorage(context).getBytes(SecureStorage.KEY_PQ_PUBLIC)
+        val pub = SecureStorage(context).getBytes(SecureStorage.KEY_KEM_PUBLIC)
         if (pub != null) {
             val md = java.security.MessageDigest.getInstance("SHA-256")
             md.digest(pub).joinToString("") { "%02x".format(it) }.take(8)

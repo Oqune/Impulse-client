@@ -10,6 +10,8 @@ import org.json.JSONObject
  * leaf certificate, hex-encoded). Up to [MAX_HASHES] hashes are kept per
  * server so a just-rotated cert and its predecessor are both accepted during
  * the overlap window.
+ *
+ * Thread-safe: all mutations are synchronized on the instance.
  */
 data class CertInfo(
     val sha256Hex: String,
@@ -20,11 +22,7 @@ class TrustedCertManager(context: Context) {
 
     private val storage = SecureStorage(context)
 
-    fun getHashes(serverId: String): List<String> {
-        return getCertInfos(serverId).map { it.sha256Hex }
-    }
-
-    fun getCertInfos(serverId: String): List<CertInfo> {
+    fun getCertInfos(serverId: String): List<CertInfo> = synchronized(this) {
         val raw = storage.getString(keyFor(serverId))
         if (raw.isEmpty()) {
             LogManager.d(TAG, "getCertInfos: no stored data for server=$serverId")
@@ -46,22 +44,28 @@ class TrustedCertManager(context: Context) {
                     )
                 }
             }
-            result.filter { it.sha256Hex.matches(Regex("^[0-9a-f]{64}$")) }
+            result.filter { it.sha256Hex.matches(HASH_PATTERN) }
         } catch (e: Exception) {
             LogManager.w(TAG, "getCertInfos: failed to parse for server=$serverId: ${e.message}")
             emptyList()
         }
     }
 
-    fun isTrusted(serverId: String): Boolean = getCertInfos(serverId).isNotEmpty()
+    fun getHashes(serverId: String): List<String> = synchronized(this) {
+        getCertInfos(serverId).map { it.sha256Hex }
+    }
+
+    fun isTrusted(serverId: String): Boolean = synchronized(this) {
+        getCertInfos(serverId).isNotEmpty()
+    }
 
     /** Trust a fingerprint obtained out-of-band (QR scan / manual entry). */
-    fun trustHash(serverId: String, hash: String) {
+    fun trustHash(serverId: String, hash: String) = synchronized(this) {
         val normalized = hash.lowercase().trim()
         val current = getCertInfos(serverId).toMutableList()
         if (current.any { it.sha256Hex == normalized }) {
             LogManager.i(TAG, "trustHash: hash already trusted for server=$serverId")
-            return
+            return@synchronized
         }
         current.add(CertInfo(sha256Hex = normalized, issuedAt = System.currentTimeMillis()))
         while (current.size > MAX_HASHES) current.removeAt(0)
@@ -74,16 +78,16 @@ class TrustedCertManager(context: Context) {
      * Stores as PENDING — not trusted until the user re-scans the QR code.
      * A MITM attacker who pushes a rogue hash will not gain trust.
      */
-    fun rotateHash(serverId: String, nextHash: String) {
+    fun rotateHash(serverId: String, nextHash: String) = synchronized(this) {
         val normalized = nextHash.lowercase().trim()
-        if (!normalized.matches(Regex("^[0-9a-f]{64}$"))) {
+        if (!normalized.matches(HASH_PATTERN)) {
             LogManager.w(TAG, "rotateHash: malformed hash for server=$serverId")
-            return
+            return@synchronized
         }
         val current = getCertInfos(serverId).toMutableList()
         if (current.any { it.sha256Hex == normalized }) {
             LogManager.d(TAG, "rotateHash: hash already known for server=$serverId, ignoring")
-            return
+            return@synchronized
         }
         // Store as pending — require explicit user approval (QR re-scan) to trust.
         val pending = current.toMutableList()
@@ -94,9 +98,9 @@ class TrustedCertManager(context: Context) {
     }
 
     /** Promote pending hashes to trusted after user confirms via QR scan. */
-    fun confirmPendingHashes(serverId: String) {
+    fun confirmPendingHashes(serverId: String) = synchronized(this) {
         val pending = loadPending(serverId)
-        if (pending.isEmpty()) return
+        if (pending.isEmpty()) return@synchronized
         val current = getCertInfos(serverId).toMutableList()
         for (info in pending) {
             if (current.any { it.sha256Hex == info.sha256Hex }) continue
@@ -151,7 +155,7 @@ class TrustedCertManager(context: Context) {
                     issuedAt = obj.optLong("t", System.currentTimeMillis())
                 ))
             }
-            result.filter { it.sha256Hex.matches(Regex("^[0-9a-f]{64}$")) }
+            result.filter { it.sha256Hex.matches(HASH_PATTERN) }
         } catch (e: Exception) {
             emptyList()
         }
@@ -165,5 +169,6 @@ class TrustedCertManager(context: Context) {
         private const val TAG = "TrustedCertManager"
         const val MAX_HASHES = 2
         const val MAX_PENDING_HASHES = 2
+        private val HASH_PATTERN = Regex("^[0-9a-f]{64}$")
     }
 }

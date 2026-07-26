@@ -121,15 +121,9 @@ class SecureStorage(context: Context) {
         private const val GCM_TAG_BITS = 128
 
         // Key names used across the app.
-        const val KEY_PQ_PRIVATE = "pq_kem_private_key"
-        const val KEY_PQ_PUBLIC = "pq_kem_public_key"
-        const val KEY_MLDSA65_PRIVATE = "mldsa65_private_key"
-        const val KEY_MLDSA65_PUBLIC = "mldsa65_public_key"
-
-        // Aliases for SecureKeyManager (same underlying keys, clearer naming)
-        const val KEY_KEM_PRIVATE = KEY_PQ_PRIVATE
-        const val KEY_KEM_PUBLIC = KEY_PQ_PUBLIC
-        const val KEY_DSA_PRIVATE = KEY_MLDSA65_PRIVATE
-        const val KEY_DSA_PUBLIC = KEY_MLDSA65_PUBLIC
+        const val KEY_KEM_PRIVATE = "pq_kem_private_key"
+        const val KEY_KEM_PUBLIC = "pq_kem_public_key"
+        const val KEY_DSA_PRIVATE = "mldsa65_private_key"
+        const val KEY_DSA_PUBLIC = "mldsa65_public_key"
     }
 }
