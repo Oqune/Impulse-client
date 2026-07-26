@@ -1,8 +1,9 @@
 # BouncyCastle PQC (ML-KEM, ML-DSA) — reflection-based provider registration
--keep class org.bouncycastle.pqc.** { *; }
+# Only keep the PQC provider classes actually used at runtime
+-keep class org.bouncycastle.pqc.jcajce.provider.** { *; }
+-keep class org.bouncycastle.pqc.jcajce.spec.** { *; }
+-keep class org.bouncycastle.pqc.crypto.** { *; }
 -keep class org.bouncycastle.jcajce.provider.** { *; }
--keep class org.bouncycastle.crypto.engines.** { *; }
--keep class org.bouncycastle.** { *; }
 -dontwarn org.bouncycastle.**
 
 # Room DAOs and entities
@@ -13,9 +14,8 @@
     @androidx.room.* <methods>;
 }
 
-# Compose
+# Compose — ships its own consumer ProGuard rules; only suppress warnings
 -dontwarn androidx.compose.**
--keep class androidx.compose.** { *; }
 
 # Timber custom trees
 -keep class * extends timber.log.Timber.Tree { *; }
@@ -27,9 +27,12 @@
     volatile <fields>;
 }
 
-# Socket HTTP3 / QUIC
+# Socket HTTP3 / QUIC — ships its own consumer rules; suppress warnings only
 -dontwarn com.ditchoom.**
--keep class com.ditchoom.** { *; }
+
+# ML Kit — reflection-based barcode scanning initialization
+-keep class com.google.mlkit.** { *; }
+-dontwarn com.google.mlkit.**
 
 # Stack traces
 -keepattributes SourceFile,LineNumberTable

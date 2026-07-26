@@ -18,6 +18,7 @@ import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.cancel
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -84,6 +85,12 @@ class WebTransportClient(
         }
         scope.launch { closeSessionAndStream() }
         setState(ConnectionState.DISCONNECTED)
+    }
+
+    /** Release all resources including the coroutine scope. */
+    fun destroy() {
+        disconnect()
+        scope.cancel()
     }
 
     suspend fun send(frame: ByteArray): Boolean {
@@ -236,9 +243,7 @@ class WebTransportClient(
                         if (n > 0) {
                             bytesRead += n
                             val chunk = ByteArray(n)
-                            for (i in 0 until n) {
-                                chunk[i] = buf.readByte()
-                            }
+                            for (i in 0 until n) chunk[i] = buf.readByte()
                             handleInboundChunk(chunk, acc)
                             framesRead++
                         }
