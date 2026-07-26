@@ -9,10 +9,6 @@ import kotlinx.coroutines.flow.Flow
 @Dao
 interface MessageDao {
 
-    /** Inserts a message, ignoring exact duplicates (same server + server_msg_id). */
-    @Insert(onConflict = OnConflictStrategy.IGNORE)
-    suspend fun insert(message: MessageEntity): Long
-
     /**
      * Inserts or replaces a message keyed by (server_id, server_msg_id). Used to
      * replace an optimistic local copy (negative temp id) with the authoritative

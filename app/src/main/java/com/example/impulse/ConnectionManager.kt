@@ -49,16 +49,18 @@ class ConnectionManager private constructor(private val context: Context) {
     }
 
     private fun observeController(server: ServerConfig, controller: ChatController) {
-        observerJobs[server.id]?.cancel()
-        observerJobs[server.id] = scope.launch {
-            controller.state.collect {
-                refreshStates()
+        synchronized(this) {
+            observerJobs[server.id]?.cancel()
+            observerJobs[server.id] = scope.launch {
+                controller.state.collect {
+                    refreshStates()
+                }
             }
-        }
-        observerJobs["error_${server.id}"]?.cancel()
-        observerJobs["error_${server.id}"] = scope.launch {
-            controller.lastError.collect {
-                refreshStates()
+            observerJobs["error_${server.id}"]?.cancel()
+            observerJobs["error_${server.id}"] = scope.launch {
+                controller.lastError.collect {
+                    refreshStates()
+                }
             }
         }
     }

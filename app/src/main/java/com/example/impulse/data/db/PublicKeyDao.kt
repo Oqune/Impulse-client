@@ -11,9 +11,6 @@ interface PublicKeyDao {
     @Insert(onConflict = OnConflictStrategy.REPLACE)
     suspend fun upsert(key: PublicKeyEntity): Long
 
-    @Query("SELECT * FROM public_keys WHERE server_id = :serverId")
-    suspend fun getAllForServer(serverId: String): List<PublicKeyEntity>
-
     @Query("SELECT * FROM public_keys WHERE server_id = :serverId AND fingerprint = :fingerprint")
     suspend fun getByFingerprint(serverId: String, fingerprint: String): PublicKeyEntity?
 
@@ -22,10 +19,4 @@ interface PublicKeyDao {
 
     @Query("SELECT dsa_public_key FROM public_keys WHERE server_id = :serverId AND fingerprint = :fingerprint AND dsa_public_key IS NOT NULL")
     suspend fun getDsaKey(serverId: String, fingerprint: String): ByteArray?
-
-    @Query("DELETE FROM public_keys WHERE server_id = :serverId AND last_seen < :olderThanMillis")
-    suspend fun deleteOlderThan(serverId: String, olderThanMillis: Long): Int
-
-    @Query("DELETE FROM public_keys WHERE server_id = :serverId")
-    suspend fun clearServer(serverId: String)
 }

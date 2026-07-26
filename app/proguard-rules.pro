@@ -6,7 +6,8 @@
 -keep class org.bouncycastle.pqc.jcajce.SecretKeyWithEncapsulation { *; }
 -keep class org.bouncycastle.pqc.jcajce.spec.KEMGenerateSpec { *; }
 -keep class org.bouncycastle.pqc.jcajce.spec.KEMExtractSpec { *; }
--dontwarn org.bouncycastle.**
+-dontwarn org.bouncycastle.pqc.jcajce.provider.BouncyCastlePQCProvider
+-dontwarn org.bouncycastle.pqc.jcajce.spec.**
 
 # Room DAOs and entities
 -keep class * extends androidx.room.RoomDatabase
@@ -30,11 +31,12 @@
 }
 
 # Socket HTTP3 / QUIC — ships its own consumer rules; suppress warnings only
--dontwarn com.ditchoom.**
+-dontwarn com.ditchoom.socket.**
+-dontwarn com.ditchoom.buffer.**
 
 # ML Kit — reflection-based barcode scanning initialization
 -keep class com.google.mlkit.vision.barcode.** { *; }
--dontwarn com.google.mlkit.vision.**
+-dontwarn com.google.mlkit.vision.barcode.internal.**
 
 # Stack traces
 -keepattributes SourceFile,LineNumberTable

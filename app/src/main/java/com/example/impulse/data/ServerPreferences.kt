@@ -18,8 +18,6 @@ class ServerPreferences(context: Context) {
         private const val CUSTOM_SERVERS_KEY = "custom_servers"
         private const val SELECTED_SERVER_KEY = "selected_server"
         private const val HIDDEN_SERVERS_KEY = "hidden_servers"
-        private const val AUTO_CONNECT_KEY = "auto_connect"
-        private const val AUTO_RECONNECT_KEY = "auto_reconnect"
         private const val SERVER_AUTO_CONNECT_PREFIX = "server_auto_connect_"
         private const val SERVER_AUTO_RECONNECT_PREFIX = "server_auto_reconnect_"
         private const val BIOMETRIC_ENABLED_KEY = "biometric_enabled"
@@ -67,13 +65,13 @@ class ServerPreferences(context: Context) {
         prefs.edit().putString(CUSTOM_SERVERS_KEY, jsonArray.toString()).apply()
     }
 
-    fun addCustomServer(server: ServerConfig) {
+    fun addCustomServer(server: ServerConfig) = synchronized(this) {
         val current = getCustomServers().toMutableList()
         current.add(server)
         saveCustomServers(current)
     }
 
-    fun updateCustomServer(updatedServer: ServerConfig) {
+    fun updateCustomServer(updatedServer: ServerConfig) = synchronized(this) {
         val current = getCustomServers().toMutableList()
         current.removeAll { it.id == updatedServer.id }
         current.add(updatedServer)
