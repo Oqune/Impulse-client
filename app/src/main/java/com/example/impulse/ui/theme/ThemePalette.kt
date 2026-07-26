@@ -149,14 +149,14 @@ private fun oled(
     secondary = secondary, onSecondary = Color.Black,
     secondaryContainer = secondary.copy(alpha = 0.12f), onSecondaryContainer = secondary.copy(alpha = 0.85f),
     tertiary = tertiary, onTertiary = Color.Black,
-    tertiaryContainer = tertiary.copy(alpha = 0.10f), onTertiaryContainer = tertiary.copy(alpha = 0.8f),
+    tertiaryContainer = tertiary.copy(alpha = 0.10f), onTertiaryContainer = primary.copy(alpha = 0.8f),
     error = error, onError = Color(0xFF3D0000),
     errorContainer = Color(0xFF5C1515), onErrorContainer = Color(0xFFFFCDD2),
     background = Color.Black, onSurface = primary.copy(alpha = 0.82f),
     surface = Color.Black, onBackground = primary.copy(alpha = 0.82f),
-    surfaceVariant = Color(0xFF0A0A0A), onSurfaceVariant = primary.copy(alpha = 0.48f),
-    surfaceContainer = Color(0xFF060606), surfaceContainerHigh = Color(0xFF0E0E0E),
-    surfaceContainerHighest = Color(0xFF161616),
+    surfaceVariant = Color(0xFF070707), onSurfaceVariant = primary.copy(alpha = 0.45f),
+    surfaceContainer = Color(0xFF040404), surfaceContainerHigh = Color(0xFF0A0A0A),
+    surfaceContainerHighest = Color(0xFF121212),
     outline = primary.copy(alpha = 0.22f), outlineVariant = primary.copy(alpha = 0.08f),
     scrim = Color.Black,
     inverseSurface = primary.copy(alpha = 0.82f), inverseOnSurface = Color.Black,
@@ -219,15 +219,16 @@ private fun backgroundFromHue(hue: Float, isDark: Boolean): Color {
 }
 
 fun generatePaletteFromHue(hue: Float, isDark: Boolean): PaletteTriple {
-    // ── Hue shift based on brightness deviation from neutral ──
-    // More "vibrant" hues (yellow, cyan) shift more; muted hues shift less
+    // ── Hue shift based on perceived brightness of the hue ──
+    // Yellow (60°) is brightest, blue (240°) is darkest
+    val perceivedBrightness = (1f + kotlin.math.sin(Math.toRadians((hue - 30.0)).toFloat())) / 2f
+    val delta = (kotlin.math.abs(perceivedBrightness - 0.5f) * 14f).coerceAtMost(10f)
+
     val shiftedHue = if (isDark) {
         // Dark mode: shift +delta (warmer direction)
-        val delta = (kotlin.math.abs(0.5f - 0.5f) * 12f).coerceAtMost(10f)
         hue + delta
     } else {
         // Light mode: shift -delta (cooler direction)
-        val delta = (kotlin.math.abs(0.5f - 0.5f) * 10f).coerceAtMost(8f)
         hue - delta
     }
 
