@@ -24,19 +24,21 @@ The client was completely rewritten around a modern, quantum-resistant stack:
 | Transport | `WebSocket` (OkHttp, `wss://`) | **`WebTransport`** (Android `android.net.http`, API 33+, HTTPS/QUIC) |
 | Wire format | newline-delimited JSON | **Binary protocol** (opcodes `0x01`–`0x08`, length-prefixed frames) |
 | Server auth | trust-any self-signed cert | **Certificate pinning** via `serverCertificateHashes` (TOFU) |
-| Key exchange | none / static key | **ML-KEM-768** (Kyber) + **Ed25519** sender signatures |
-| Group secret | KEM encapsulate | **Deterministic** `SHA-256(sorted pubkeys)` (server only relays pubkeys) |
-| Message crypto | weak AES-ECB | **AES-256-GCM** with the derived group key |
+| Key exchange | none / static key | **ML-KEM-768** (per-recipient KEM wrapping) + **ML-DSA-65** sender signatures |
+| Group secret | KEM encapsulate | **Per-Recipient KEM** — each message encrypted N times (once per recipient) via ML-KEM-768 encapsulation |
+| Message crypto | weak AES-ECB | **AES-256-GCM** with the per-recipient shared secret |
 | Local store | plaintext `SharedPreferences` | **Room** (message bodies AES-256-GCM encrypted at the app layer, 72 h TTL) |
 | Onboarding | manual URL + key | **QR-code scan** for the server cert hash |
 
 ## Features
 
 - 🚀 **WebTransport** transport (Android 13+), replacing WebSocket entirely.
-- 🔐 **Post-quantum E2EE**: ML-KEM-768 key generation, deterministic group-secret
-  derivation from the set of observed public keys, and AES-256-GCM message
-  encryption. Every message is signed with **ML-DSA-65 (Dilithium3)** — the NIST
-  post-quantum signature standard — so receivers can authenticate the sender
+- 🔐 **Post-quantum E2EE**: Per-Recipient KEM Wrapping — each message is
+  individually encrypted for every recipient using **ML-KEM-768** encapsulation.
+  The sender generates a random shared secret per recipient, encrypts the message
+  with **AES-256-GCM**, and sends all wrapped keys + ciphertexts in a single
+  `OP_DATA` blob. Every message is signed with **ML-DSA-65 (Dilithium3)** — the
+  NIST post-quantum signature standard — so receivers can authenticate the sender
   with PQ security.
 - 📷 **TOFU certificate pinning** via QR scan (`impulse-cert:<sha256>`). The pinned
   hash is stored in an in-module encrypted store (`SecureStorage`, Android
@@ -53,9 +55,12 @@ The client was completely rewritten around a modern, quantum-resistant stack:
   bar, QR scanner, settings, status indicators.
 - 🔁 Automatic reconnect with exponential backoff; foreground service keeps the
   connection alive; boot receiver re-connects after reboot.
+- 🔑 **Secure key export/import** — password-protected backup (PBKDF2 + AES-256-GCM)
+  for transferring your ML-KEM identity across devices; a new ML-DSA key pair is
+  generated on import for forward secrecy.
 - 🌗 Light / Dark / System themes and optional biometric app lock.
 
-## Binary protocol (opcodes `0x01`–`0x08`)
+## Binary protocol (opcodes `0x01`–`0x0A`)
 
 Every frame starts with a single opcode byte. Field encoding is little-endian:
 `u8` (1 B), `u32` (4 B length prefix), `u64` (8 B), `bytes`
@@ -71,7 +76,9 @@ signature and content live inside the AES-256-GCM `OP_DATA` payload.
 | `0x05` | `OP_DATA` | both | C→S: `len(u32)`+`payload`. S→C relay: `server_msg_id(u64)`+`timestamp(u64)`+`len(u32)`+`payload` |
 | `0x06` | `OP_HEARTBEAT` | both | `client_timestamp(u64)` |
 | `0x07` | `OP_NEW_CERT_HASH` | S→C | `hash(32 bytes raw)` + `expiry(u64)` (no length prefix) |
-| `0x08` | `OP_KEY_EXCHANGE` | both | `key_len(u32)`+`public_key` (ML-KEM-768 or ML-DSA-65, distinguished by length) |
+| `0x08` | `OP_KEY_EXCHANGE` | both | `key_len(u32)`+`public_key` (ML-KEM-768, legacy) |
+| `0x09` | `OP_KEY_EXCHANGE_KEM` | both | `key_len(u32)`+`ML-KEM-768 public key` (relayed to other clients) |
+| `0x0A` | `OP_KEY_EXCHANGE_DSA` | both | `key_len(u32)`+`ML-DSA-65 public key` (relayed to other clients) |
 
 The client sends `OP_DATA` as `len+payload`; the server prepends
 `server_msg_id` + `timestamp` when it relays the message back to all peers. The
@@ -126,20 +133,48 @@ doesn't match, authentication is rejected with `OP_AUTH_RESULT` (0x02)
 | `Ошибка сессии WebTransport` | Server not reachable or not running | Check IP/port, ensure server is running, same network |
 | Auth timeout (15 s) | Stream not established or firewall blocking QUIC | Verify UDP port 4433 is open, server supports HTTP/3 |
 
-## Group secret (deterministic, no KEM exchange)
+## Per-Recipient KEM Wrapping (replaces deterministic group key)
 
-The server has **no** ML-KEM key and only relays `OP_KEY_EXCHANGE` pubkeys. Each
-client therefore derives the group AES key locally and deterministically:
+Each message is encrypted **N times** — once per recipient — using ML-KEM-768
+encapsulation. The sender:
 
-```
-group_key = SHA-256( concat( sort_lexicographically( all_observed_ml_kem_pubkeys ) ) )[0..32]
-```
+1. Builds and signs the inner envelope (`ML-DSA-65` signature over the payload).
+2. For each cached peer ML-KEM public key, calls `encapsulateKem(recipientPubKey)`
+   to generate a fresh `(encapsulatedKey, sharedSecret)`.
+3. Encrypts the signed envelope with `AES-256-GCM(sharedSecret)` for that
+   recipient.
+4. Also encapsulates for **itself** (own public key) so it can decrypt its own
+   message.
+5. Serialises all `(recipientId, encKey, ciphertext)` triples into a single
+   `OP_DATA` blob and sends it.
 
-Because the set is sorted before hashing, every participant that has observed the
-same set of public keys derives the **identical** 32-byte key — enabling
-cross-client decryption without any KEM encapsulate/decapsulate step. The
-`AUTHENTICATED` state is reached only after the group secret is established, and
-the channel becomes `READY` (chat enabled) once key exchange completes.
+On receive, the client finds the triple whose `recipientId` matches its own
+fingerprint (SHA-256 of ML-KEM public key, truncated to 32 hex chars), calls
+`decapsulateKem(encKey)` with its private key, and decrypts with the recovered
+shared secret. The server never decrypts — it only relays the opaque blob.
+
+### Key generation & storage
+
+- **`SecureKeyManager`** (singleton) generates and caches ML-KEM-768 and
+  ML-DSA-65 key pairs. Keys are persisted in `SecureStorage` (Android Keystore +
+  AES-256-GCM). On first run, both key pairs are generated; on subsequent runs,
+  existing keys are loaded.
+- **`PublicKeyRepository`** caches peers' ML-KEM and ML-DSA public keys in a
+  Room database (`public_keys` table). Keys are indexed by `(serverId, fingerprint)`
+  and auto-expire after **72 hours** (TTL sweep).
+
+### Key exchange flow
+
+After authentication, the client sends its ML-KEM public key via `OP_KEY_EXCHANGE_KEM`
+(0x09) and its ML-DSA-65 public key via `OP_KEY_EXCHANGE_DSA` (0x0A). The server
+relays these to all other clients, who cache them for Per-Recipient encryption.
+
+### Export / Import
+
+The ML-KEM private key can be exported as a password-protected binary backup
+(PBKDF2 + AES-256-GCM) via **Settings → Export keys**. On import, the private
+key is restored and a **new ML-DSA-65 key pair** is generated (the DSA key is
+device-specific and never exported). The backup file is deleted after import.
 
 ## Requirements
 
@@ -174,10 +209,11 @@ Install the APK from `app/build/outputs/apk/debug/` onto a device/emulator
     certificate.
  4. After a successful handshake the server may push a *next* cert hash
     (`OP_NEW_CERT_HASH`); it is stored as the second slot for rotation.
-  5. ML-KEM-768 + Ed25519 public keys are exchanged automatically; once the group
-     secret is derived, chat is fully E2EE and the state becomes *READY* (the
+  5. ML-KEM-768 + ML-DSA-65 public keys are exchanged automatically via
+     `OP_KEY_EXCHANGE_KEM` (0x09) and `OP_KEY_EXCHANGE_DSA` (0x0A); once all
+     peer keys are cached, the channel becomes `READY` (chat enabled). The
      connection state machine is `CONNECTING → CONNECTED → AUTHENTICATING →
-     AUTHENTICATED → READY`; sending is blocked until `READY`).
+     AUTHENTICATED → READY`; sending is blocked until `READY`.
   6. **Authentication is automatic.** The moment the WebTransport session becomes
      `CONNECTED`, the client sends `OP_AUTH` (0x01) with the server password
      (UTF-8). If the server does not answer `OP_AUTH_RESULT` (0x02) within
@@ -214,20 +250,24 @@ Install the APK from `app/build/outputs/apk/debug/` onto a device/emulator
 ```
 app/src/main/java/com/example/impulse/
 ├── MainActivity.kt                     # entry point, biometric lock, foreground service, TTL purge
-├── ChatController.kt                   # orchestrates transport + crypto + storage + key exchange
+├── ChatController.kt                   # orchestrates transport + crypto + storage + Per-Recipient KEM
 ├── transport/
 │   ├── WebTransportClient.kt           # WebTransport session + serverCertificateHashes + reconnect
-│   ├── Protocol.kt                     # binary wire protocol (opcodes 0x01–0x08)
+│   ├── Protocol.kt                     # binary wire protocol (opcodes 0x01–0x0A)
 │   └── ConnectionState.kt
 ├── security/
-│   ├── PqcCrypto.kt                    # ML-KEM-768 + Ed25519 + AES-256-GCM + deterministic group key
+│   ├── PqcCrypto.kt                    # ML-KEM-768 + ML-DSA-65 + AES-256-GCM + Per-Recipient KEM
+│   ├── SecureKeyManager.kt             # key generation, encapsulate/decapsulate, sign/verify, export/import
 │   ├── SecureStorage.kt                # Android Keystore + AES-256-GCM store (keys + cert hashes)
 │   └── TrustedCertManager.kt           # TOFU, max-2-hash rotation
 ├── data/
 │   ├── ServerConfig.kt                 # WebTransport URL builder (https://host:port)
 │   ├── ServerPreferences.kt
 │   ├── MessageRepository.kt            # Room access + 72h TTL purge
+│   ├── PublicKeyRepository.kt          # high-level access to cached peer ML-KEM/ML-DSA public keys
 │   └── db/                             # Room entities, DAO, database, repository
+│       ├── PublicKeyEntity.kt          # Room entity for cached public keys
+│       └── PublicKeyDao.kt             # Room DAO for public key CRUD + TTL sweep
 ├── service/
 │   ├── WebTransportForegroundService.kt
 │   ├── TtlPurgeWorker.kt               # periodic 72h TTL cleanup (WorkManager)
@@ -242,14 +282,18 @@ app/src/main/java/com/example/impulse/
 ## Testing
 
 ```bash
-./gradlew test            # unit tests: PqcCrypto (ML-KEM, Ed25519, AES, group key) + Protocol (opcodes)
+./gradlew test            # unit tests: PqcCrypto (ML-KEM, ML-DSA-65, AES) + Protocol (opcodes) + SecureKeyManager + PerRecipientPacket
 ./gradlew connectedAndroidTest   # instrumented: TrustedCertManager (TOFU, max-2-hash) + MessageDao (Room, TTL)
 ```
 
 Test coverage includes:
-- `PqcCryptoTest` — ML-KEM keygen, AES-256-GCM round-trip, deterministic group key
-  (identical across clients), ML-DSA-65 sign/verify (incl. tamper & wrong-key rejection).
-- `ProtocolTest` — all opcodes `0x01`–`0x08` build/parse round-trips.
+- `PqcCryptoTest` — ML-KEM keygen, AES-256-GCM round-trip, ML-KEM encapsulate/decapsulate,
+  ML-DSA-65 sign/verify (incl. tamper & wrong-key rejection).
+- `SecureKeyManagerTest` — key generation, encapsulate/decapsulate round-trip, ML-DSA sign/verify.
+- `PerRecipientPacketTest` — Per-Recipient blob build/parse round-trip, multi-recipient
+  encapsulation (different encKeys, same plaintext).
+- `PublicKeyCacheTest` — Room entity equality, ByteArray key storage.
+- `ProtocolTest` — all opcodes `0x01`–`0x0A` build/parse round-trips.
 - `QrParseTest` — **strict** `impulse-cert:<64 hex>` validation (rejects bare 64-hex).
 - `ChatControllerIntegrationTest` — full protocol cycle simulated without a network:
   two clients derive the same group secret, auth/key-exchange frames round-trip,
@@ -307,13 +351,15 @@ flowchart TD
     VM --> CC[ChatController]
     CC --> WT[WebTransportClient]
     WT -->|HTTPS/QUIC| SRV[(Impulse Server)]
-    CC --> CRYPTO[PqcCrypto: ML-KEM-768 + Ed25519 + AES-256-GCM]
+    CC --> CRYPTO[PqcCrypto: ML-KEM-768 + ML-DSA-65 + AES-256-GCM]
+    CC --> SKM[SecureKeyManager: key gen / encapsulate / sign / export]
     CC --> CERT[TrustedCertManager: TOFU pinning]
     CC --> REPO[MessageRepository → Room]
+    CC --> PKR[PublicKeyRepository → Room: cached peer ML-KEM/DSA keys]
     CC --> LOG[LogManager: Timber Debug/File/Release trees]
-    WT -->|opcodes 0x01-0x08| SRV
-    SRV -->|OP_KEY_EXCHANGE pubkeys| CC
-    CC -->|deriveGroupKey SHA-256 sorted pubkeys| CRYPTO
+    WT -->|opcodes 0x01-0x0A| SRV
+    SRV -->|OP_KEY_EXCHANGE_KEM/DSA pubkeys| CC
+    CC -->|Per-Recipient KEM: encapsulate per peer| CRYPTO
 ```
 
 Connection state machine:
@@ -324,8 +370,8 @@ stateDiagram-v2
     DISCONNECTED --> CONNECTING: connect()
     CONNECTING --> CONNECTED: session ready
     CONNECTED --> AUTHENTICATING: auth sent
-    AUTHENTICATING --> AUTHENTICATED: auth ok + group secret
-    AUTHENTICATED --> READY: key exchange done (chat enabled)
+    AUTHENTICATING --> AUTHENTICATED: auth ok + keys exchanged
+    AUTHENTICATED --> READY: peer keys cached (chat enabled)
     READY --> ERROR: failure
     CONNECTED --> ERROR: failure
     ERROR --> CONNECTING: reconnect (exp backoff)
@@ -342,11 +388,16 @@ stateDiagram-v2
   `KeyPairGenerator.getInstance("Kyber")` with `KyberParameterSpec.kyber768`.
   ML-DSA-65 signing/verification uses `KeyFactory.getInstance("Dilithium")` via
   the same PQC provider. See
-  [`security/PqcCrypto.kt`](app/src/main/java/com/example/impulse/security/PqcCrypto.kt).
-- **Deterministic group key.** `PqcCrypto.deriveGroupKey` sorts the observed
-  ML-KEM public keys (by bytes) and returns `SHA-256(concat(...))[0..32]`. This
-  replaces the earlier KEM-encapsulate approach and lets any client that has seen
-  the same pubkey set decrypt the same traffic.
+  [`security/PqcCrypto.kt`](app/src/main/java/com/example/impulse/security/PqcCrypto.kt)
+  and [`security/SecureKeyManager.kt`](app/src/main/java/com/example/impulse/security/SecureKeyManager.kt).
+- **Per-Recipient KEM Wrapping.** Each message is encrypted N times (once per
+  recipient) using ML-KEM-768 encapsulation. The sender calls `encapsulateKem`
+  for each cached peer public key to produce a fresh `(encapsulatedKey, sharedSecret)`
+  pair, encrypts the signed envelope with AES-256-GCM using that shared secret,
+  and sends all wrapped keys + ciphertexts in a single `OP_DATA` blob. The
+  recipient calls `decapsulateKem` with its ML-KEM private key to recover the
+  shared secret and decrypt. The server never decrypts — it only relays opaque
+  bytes. Public keys are cached in Room (`PublicKeyEntity`) with a 72-hour TTL.
 - **Secure storage.** Instead of AndroidX `EncryptedSharedPreferences`
   (which pulls in the Tink + Gson transitive dependencies), the app ships a
   self-contained [`security/SecureStorage.kt`](app/src/main/java/com/example/impulse/security/SecureStorage.kt)
