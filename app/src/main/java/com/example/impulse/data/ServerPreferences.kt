@@ -69,15 +69,6 @@ class ServerPreferences(context: Context) {
         saveCustomServers(current)
     }
 
-    fun removeCustomServer(server: ServerConfig) {
-        val current = getCustomServers().toMutableList()
-        current.removeAll { it.id == server.id }
-        saveCustomServers(current)
-        val hidden = getHiddenServers().toMutableSet()
-        hidden.remove(server.id)
-        saveHiddenServers(hidden)
-    }
-
     fun updateCustomServer(updatedServer: ServerConfig) {
         val current = getCustomServers().toMutableList()
         current.removeAll { it.id == updatedServer.id }
@@ -111,22 +102,6 @@ class ServerPreferences(context: Context) {
         obj.put("description", server.description)
         obj.put("password", server.password)
         prefs.edit().putString(SELECTED_SERVER_KEY, obj.toString()).apply()
-    }
-
-    fun getAutoConnect(): Boolean {
-        return prefs.getBoolean(AUTO_CONNECT_KEY, false)
-    }
-
-    fun saveAutoConnect(enabled: Boolean) {
-        prefs.edit().putBoolean(AUTO_CONNECT_KEY, enabled).apply()
-    }
-
-    fun getAutoReconnect(): Boolean {
-        return prefs.getBoolean(AUTO_RECONNECT_KEY, false)
-    }
-
-    fun saveAutoReconnect(enabled: Boolean) {
-        prefs.edit().putBoolean(AUTO_RECONNECT_KEY, enabled).apply()
     }
 
     fun getServerAutoConnect(serverId: String): Boolean {

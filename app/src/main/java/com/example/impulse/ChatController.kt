@@ -190,8 +190,6 @@ class ChatController(private val context: Context) {
         scope.cancel()
     }
 
-    fun clearError() { _lastError.value = null }
-
     suspend fun clearHistory() {
         val serverId = currentServer?.id ?: return
         LogManager.i(TAG, "clearHistory: clearing local messages for server=$serverId")

@@ -33,9 +33,6 @@ class ThemePreferences(context: Context) {
     private val _accentColorFlow = MutableStateFlow(getAccentColor())
     val accentColorFlow: StateFlow<DynamicColor> = _accentColorFlow.asStateFlow()
 
-    private val _fontSizeFlow = MutableStateFlow(getFontSize())
-    val fontSizeFlow: StateFlow<FontSize> = _fontSizeFlow.asStateFlow()
-
     private val _fontScaleFlow = MutableStateFlow(getFontScale())
     val fontScaleFlow: StateFlow<Float> = _fontScaleFlow.asStateFlow()
 
@@ -68,15 +65,6 @@ class ThemePreferences(context: Context) {
         return DynamicColor(hue, saturation, lightness, alpha)
     }
 
-    private fun getFontSize(): FontSize {
-        val fontSizeString = prefs.getString(FONT_SIZE_KEY, FontSize.MEDIUM.name)
-        return try {
-            FontSize.valueOf(fontSizeString ?: FontSize.MEDIUM.name)
-        } catch (e: IllegalArgumentException) {
-            FontSize.MEDIUM
-        }
-    }
-
     private fun getThemePreset(): ThemePreset {
         val name = prefs.getString(THEME_PRESET_KEY, ThemePreset.NEON.name)
         return try {
@@ -106,18 +94,13 @@ class ThemePreferences(context: Context) {
         _accentColorFlow.value = accentColor
     }
 
-    fun saveFontSize(fontSize: FontSize) {
-        prefs.edit().putString(FONT_SIZE_KEY, fontSize.name).apply()
-        _fontSizeFlow.value = fontSize
+    fun saveFontScale(scale: Float) {
+        prefs.edit().putFloat(FONT_SCALE_KEY, scale).apply()
+        _fontScaleFlow.value = scale
     }
 
     private fun getFontScale(): Float {
         return prefs.getFloat(FONT_SCALE_KEY, 1.0f).coerceIn(0.8f, 1.4f)
-    }
-
-    fun saveFontScale(scale: Float) {
-        prefs.edit().putFloat(FONT_SCALE_KEY, scale).apply()
-        _fontScaleFlow.value = scale
     }
 
     fun saveThemePreset(preset: ThemePreset) {

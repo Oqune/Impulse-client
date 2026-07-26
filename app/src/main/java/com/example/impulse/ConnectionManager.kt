@@ -86,21 +86,6 @@ class ConnectionManager private constructor(private val context: Context) {
     }
 
     @Synchronized
-    fun removeServer(serverId: String) {
-        observerJobs[serverId]?.cancel()
-        observerJobs.remove(serverId)
-        observerJobs["error_$serverId"]?.cancel()
-        observerJobs.remove("error_$serverId")
-        controllers[serverId]?.destroy()
-        controllers.remove(serverId)
-        refreshStates()
-    }
-
-    @Synchronized
-    fun getState(serverId: String): ConnectionState {
-        return controllers[serverId]?.state?.value ?: ConnectionState.DISCONNECTED
-    }
-
     fun refreshStates() {
         val map = mutableMapOf<String, ServerStatus>()
         synchronized(this) {

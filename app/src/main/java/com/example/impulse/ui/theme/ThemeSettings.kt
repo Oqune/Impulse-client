@@ -61,9 +61,6 @@ object ThemeSettings {
     private var _accentColor by mutableStateOf(DynamicColor(210f, 0.85f, 0.5f))
     val accentColor: DynamicColor get() = _accentColor
 
-    private var _fontSize by mutableStateOf(FontSize.MEDIUM)
-    val fontSize: FontSize get() = _fontSize
-
     private var _fontScale by mutableStateOf(1.0f)
     val fontScale: Float get() = _fontScale
 
@@ -93,7 +90,6 @@ object ThemeSettings {
         preferences = themePreferences
         scope.launch { themePreferences.themeModeFlow.collect { _themeMode = it } }
         scope.launch { themePreferences.accentColorFlow.collect { _accentColor = it } }
-        scope.launch { themePreferences.fontSizeFlow.collect { _fontSize = it } }
         scope.launch { themePreferences.fontScaleFlow.collect { _fontScale = it } }
         scope.launch { themePreferences.themePresetFlow.collect { _preset = it } }
         scope.launch { themePreferences.hueFlow.collect { _hue = it } }
