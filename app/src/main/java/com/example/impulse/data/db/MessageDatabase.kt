@@ -4,6 +4,8 @@ import android.content.Context
 import androidx.room.Database
 import androidx.room.Room
 import androidx.room.RoomDatabase
+import androidx.room.migration.Migration
+import androidx.sqlite.db.SupportSQLiteDatabase
 
 /**
  * Room database holding chat messages.
@@ -21,15 +23,40 @@ import androidx.room.RoomDatabase
  * contain plaintext. This satisfies the "SQLite with encryption" requirement
  * without any native dependency, and the app now loads on 16 KB-page devices.
  */
-@Database(entities = [MessageEntity::class], version = 1, exportSchema = false)
+@Database(entities = [MessageEntity::class, PublicKeyEntity::class], version = 3, exportSchema = false)
 abstract class MessageDatabase : RoomDatabase() {
     abstract fun messageDao(): MessageDao
+    abstract fun publicKeyDao(): PublicKeyDao
 
     companion object {
         private const val DB_NAME = "impulse_messages.db"
 
         @Volatile
         private var INSTANCE: MessageDatabase? = null
+
+        private val MIGRATION_1_2 = object : Migration(1, 2) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL("ALTER TABLE messages ADD COLUMN is_own INTEGER NOT NULL DEFAULT 0")
+            }
+        }
+
+        private val MIGRATION_2_3 = object : Migration(2, 3) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL(
+                    """CREATE TABLE IF NOT EXISTS `public_keys` (
+                        `id` INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL,
+                        `server_id` TEXT NOT NULL,
+                        `fingerprint` TEXT NOT NULL,
+                        `kem_public_key` BLOB,
+                        `dsa_public_key` BLOB,
+                        `first_seen` INTEGER NOT NULL DEFAULT 0,
+                        `last_seen` INTEGER NOT NULL DEFAULT 0
+                    )"""
+                )
+                db.execSQL("CREATE INDEX IF NOT EXISTS `index_public_keys_server_id` ON `public_keys` (`server_id`)")
+                db.execSQL("CREATE UNIQUE INDEX IF NOT EXISTS `index_public_keys_server_id_fingerprint` ON `public_keys` (`server_id`, `fingerprint`)")
+            }
+        }
 
         fun getInstance(context: Context): MessageDatabase {
             return INSTANCE ?: synchronized(this) {
@@ -42,7 +69,10 @@ abstract class MessageDatabase : RoomDatabase() {
                 context.applicationContext,
                 MessageDatabase::class.java,
                 DB_NAME
-            ).fallbackToDestructiveMigration(false).build()
+            )
+                .addMigrations(MIGRATION_1_2, MIGRATION_2_3)
+                .fallbackToDestructiveMigrationOnDowngrade(dropAllTables = true)
+                .build()
         }
     }
 }
