@@ -1,5 +1,8 @@
 package com.example.impulse.security
 
+import org.bouncycastle.jcajce.SecretKeyWithEncapsulation
+import org.bouncycastle.jcajce.spec.KEMExtractSpec
+import org.bouncycastle.jcajce.spec.KEMGenerateSpec
 import org.bouncycastle.pqc.jcajce.provider.BouncyCastlePQCProvider
 import org.bouncycastle.pqc.jcajce.spec.DilithiumParameterSpec
 import org.bouncycastle.pqc.jcajce.spec.KyberParameterSpec
@@ -11,6 +14,7 @@ import java.security.Signature
 import java.security.spec.PKCS8EncodedKeySpec
 import java.security.spec.X509EncodedKeySpec
 import javax.crypto.Cipher
+import javax.crypto.KeyGenerator
 import javax.crypto.SecretKey
 import javax.crypto.spec.GCMParameterSpec
 import javax.crypto.spec.SecretKeySpec
@@ -70,6 +74,35 @@ object PqcCrypto {
             privateEncoded = pair.private.encoded,
             publicEncoded = pair.public.encoded
         )
+    }
+
+    /**
+     * ML-KEM-768 encapsulation: generates a random shared secret and wraps it
+     * for the recipient's public key. Returns (encapsulatedKey, sharedSecret).
+     *
+     * Uses the JCA KeyGenerator with KEMGenerateSpec per BouncyCastle 1.79 API.
+     * The sharedSecret is 32 bytes, suitable as an AES-256-GCM key.
+     */
+    fun encapsulateKem(recipientPubKey: ByteArray): Pair<ByteArray, ByteArray> {
+        val kf = KeyFactory.getInstance("Kyber", PQC_PROVIDER)
+        val pub = kf.generatePublic(X509EncodedKeySpec(recipientPubKey))
+        val kg = KeyGenerator.getInstance("Kyber", PQC_PROVIDER)
+        kg.init(KEMGenerateSpec(pub, "AES"), SecureRandom())
+        val sk = kg.generateKey() as SecretKeyWithEncapsulation
+        return Pair(sk.encapsulation, sk.encoded)
+    }
+
+    /**
+     * ML-KEM-768 decapsulation: unwraps the encapsulated key using our private key.
+     * Returns the same 32-byte shared secret that the sender's encapsulate produced.
+     */
+    fun decapsulateKem(encapsulatedKey: ByteArray, privateEncoded: ByteArray): ByteArray {
+        val kf = KeyFactory.getInstance("Kyber", PQC_PROVIDER)
+        val priv = kf.generatePrivate(PKCS8EncodedKeySpec(privateEncoded))
+        val kg = KeyGenerator.getInstance("Kyber", PQC_PROVIDER)
+        kg.init(KEMExtractSpec(priv, encapsulatedKey, "AES"), SecureRandom())
+        val sk = kg.generateKey() as SecretKeyWithEncapsulation
+        return sk.encoded
     }
 
     // ------------------------------------------------------------------
