@@ -54,12 +54,6 @@ object CrashLog {
         return if (f.exists()) f.readText() else null
     }
 
-    /** Returns the list of stored crash reports (newest first). */
-    fun history(context: Context): List<File> {
-        val dir = File(context.filesDir, HISTORY_DIR)
-        return dir.listFiles()?.sortedByDescending { it.lastModified() } ?: emptyList()
-    }
-
     /** Call once at startup (Application.onCreate) so we know where to write. */
     fun init(context: Context) {
         lastContext = context.applicationContext

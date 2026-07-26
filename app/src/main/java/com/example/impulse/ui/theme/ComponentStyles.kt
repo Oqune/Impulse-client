@@ -70,16 +70,6 @@ fun ImpulseSection(
     }
 }
 
-// ── Divider ─────────────────────────────────────────────────────────────
-
-@Composable
-fun ImpulseDivider(modifier: Modifier = Modifier) {
-    HorizontalDivider(
-        modifier = modifier.padding(vertical = 6.dp),
-        color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.4f)
-    )
-}
-
 // ── Toggle row ──────────────────────────────────────────────────────────
 
 @Composable
@@ -118,47 +108,6 @@ fun ImpulseToggle(
                 uncheckedTrackColor = MaterialTheme.colorScheme.surfaceVariant,
             )
         )
-    }
-}
-
-// ── Radio row ───────────────────────────────────────────────────────────
-
-@Composable
-fun ImpulseRadio(
-    title: String,
-    selected: Boolean,
-    onClick: () -> Unit,
-    modifier: Modifier = Modifier,
-) {
-    Row(
-        modifier = modifier
-            .fillMaxWidth()
-            .padding(vertical = 4.dp),
-        verticalAlignment = Alignment.CenterVertically,
-    ) {
-        RadioButton(
-            selected = selected,
-            onClick = onClick,
-            colors = RadioButtonDefaults.colors(
-                selectedColor = MaterialTheme.colorScheme.primary,
-            )
-        )
-        Spacer(Modifier.width(8.dp))
-        Text(title, style = MaterialTheme.typography.bodyMedium)
-    }
-}
-
-// ── Icon button ─────────────────────────────────────────────────────────
-
-@Composable
-fun ImpulseIconButton(
-    icon: ImageVector,
-    contentDescription: String,
-    onClick: () -> Unit,
-    tint: Color = MaterialTheme.colorScheme.onSurfaceVariant,
-) {
-    IconButton(onClick = onClick) {
-        Icon(icon, contentDescription = contentDescription, tint = tint)
     }
 }
 
@@ -269,111 +218,5 @@ fun ShieldBadge(
                 fontWeight = FontWeight.Medium,
             )
         }
-    }
-}
-
-// ── Certificate card ────────────────────────────────────────────────────
-
-@Composable
-fun CertificateCard(
-    fingerprint: String,
-    label: String,
-    isVerified: Boolean,
-    modifier: Modifier = Modifier,
-) {
-    val borderColor = if (isVerified)
-        MaterialTheme.colorScheme.primary.copy(alpha = 0.5f)
-    else
-        MaterialTheme.colorScheme.outlineVariant
-
-    Card(
-        modifier = modifier.fillMaxWidth(),
-        shape = RoundedCornerShape(10.dp),
-        colors = CardDefaults.cardColors(
-            containerColor = MaterialTheme.colorScheme.surfaceContainer
-        ),
-        border = androidx.compose.foundation.BorderStroke(1.dp, borderColor),
-    ) {
-        Column(modifier = Modifier.padding(14.dp)) {
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.SpaceBetween,
-                verticalAlignment = Alignment.CenterVertically,
-            ) {
-                Text(
-                    text = label,
-                    style = MaterialTheme.typography.labelMedium,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                )
-                ShieldBadge(
-                    text = if (isVerified) "VERIFIED" else "UNVERIFIED",
-                    color = if (isVerified) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.error,
-                )
-            }
-            Spacer(Modifier.height(8.dp))
-            Text(
-                text = fingerprint,
-                style = MaterialTheme.typography.bodySmall,
-                fontFamily = FontFamily.Monospace,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                lineHeight = 16.sp,
-            )
-        }
-    }
-}
-
-// ── Status indicator ────────────────────────────────────────────────────
-
-@Composable
-fun StatusIndicator(
-    label: String,
-    isActive: Boolean,
-    modifier: Modifier = Modifier,
-) {
-    val dotColor = if (isActive) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.error
-    val textColor = if (isActive) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.error
-
-    Row(
-        modifier = modifier,
-        verticalAlignment = Alignment.CenterVertically,
-        horizontalArrangement = Arrangement.spacedBy(6.dp),
-    ) {
-        Box(
-            modifier = Modifier
-                .size(8.dp)
-                .clip(RoundedCornerShape(4.dp))
-                .background(dotColor)
-        )
-        Text(
-            text = label,
-            style = MaterialTheme.typography.labelSmall,
-            fontFamily = FontFamily.Monospace,
-            color = textColor,
-        )
-    }
-}
-
-// ── Fingerprint display ─────────────────────────────────────────────────
-
-@Composable
-fun FingerprintDisplay(
-    hash: String,
-    modifier: Modifier = Modifier,
-    label: String = "SHA-256",
-) {
-    Column(modifier = modifier.fillMaxWidth()) {
-        Text(
-            text = label,
-            style = MaterialTheme.typography.labelSmall,
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
-            modifier = Modifier.padding(bottom = 4.dp)
-        )
-        Text(
-            text = hash.chunked(16).joinToString("\n"),
-            style = MaterialTheme.typography.bodySmall,
-            fontFamily = FontFamily.Monospace,
-            color = MaterialTheme.colorScheme.primary,
-            lineHeight = 18.sp,
-        )
     }
 }

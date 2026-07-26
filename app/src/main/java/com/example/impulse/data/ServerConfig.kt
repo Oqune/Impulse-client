@@ -1,6 +1,5 @@
 package com.example.impulse.data
 
-import java.util.regex.Pattern
 import java.util.UUID
 
 data class ServerConfig(
@@ -43,11 +42,4 @@ data class ServerConfig(
         val defaultServer = production
         val builtInServers = listOf(production, local)
     }
-}
-
-fun isValidIpAddress(ip: String): Boolean {
-    val ipPattern = Pattern.compile(
-        "^((25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)\\.){3}(25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)$"
-    )
-    return ipPattern.matcher(ip).matches()
 }

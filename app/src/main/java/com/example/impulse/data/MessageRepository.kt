@@ -21,12 +21,6 @@ class MessageRepository(context: Context) {
 
     private val dao: MessageDao = MessageDatabase.getInstance(context).messageDao()
 
-    /** Inserts a message; returns true if it was actually stored (not a duplicate). */
-    suspend fun store(message: MessageEntity): Boolean {
-        val id = dao.insert(message)
-        return id != -1L
-    }
-
     /**
      * Inserts or replaces a message keyed by (server_id, server_msg_id). Used to
      * replace an optimistic local copy (negative temp id) with the authoritative

@@ -906,5 +906,3 @@ internal fun parseCertHash(raw: String): String? {
 
     return null
 }
-
-internal fun isValidCertHash(raw: String): Boolean = parseCertHash(raw) != null

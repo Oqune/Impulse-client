@@ -32,8 +32,6 @@ object LogManager {
 
     // ---- Level helpers ----
 
-    fun v(tag: String, message: String) = Timber.tag(tag).v(message)
-    fun v(tag: String, lazy: () -> String) = Timber.tag(tag).v(lazy())
     fun d(tag: String, message: String) = Timber.tag(tag).d(message)
     fun d(tag: String, lazy: () -> String) = Timber.tag(tag).d(lazy())
     fun i(tag: String, message: String) = Timber.tag(tag).i(message)

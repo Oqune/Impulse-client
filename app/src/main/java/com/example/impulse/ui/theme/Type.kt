@@ -133,8 +133,6 @@ fun getTypography(scale: Float = 1.0f): Typography {
     )
 }
 
-fun getTypography(fontSize: FontSize = FontSize.MEDIUM): Typography = getTypography(fontSize.scale)
-
 fun scaledFontSize(baseSp: androidx.compose.ui.unit.TextUnit, scale: Float): androidx.compose.ui.unit.TextUnit {
     return (baseSp.value * scale).sp
 }

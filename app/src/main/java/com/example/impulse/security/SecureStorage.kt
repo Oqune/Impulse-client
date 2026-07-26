@@ -87,8 +87,6 @@ class SecureStorage(context: Context) {
         prefs.edit().remove(key).apply()
     }
 
-    fun contains(key: String): Boolean = prefs.contains(key)
-
     /** Encrypts [plain] -> base64(IV(12) || ciphertext). */
     private fun encrypt(plain: ByteArray): String {
         val cipher = Cipher.getInstance(AES_GCM)

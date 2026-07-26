@@ -189,7 +189,7 @@ dependencies {
     // arm64-v8a/armeabi-v7a/x86_64), pulled in transitively via
     // socket-http3 → socket-quic-default → socket-quic-quiche. NativeLibLoader
     // resolves it with System.loadLibrary — no manual extraction needed.
-    // buffer/flow транзитивно подтягиваются socket-http3 — не указываем явно.
+    // buffer/flow are pulled transitively via socket-http3 — do not declare explicitly.
     implementation("com.ditchoom:socket-http3:3.9.5")
     implementation("com.ditchoom:socket-quic:3.9.5")
 

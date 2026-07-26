@@ -85,10 +85,6 @@ class TrustedCertManager(context: Context) {
         storage.remove(keyFor(serverId))
     }
 
-    fun getIssuedAt(serverId: String): Long? {
-        return getCertInfos(serverId).firstOrNull()?.issuedAt
-    }
-
     private fun persist(serverId: String, infos: List<CertInfo>) {
         val arr = JSONArray()
         infos.forEach { info ->

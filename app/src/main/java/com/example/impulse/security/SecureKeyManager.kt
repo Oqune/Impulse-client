@@ -83,15 +83,6 @@ object SecureKeyManager {
     fun verifyDsa(publicKey: ByteArray, data: ByteArray, signature: ByteArray): Boolean =
         PqcCrypto.verifyMlDsa65(publicKey, data, signature)
 
-    fun reset() {
-        kemKeyPair?.privateEncoded?.fill(0)
-        kemKeyPair?.publicEncoded?.fill(0)
-        dsaKeyPair?.privateEncoded?.fill(0)
-        dsaKeyPair?.publicEncoded?.fill(0)
-        kemKeyPair = null
-        dsaKeyPair = null
-    }
-
     fun exportKeyBackup(context: Context): String {
         val password = generatePassword(8)
         val salt = ByteArray(SALT_LENGTH).also { SecureRandom().nextBytes(it) }

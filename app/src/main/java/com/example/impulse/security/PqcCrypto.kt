@@ -34,9 +34,8 @@ import javax.crypto.spec.SecretKeySpec
  *
  *    Key generation uses algorithm **"Kyber"** with [KyberParameterSpec.kyber768].
  *
- *  - The group AES key is derived **deterministically** from the set of observed
- *    ML-KEM public keys (see [deriveGroupKey]); the server only relays pubkeys,
- *    there is no KEM encapsulate/decapsulate step.
+ *  - Each recipient gets a unique shared secret via ML-KEM encapsulation;
+ *    the server only relays pubkeys, there is no shared group key.
  *
  *  - Sender authentication: every message is signed with **ML-DSA-65**
  *    (Dilithium3, NIST-standardised post-quantum signature) so receivers can
@@ -108,42 +107,6 @@ object PqcCrypto {
         val sharedSecret = sk.encoded.copyOf()
         sk.encoded.fill(0)
         return sharedSecret
-    }
-
-    // ------------------------------------------------------------------
-    // Deterministic group shared secret (server relays pubkeys, no KEM)
-    // ------------------------------------------------------------------
-
-    /**
-     * Derives the group AES-256 key deterministically from the SET of all
-     * participant ML-KEM public keys (X509-encoded). Every client that has
-     * observed the same set computes the identical key, so cross-client
-     * decryption works without any KEM exchange.
-     *
-     * Algorithm (order-independent):
-     *   1. Collect all public keys (including our own).
-     *   2. Sort them lexicographically by raw bytes.
-     *   3. SHA-256 over their concatenation → 32-byte group secret.
-     *
-     * @param publicKeys all known participant public keys (X509-encoded bytes).
-     */
-    fun deriveGroupKey(publicKeys: Collection<ByteArray>): ByteArray {
-        require(publicKeys.isNotEmpty()) { "At least one public key is required" }
-        val sorted = publicKeys.map { it.copyOf() }.sortedWith(ByteArrayComparator)
-        val digest = java.security.MessageDigest.getInstance("SHA-256")
-        for (key in sorted) digest.update(key)
-        return digest.digest()
-    }
-
-    private object ByteArrayComparator : Comparator<ByteArray> {
-        override fun compare(a: ByteArray, b: ByteArray): Int {
-            val len = minOf(a.size, b.size)
-            for (i in 0 until len) {
-                val d = (a[i].toInt() and 0xFF) - (b[i].toInt() and 0xFF)
-                if (d != 0) return d
-            }
-            return a.size - b.size
-        }
     }
 
     // ------------------------------------------------------------------
@@ -220,6 +183,4 @@ object PqcCrypto {
         return SecretKeySpec(k, "AES")
     }
 
-    /** Helper to generate a random 32-byte symmetric key (used for tests). */
-    fun randomKey(): ByteArray = ByteArray(32).also { SecureRandom().nextBytes(it) }
 }

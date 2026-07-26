@@ -6,7 +6,7 @@ package com.example.impulse.transport
  * Every frame starts with a single opcode byte. The server and client share the
  * same opcode table, so the server never sees any plaintext metadata: the
  * sender, message type, signatures and content are all encrypted inside the
- * [OP_DATA] payload (which itself is AES-256-GCM encrypted with the group key).
+ * [OP_DATA] payload (which itself is AES-256-GCM encrypted per-recipient).
  *
  * Field encoding (little-endian):
  *  - u8   : 1 byte
@@ -181,17 +181,6 @@ object Protocol {
     }
 
     /**
-     * KeyExchange: opcode + key_len(u32) + public_key(bytes).
-     * [publicKey] is the X509-encoded ML-KEM public key.
-     */
-    fun buildKeyExchange(publicKey: ByteArray): ByteArray {
-        val w = Writer()
-        w.u8(OP_KEY_EXCHANGE.toInt())
-        w.bytes(publicKey)
-        return w.toByteArray()
-    }
-
-    /**
      * KeyExchange with explicit opcode: opcode + key_len(u32) + public_key(bytes).
      * Used for OP_KEY_EXCHANGE_KEM (0x09) and OP_KEY_EXCHANGE_DSA (0x0A).
      */
@@ -202,32 +191,6 @@ object Protocol {
         return w.toByteArray()
     }
 
-    /** AuthResult: opcode + success(u8) [error_message bytes if !success]. */
-    fun buildAuthResult(success: Boolean, errorMessage: String? = null): ByteArray {
-        val w = Writer()
-        w.u8(OP_AUTH_RESULT.toInt())
-        w.u8(if (success) 1 else 0)
-        if (!success && errorMessage != null) w.utf8(errorMessage)
-        return w.toByteArray()
-    }
-
-    /** SyncResponse: opcode + count(u32) { id(u64), timestamp(u64), len(u32), payload(bytes) }. */
-    fun buildSyncResponse(messages: List<SyncMessage>): ByteArray {
-        val w = Writer()
-        w.u8(OP_SYNC_RESPONSE.toInt())
-        w.u32(messages.size.toLong())
-        for (m in messages) {
-            w.u64(m.id)
-            w.u64(m.timestamp)
-            w.bytes(m.payload)
-        }
-        return w.toByteArray()
-    }
-
-    // ======================================================================
-    // Server -> Client frame parsers
-    // ======================================================================
-
     data class AuthResultFrame(val success: Boolean, val errorMessage: String?)
 
     /** Parses an AuthResult frame (opcode already consumed by caller). */
@@ -236,14 +199,6 @@ object Protocol {
         val msg = if (r.remaining() > 0) r.utf8() else null
         return AuthResultFrame(ok, msg)
     }
-
-    /**
-     * Parses the Auth (0x01) frame body (opcode already consumed by caller) and
-     * returns the SHA-256 hex the client sent. Used by tests/diagnostics to
-     * verify the wire format; the plaintext password is never recoverable from
-     * this value.
-     */
-    fun parseAuthPassword(r: Reader): String = r.utf8()
 
     data class SyncMessage(
         val id: Long,

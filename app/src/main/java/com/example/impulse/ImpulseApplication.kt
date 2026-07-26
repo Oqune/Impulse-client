@@ -8,7 +8,6 @@ import com.example.impulse.util.LogManager
 import com.example.impulse.service.TtlPurgeWorker
 import java.io.PrintWriter
 import java.io.StringWriter
-import kotlin.system.exitProcess
 
 /**
  * Application entry point.

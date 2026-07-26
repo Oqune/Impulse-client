@@ -102,10 +102,7 @@ object ThemeSettings {
     }
 
     fun setThemeMode(mode: ThemeMode) { _themeMode = mode; preferences?.saveThemeMode(mode) }
-    fun setAccentColor(color: DynamicColor) { _accentColor = color; preferences?.saveAccentColor(color) }
-    fun setFontSize(size: FontSize) { _fontSize = size; preferences?.saveFontSize(size) }
     fun setFontScale(scale: Float) { _fontScale = scale.coerceIn(0.8f, 1.4f); preferences?.saveFontScale(_fontScale) }
-    fun setThemePreset(preset: ThemePreset) { _preset = preset; preferences?.saveThemePreset(preset) }
     fun setHue(hue: Float) { _hue = hue.coerceIn(0f, 360f); preferences?.saveHue(_hue) }
 
     fun setOledEnabled(enabled: Boolean) {
