@@ -88,17 +88,15 @@ class ConnectionManager private constructor(private val context: Context) {
     @Synchronized
     fun refreshStates() {
         val map = mutableMapOf<String, ServerStatus>()
-        synchronized(this) {
-            for ((id, ctrl) in controllers) {
-                val server = ctrl.currentServer ?: continue
-                map[id] = ServerStatus(
-                    server = server,
-                    state = ctrl.state.value,
-                    lastError = ctrl.lastError.value,
-                    lastMessage = null,
-                    lastMessageTime = 0L,
-                )
-            }
+        for ((id, ctrl) in controllers) {
+            val server = ctrl.currentServer ?: continue
+            map[id] = ServerStatus(
+                server = server,
+                state = ctrl.state.value,
+                lastError = ctrl.lastError.value,
+                lastMessage = null,
+                lastMessageTime = 0L,
+            )
         }
         _serverStates.value = map
     }

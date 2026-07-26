@@ -50,6 +50,8 @@ object PqcCrypto {
     private const val GCM_TAG_LENGTH = 128 // bits
     private const val PQC_PROVIDER = "BCPQC"
 
+    private val secureRandom = SecureRandom()
+
     init {
         if (Security.getProvider(PQC_PROVIDER) == null) {
             Security.addProvider(BouncyCastlePQCProvider())
@@ -67,7 +69,7 @@ object PqcCrypto {
     /** Generates a new ML-KEM-768 key pair. */
     fun generateKeyPair(): KeyPair {
         val kpg = KeyPairGenerator.getInstance("Kyber", PQC_PROVIDER)
-        kpg.initialize(KyberParameterSpec.kyber768, SecureRandom())
+        kpg.initialize(KyberParameterSpec.kyber768, secureRandom)
         val pair = kpg.generateKeyPair()
         return KeyPair(
             privateEncoded = pair.private.encoded,
@@ -86,7 +88,7 @@ object PqcCrypto {
         val kf = KeyFactory.getInstance("Kyber", PQC_PROVIDER)
         val pub = kf.generatePublic(X509EncodedKeySpec(recipientPubKey))
         val kg = KeyGenerator.getInstance("Kyber", PQC_PROVIDER)
-        kg.init(KEMGenerateSpec(pub, "AES"), SecureRandom())
+        kg.init(KEMGenerateSpec(pub, "AES"), secureRandom)
         val sk = kg.generateKey() as SecretKeyWithEncapsulation
         val sharedSecret = sk.encoded.copyOf()
         val encapsulation = sk.encapsulation
@@ -102,7 +104,7 @@ object PqcCrypto {
         val kf = KeyFactory.getInstance("Kyber", PQC_PROVIDER)
         val priv = kf.generatePrivate(PKCS8EncodedKeySpec(privateEncoded))
         val kg = KeyGenerator.getInstance("Kyber", PQC_PROVIDER)
-        kg.init(KEMExtractSpec(priv, encapsulatedKey, "AES"), SecureRandom())
+        kg.init(KEMExtractSpec(priv, encapsulatedKey, "AES"), secureRandom)
         val sk = kg.generateKey() as SecretKeyWithEncapsulation
         val sharedSecret = sk.encoded.copyOf()
         sk.encoded.fill(0)
@@ -124,7 +126,7 @@ object PqcCrypto {
     /** Generates an ML-DSA-65 signing key pair via BouncyCastle PQC. */
     fun generateMlDsa65KeyPair(): MlDsa65KeyPair {
         val kpg = KeyPairGenerator.getInstance("Dilithium", PQC_PROVIDER)
-        kpg.initialize(DilithiumParameterSpec.dilithium3, SecureRandom())
+        kpg.initialize(DilithiumParameterSpec.dilithium3, secureRandom)
         val pair = kpg.generateKeyPair()
         return MlDsa65KeyPair(pair.private.encoded, pair.public.encoded)
     }
@@ -160,7 +162,7 @@ object PqcCrypto {
     /** Encrypts [plaintext] with the 32-byte [key]; output = IV(12) || ciphertext. */
     fun aesEncrypt(key: ByteArray, plaintext: ByteArray): ByteArray {
         val secretKey = toAesKey(key)
-        val iv = ByteArray(GCM_IV_LENGTH).also { SecureRandom().nextBytes(it) }
+        val iv = ByteArray(GCM_IV_LENGTH).also { secureRandom.nextBytes(it) }
         val cipher = Cipher.getInstance(AES_GCM)
         cipher.init(Cipher.ENCRYPT_MODE, secretKey, GCMParameterSpec(GCM_TAG_LENGTH, iv))
         val ct = cipher.doFinal(plaintext)

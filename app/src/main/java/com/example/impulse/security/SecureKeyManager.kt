@@ -12,12 +12,24 @@ import javax.crypto.spec.GCMParameterSpec
 import javax.crypto.spec.PBEKeySpec
 import javax.crypto.spec.SecretKeySpec
 
+/**
+ * Manages post-quantum ML-KEM-768 and ML-DSA-65 key pairs.
+ *
+ * Keys are persisted in [SecureStorage] (AES-256-GCM encrypted via Android
+ * KeyStore) and cached in memory for the process lifetime. All public
+ * accessors return **defensive copies** so callers cannot mutate internal
+ * key material.
+ *
+ * Backup export uses PBKDF2-HMAC-SHA256 (100k iterations) + AES-256-GCM
+ * with a random 16-character password displayed to the user.
+ */
 object SecureKeyManager {
 
     @Volatile private var kemKeyPair: PqcCrypto.KeyPair? = null
     @Volatile private var dsaKeyPair: PqcCrypto.MlDsa65KeyPair? = null
 
     private val initLock = Any()
+    private val secureRandom = SecureRandom()
 
     private const val PBKDF2_ITERATIONS = 100_000
     private const val AES_KEY_LENGTH = 256
@@ -26,7 +38,13 @@ object SecureKeyManager {
     private const val SALT_LENGTH = 16
     private const val BACKUP_VERSION: Byte = 0x02
     private const val BACKUP_FILENAME = "key_backup.enc"
+    private const val BACKUP_PASSWORD_LENGTH = 16
 
+    /**
+     * Ensures both ML-KEM and ML-DSA key pairs exist, loading from
+     * [SecureStorage] or generating fresh ones on first run.
+     * Thread-safe: double-checked locking with [initLock].
+     */
     fun ensureKeyPair(context: Context) {
         if (kemKeyPair != null && dsaKeyPair != null) return
         synchronized(initLock) {
@@ -55,44 +73,101 @@ object SecureKeyManager {
         }
     }
 
-    fun getKemPublicKey(): ByteArray = kemKeyPair?.publicEncoded
-        ?: throw IllegalStateException("Key pair not generated")
+    /** Returns a **copy** of the ML-KEM public key (X509-encoded). Callers must zero after use. */
+    fun getKemPublicKey(): ByteArray = (kemKeyPair?.publicEncoded
+        ?: throw IllegalStateException("Key pair not generated")).clone()
 
-    fun getKemPrivateKey(): ByteArray = kemKeyPair?.privateEncoded
-        ?: throw IllegalStateException("Key pair not generated")
+    /** Returns a **copy** of the ML-KEM private key (PKCS8-encoded). Callers MUST zero after use. */
+    fun getKemPrivateKey(): ByteArray = (kemKeyPair?.privateEncoded
+        ?: throw IllegalStateException("Key pair not generated")).clone()
 
-    fun getDsaPublicKey(): ByteArray = dsaKeyPair?.publicEncoded
-        ?: throw IllegalStateException("DSA key pair not generated")
+    /** Returns a **copy** of the ML-DSA-65 public key (X509-encoded). */
+    fun getDsaPublicKey(): ByteArray = (dsaKeyPair?.publicEncoded
+        ?: throw IllegalStateException("DSA key pair not generated")).clone()
 
+    /** SHA-256 fingerprint of the KEM public key, truncated to 32 hex chars. */
     fun getFingerprint(): String {
         val pub = getKemPublicKey()
         return fingerprintForBytes(pub)
     }
 
+    /** SHA-256 fingerprint of arbitrary bytes, truncated to 32 hex chars. */
     fun fingerprintForBytes(data: ByteArray): String {
         val digest = MessageDigest.getInstance("SHA-256")
         return digest.digest(data).joinToString("") { "%02x".format(it) }.take(32)
     }
 
+    /** ML-KEM-768 encapsulation for [recipientPubKey]. Returns (encapsulatedKey, sharedSecret). */
     fun encapsulateKem(recipientPubKey: ByteArray): Pair<ByteArray, ByteArray> =
         PqcCrypto.encapsulateKem(recipientPubKey)
 
+    /** ML-KEM-768 decapsulation. Returns the 32-byte shared secret. */
     fun decapsulateKem(encapsulatedKey: ByteArray): ByteArray =
         PqcCrypto.decapsulateKem(encapsulatedKey, getKemPrivateKey())
 
+    /** Signs [data] with the ML-DSA-65 private key. */
     fun signDsa(data: ByteArray): ByteArray {
         val priv = dsaKeyPair?.privateEncoded
             ?: throw IllegalStateException("DSA key pair not generated")
         return PqcCrypto.signMlDsa65(priv, data)
     }
 
+    /** Verifies an ML-DSA-65 [signature] over [data] using [publicKey]. */
     fun verifyDsa(publicKey: ByteArray, data: ByteArray, signature: ByteArray): Boolean =
         PqcCrypto.verifyMlDsa65(publicKey, data, signature)
 
-    fun exportKeyBackup(context: Context): String {
-        val password = generatePassword(8)
-        val salt = ByteArray(SALT_LENGTH).also { SecureRandom().nextBytes(it) }
-        val iv = ByteArray(GCM_IV_LENGTH).also { SecureRandom().nextBytes(it) }
+    /**
+     * Exports the ML-KEM private key as an encrypted backup file.
+     * The user-selected location is used via [ACTION_OPEN_DOCUMENT_TREE].
+     * Returns the backup password (16 chars) that must be shown to the user.
+     */
+    fun exportKeyBackup(context: Context, treeUri: android.net.Uri): String {
+        val password = generatePassword(BACKUP_PASSWORD_LENGTH)
+        val salt = ByteArray(SALT_LENGTH).also { secureRandom.nextBytes(it) }
+        val iv = ByteArray(GCM_IV_LENGTH).also { secureRandom.nextBytes(it) }
+
+        val secure = SecureStorage(context)
+        val kemPriv = secure.getBytes(SecureStorage.KEY_KEM_PRIVATE)
+            ?: throw IllegalStateException("No ML-KEM private key to export")
+        val kemPub = secure.getBytes(SecureStorage.KEY_KEM_PUBLIC)
+            ?: throw IllegalStateException("No ML-KEM public key to export")
+
+        val aesKey = pbkdf2(password.toCharArray(), salt, PBKDF2_ITERATIONS, AES_KEY_LENGTH)
+        val encrypted = aesGcmEncrypt(aesKey, iv, kemPriv)
+
+        val bytes = ByteArrayOutputStream()
+        bytes.write(BACKUP_VERSION.toInt())
+        bytes.write(salt)
+        bytes.write(iv)
+        bytes.write(intToLittleEndian(encrypted.size))
+        bytes.write(encrypted)
+        bytes.write(intToLittleEndian(kemPub.size))
+        bytes.write(kemPub)
+
+        val resolver = context.contentResolver
+        val mimeType = "application/octet-stream"
+        val fileUri = android.provider.DocumentsContract.createDocument(
+            resolver, treeUri, mimeType, BACKUP_FILENAME
+        ) ?: throw IOException("Failed to create backup file")
+        resolver.openOutputStream(fileUri)?.use { it.write(bytes.toByteArray()) }
+            ?: throw IOException("Failed to write backup file")
+
+        kemPriv.fill(0)
+        kemPub.fill(0)
+        encrypted.fill(0)
+        aesKey.fill(0)
+
+        return password
+    }
+
+    /**
+     * Exports to a user-selected SAF directory (preferred) or falls back to
+     * MediaStore Downloads (legacy, public directory).
+     */
+    fun exportKeyBackupLegacy(context: Context): String {
+        val password = generatePassword(BACKUP_PASSWORD_LENGTH)
+        val salt = ByteArray(SALT_LENGTH).also { secureRandom.nextBytes(it) }
+        val iv = ByteArray(GCM_IV_LENGTH).also { secureRandom.nextBytes(it) }
 
         val secure = SecureStorage(context)
         val kemPriv = secure.getBytes(SecureStorage.KEY_KEM_PRIVATE)
@@ -181,9 +256,8 @@ object SecureKeyManager {
     }
 
     private fun generatePassword(length: Int): String {
-        val chars = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789"
-        val random = SecureRandom()
-        return (1..length).map { chars[random.nextInt(chars.length)] }.joinToString("")
+        val chars = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789!@#$%^&*"
+        return (1..length).map { chars[secureRandom.nextInt(chars.length)] }.joinToString("")
     }
 
     internal fun pbkdf2(password: CharArray, salt: ByteArray, iterations: Int, keyLengthBits: Int): ByteArray {

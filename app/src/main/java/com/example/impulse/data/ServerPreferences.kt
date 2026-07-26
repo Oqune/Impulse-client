@@ -2,6 +2,7 @@ package com.example.impulse.data
 
 import android.content.Context
 import android.content.SharedPreferences
+import com.example.impulse.security.SecureStorage
 import org.json.JSONArray
 import org.json.JSONObject
 
@@ -11,6 +12,7 @@ class ServerPreferences(context: Context) {
         "server_preferences",
         Context.MODE_PRIVATE
     )
+    private val secure = SecureStorage(context)
 
     companion object {
         private const val CUSTOM_SERVERS_KEY = "custom_servers"
@@ -22,6 +24,7 @@ class ServerPreferences(context: Context) {
         private const val SERVER_AUTO_RECONNECT_PREFIX = "server_auto_reconnect_"
         private const val BIOMETRIC_ENABLED_KEY = "biometric_enabled"
         private const val CLIENT_NAME_KEY = "client_name"
+        private const val SECURE_PWD_PREFIX = "server_pwd_"
     }
 
     fun getCustomServers(): List<ServerConfig> {
@@ -31,14 +34,15 @@ class ServerPreferences(context: Context) {
             val servers = mutableListOf<ServerConfig>()
             for (i in 0 until jsonArray.length()) {
                 val obj = jsonArray.getJSONObject(i)
+                val id = obj.getString("id")
                 servers.add(
                     ServerConfig(
-                        id = obj.getString("id"),
+                        id = id,
                         name = obj.getString("name"),
                         ipAddress = obj.getString("ipAddress"),
                         port = obj.getInt("port"),
                         description = obj.getString("description"),
-                        password = obj.optString("password", "")
+                        password = secure.getString("$SECURE_PWD_PREFIX$id", "")
                     )
                 )
             }
@@ -57,8 +61,8 @@ class ServerPreferences(context: Context) {
             obj.put("ipAddress", server.ipAddress)
             obj.put("port", server.port)
             obj.put("description", server.description)
-            obj.put("password", server.password)
             jsonArray.put(obj)
+            secure.putString("$SECURE_PWD_PREFIX${server.id}", server.password)
         }
         prefs.edit().putString(CUSTOM_SERVERS_KEY, jsonArray.toString()).apply()
     }
@@ -80,13 +84,14 @@ class ServerPreferences(context: Context) {
         val json = prefs.getString(SELECTED_SERVER_KEY, null) ?: return null
         return try {
             val obj = JSONObject(json)
+            val id = obj.getString("id")
             ServerConfig(
-                id = obj.getString("id"),
+                id = id,
                 name = obj.getString("name"),
                 ipAddress = obj.getString("ipAddress"),
                 port = obj.getInt("port"),
                 description = obj.getString("description"),
-                password = obj.optString("password", "")
+                password = secure.getString("$SECURE_PWD_PREFIX$id", "")
             )
         } catch (e: Exception) {
             null
@@ -100,8 +105,8 @@ class ServerPreferences(context: Context) {
         obj.put("ipAddress", server.ipAddress)
         obj.put("port", server.port)
         obj.put("description", server.description)
-        obj.put("password", server.password)
         prefs.edit().putString(SELECTED_SERVER_KEY, obj.toString()).apply()
+        secure.putString("$SECURE_PWD_PREFIX${server.id}", server.password)
     }
 
     fun getServerAutoConnect(serverId: String): Boolean {

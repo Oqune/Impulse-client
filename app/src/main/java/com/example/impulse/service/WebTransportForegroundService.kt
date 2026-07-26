@@ -14,7 +14,6 @@ import android.util.Log
 import androidx.core.app.NotificationCompat
 import com.example.impulse.MainActivity
 import com.example.impulse.ConnectionManager
-import com.example.impulse.data.ServerConfig
 import com.example.impulse.data.ServerPreferences
 import com.example.impulse.transport.ConnectionState
 import com.example.impulse.ui.theme.ThemeSettings
@@ -23,7 +22,6 @@ import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
-import kotlinx.coroutines.flow.collect
 import kotlinx.coroutines.launch
 /**
  * Keeps the WebTransport connection alive while the app is in the background.
@@ -36,6 +34,7 @@ class WebTransportForegroundService : Service() {
     private val NOTIFICATION_ID = 1001
     private var wakeLock: PowerManager.WakeLock? = null
     private var job: Job? = null
+    private var scope: CoroutineScope? = null
     private var serverPreferences: ServerPreferences? = null
     private var connectionManager: com.example.impulse.ConnectionManager? = null
     private var notificationManager: NotificationManager? = null
@@ -127,8 +126,8 @@ class WebTransportForegroundService : Service() {
 
     private fun startConnection() {
         job = SupervisorJob()
-        val scope = CoroutineScope(Dispatchers.IO + job!!)
-        scope.launch {
+        scope = CoroutineScope(Dispatchers.IO + job!!)
+        scope?.launch {
             val savedServer = serverPreferences?.getSelectedServer()
             val savedClientName = serverPreferences?.getClientName()?.takeIf { it.isNotBlank() }
                 ?: NameGenerator.generate()

@@ -7,7 +7,6 @@ import com.example.impulse.data.ServerConfig
 import com.example.impulse.data.db.MessageEntity
 import com.example.impulse.security.PqcCrypto
 import com.example.impulse.security.SecureKeyManager
-import com.example.impulse.security.SecureStorage
 import com.example.impulse.security.TrustedCertManager
 import com.example.impulse.transport.ConnectionState
 import com.example.impulse.transport.Protocol
@@ -33,7 +32,6 @@ class ChatController(private val context: Context) {
             LogManager.e(TAG, "uncaught coroutine exception", e)
         }
     )
-    private val secure = SecureStorage(context)
     private val certManager = TrustedCertManager(context)
     private val repo = MessageRepository(context)
 
@@ -719,8 +717,8 @@ class ChatController(private val context: Context) {
                 Protocol.OP_SYNC_RESPONSE -> onSyncResponse(r)
                 Protocol.OP_DATA -> onData(r)
                 Protocol.OP_HEARTBEAT -> onHeartbeat()
-                Protocol.OP_KEY_EXCHANGE -> onKeyExchange(r)
-                Protocol.OP_KEY_EXCHANGE_KEM -> onKeyExchange(r, Protocol.OP_KEY_EXCHANGE_KEM)
+            Protocol.OP_KEY_EXCHANGE -> { /* legacy: ignore untagged key exchange */ }
+            Protocol.OP_KEY_EXCHANGE_KEM -> onKeyExchange(r, Protocol.OP_KEY_EXCHANGE_KEM)
                 Protocol.OP_KEY_EXCHANGE_DSA -> onKeyExchange(r, Protocol.OP_KEY_EXCHANGE_DSA)
                 Protocol.OP_NEW_CERT_HASH -> { }
                 else -> LogManager.w(TAG, "UNKNOWN opcode 0x%02x (${raw.size} bytes)".format(opcode))
@@ -773,31 +771,6 @@ class ChatController(private val context: Context) {
             }
         }
         startHeartbeat()
-    }
-
-    private fun onKeyExchange(r: Protocol.Reader) {
-        val frame = Protocol.parseKeyExchange(r)
-        val key = frame.publicKey
-        val serverId = currentServer?.id ?: return
-
-        try {
-            val kf = java.security.KeyFactory.getInstance("Dilithium", "BCPQC")
-            kf.generatePublic(java.security.spec.X509EncodedKeySpec(key))
-            val fp = keyManager.fingerprintForBytes(key)
-            scope.launch { keyRepo.cacheKey(serverId, fp, null, key) }
-            LogManager.i(TAG, "KeyExchange ML-DSA-65 received, cached")
-            processPendingMessages(fp)
-        } catch (_: Exception) {
-            try {
-                val kf = java.security.KeyFactory.getInstance("Kyber", "BCPQC")
-                kf.generatePublic(java.security.spec.X509EncodedKeySpec(key))
-                val fp = keyManager.fingerprintForBytes(key)
-                scope.launch { keyRepo.cacheKey(serverId, fp, key, null) }
-                LogManager.i(TAG, "KeyExchange ML-KEM received, cached")
-            } catch (e: Exception) {
-                LogManager.w(TAG, "KeyExchange validation failed", e)
-            }
-        }
     }
 
     private fun onKeyExchange(r: Protocol.Reader, opcode: Byte) {

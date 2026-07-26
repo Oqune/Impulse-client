@@ -46,9 +46,6 @@ data class DynamicColor(
             blue
         ))
     }
-
-    fun lightColor(isDark: Boolean = false): Color = toColor(isDark)
-    fun darkColor(isDark: Boolean = false): Color = toColor(isDark)
 }
 
 object ThemeSettings {
