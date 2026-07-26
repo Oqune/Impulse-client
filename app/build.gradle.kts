@@ -21,7 +21,8 @@ android {
     }
     buildTypes {
         release {
-            isMinifyEnabled = false
+            isMinifyEnabled = true
+            isShrinkResources = true
             proguardFiles(
                 getDefaultProguardFile("proguard-android-optimize.txt"),
                 "proguard-rules.pro"
@@ -163,10 +164,6 @@ dependencies {
     implementation(libs.room.runtime)
     implementation(libs.room.ktx)
     kapt(libs.room.compiler)
-    // Room 2.8.4's annotation processor pulls an old kotlin-metadata-jvm (via
-    // kotlinpoet) that cannot read Kotlin 2.4.0 class metadata, breaking kapt's
-    // incremental processor. Force the matching metadata library on the kapt
-    // classpath (Gradle picks the highest version).
     kapt("org.jetbrains.kotlin:kotlin-metadata-jvm:2.4.0")
 
     // Post-quantum cryptography (ML-KEM-768) and AES-256-GCM.
