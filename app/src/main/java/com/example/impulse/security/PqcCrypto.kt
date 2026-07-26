@@ -89,7 +89,10 @@ object PqcCrypto {
         val kg = KeyGenerator.getInstance("Kyber", PQC_PROVIDER)
         kg.init(KEMGenerateSpec(pub, "AES"), SecureRandom())
         val sk = kg.generateKey() as SecretKeyWithEncapsulation
-        return Pair(sk.encapsulation, sk.encoded)
+        val sharedSecret = sk.encoded.copyOf()
+        val encapsulation = sk.encapsulation
+        sk.encoded.fill(0)
+        return Pair(encapsulation, sharedSecret)
     }
 
     /**
@@ -102,7 +105,9 @@ object PqcCrypto {
         val kg = KeyGenerator.getInstance("Kyber", PQC_PROVIDER)
         kg.init(KEMExtractSpec(priv, encapsulatedKey, "AES"), SecureRandom())
         val sk = kg.generateKey() as SecretKeyWithEncapsulation
-        return sk.encoded
+        val sharedSecret = sk.encoded.copyOf()
+        sk.encoded.fill(0)
+        return sharedSecret
     }
 
     // ------------------------------------------------------------------

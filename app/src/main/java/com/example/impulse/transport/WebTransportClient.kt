@@ -17,7 +17,6 @@ import kotlinx.coroutines.CoroutineExceptionHandler
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
-import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -48,6 +47,7 @@ class WebTransportClient(
         }
     )
 
+    private val lock = Any()
     private var session: WebTransportSession? = null
     private var stream: WebTransportStream? = null
     private var connectionJob: Job? = null
@@ -63,9 +63,11 @@ class WebTransportClient(
     fun connect(url: String) {
         intentionalClose.set(false)
         val uri = URI(url)
-        currentHost = uri.host
-        if (uri.port > 0) currentPort = uri.port
-        currentPath = uri.path.ifEmpty { "/" }
+        synchronized(lock) {
+            currentHost = uri.host
+            if (uri.port > 0) currentPort = uri.port
+            currentPath = uri.path.ifEmpty { "/" }
+        }
         LogManager.i(TAG, "connect() url=$url host=$currentHost port=$currentPort path=$currentPath")
         startConnectTimeout()
         startSession()
@@ -74,17 +76,19 @@ class WebTransportClient(
     fun disconnect() {
         LogManager.i(TAG, "disconnect() called — closing session/stream")
         intentionalClose.set(true)
-        connectTimeoutJob?.cancel()
-        connectTimeoutJob = null
-        connectionJob?.cancel()
-        connectionJob = null
-        closeSessionAndStream()
+        synchronized(lock) {
+            connectTimeoutJob?.cancel()
+            connectTimeoutJob = null
+            connectionJob?.cancel()
+            connectionJob = null
+        }
+        scope.launch { closeSessionAndStream() }
         setState(ConnectionState.DISCONNECTED)
     }
 
     suspend fun send(frame: ByteArray): Boolean {
         if (intentionalClose.get()) return false
-        val st = stream ?: run {
+        val st = synchronized(lock) { stream } ?: run {
             LogManager.w(TAG, "SEND BLOCKED: stream is null (state=${_state.value})")
             return false
         }
@@ -113,8 +117,7 @@ class WebTransportClient(
     }
 
     private fun startConnectTimeout() {
-        connectTimeoutJob?.cancel()
-        connectTimeoutJob = scope.launch {
+        val job = scope.launch {
             delay(CONNECT_TIMEOUT_MS)
             if (intentionalClose.get()) return@launch
             if (_state.value == ConnectionState.CONNECTING) {
@@ -122,11 +125,17 @@ class WebTransportClient(
                 setState(ConnectionState.ERROR)
             }
         }
+        synchronized(lock) {
+            connectTimeoutJob?.cancel()
+            connectTimeoutJob = job
+        }
     }
 
     private fun cancelConnectTimeout() {
-        connectTimeoutJob?.cancel()
-        connectTimeoutJob = null
+        synchronized(lock) {
+            connectTimeoutJob?.cancel()
+            connectTimeoutJob = null
+        }
     }
 
     private fun startSession() {
@@ -142,8 +151,7 @@ class WebTransportClient(
 
         LogManager.i(TAG, "connecting to $currentHost:$currentPort${currentPath} " +
             "(pinnedHashes=${serverCertHashes.size})")
-        connectionJob?.cancel()
-        connectionJob = scope.launch {
+        val job = scope.launch {
             try {
                 val pinned = serverCertHashes.mapNotNull { hex -> certHashFromHex(hex) }
                 if (pinned.isEmpty()) {
@@ -173,8 +181,10 @@ class WebTransportClient(
                     )
                     LogManager.i(TAG, "WebTransport session opened, opening bidirectional stream...")
                     val wtStream = wtSession.openBidiStream()
-                    session = wtSession
-                    stream = wtStream
+                    synchronized(lock) {
+                        session = wtSession
+                        stream = wtStream
+                    }
                     cancelConnectTimeout()
                     val elapsed = System.currentTimeMillis() - startTime
                     LogManager.i(TAG, "SESSION READY (${elapsed}ms) — session + stream open")
@@ -206,6 +216,10 @@ class WebTransportClient(
                 cancelConnectTimeout()
                 setState(ConnectionState.ERROR)
             }
+        }
+        synchronized(lock) {
+            connectionJob?.cancel()
+            connectionJob = job
         }
     }
 
@@ -262,8 +276,6 @@ class WebTransportClient(
         drainFrames(acc)
     }
 
-    private val readAccumulator = ByteArrayOutputStream()
-
     private fun drainFrames(acc: ByteArrayOutputStream) {
         val bytes = acc.toByteArray()
         if (bytes.isEmpty()) return
@@ -315,20 +327,19 @@ class WebTransportClient(
         }
     }
 
-    private fun closeSessionAndStream() {
+    private suspend fun closeSessionAndStream() {
         try {
-            val st = stream
-            val se = session
+            val st = synchronized(lock) { stream }
+            val se = synchronized(lock) { session }
             if (st != null || se != null) {
-                runBlocking {
-                    st?.close()
-                    se?.close()
-                }
+                st?.close()
+                se?.close()
             }
         } catch (_: Exception) { }
-        stream = null
-        session = null
-        readAccumulator.reset()
+        synchronized(lock) {
+            stream = null
+            session = null
+        }
     }
 
     private fun setState(s: ConnectionState) {

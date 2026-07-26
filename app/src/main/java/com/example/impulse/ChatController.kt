@@ -24,11 +24,12 @@ import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.CoroutineExceptionHandler
+import kotlinx.coroutines.withContext
 
 class ChatController(private val context: Context) {
 
     private val scope = CoroutineScope(
-        SupervisorJob() + Dispatchers.IO + CoroutineExceptionHandler { _, e ->
+        SupervisorJob() + Dispatchers.Default + CoroutineExceptionHandler { _, e ->
             LogManager.e(TAG, "uncaught coroutine exception", e)
         }
     )
@@ -36,10 +37,12 @@ class ChatController(private val context: Context) {
     private val certManager = TrustedCertManager(context)
     private val repo = MessageRepository(context)
 
-    private var client: WebTransportClient? = null
-    var currentServer: ServerConfig? = null
+    private val lock = Any()
+
+    @Volatile private var client: WebTransportClient? = null
+    @Volatile var currentServer: ServerConfig? = null
         private set
-    var clientName: String = ""
+    @Volatile var clientName: String = ""
         private set
 
     private lateinit var keyManager: SecureKeyManager
@@ -63,7 +66,24 @@ class ChatController(private val context: Context) {
 
     private val listeners = mutableListOf<(DecryptedMessage) -> Unit>()
 
-    private var heartbeatJob: kotlinx.coroutines.Job? = null
+    @Volatile private var heartbeatJob: kotlinx.coroutines.Job? = null
+    @Volatile private var reconnectJob: kotlinx.coroutines.Job? = null
+    @Volatile private var authTimeoutJob: kotlinx.coroutines.Job? = null
+    @Volatile private var autoReconnectEnabled = false
+    @Volatile private var userDisconnect = false
+
+    private data class PendingMessage(
+        val serverMsgId: Long,
+        val senderFingerprint: String,
+        val env: Protocol.InnerEnvelope,
+        val ciphertext: ByteArray,
+        val timestamp: Long,
+        val isOwn: Boolean,
+        val queuedAt: Long = System.currentTimeMillis()
+    )
+
+    private val pendingMessages = mutableMapOf<String, MutableList<PendingMessage>>()
+    private val pendingMessagesLock = Any()
 
     data class DecryptedMessage(
         val serverMsgId: Long,
@@ -93,11 +113,13 @@ class ChatController(private val context: Context) {
             LogManager.w(TAG, "connect ignored: already active (state=$cur)")
             return
         }
-        userDisconnect = false
-        reconnectJob?.cancel()
-        reconnectJob = null
-        currentServer = server
-        clientName = name
+        synchronized(lock) {
+            userDisconnect = false
+            reconnectJob?.cancel()
+            reconnectJob = null
+            currentServer = server
+            clientName = name
+        }
         LogManager.i(TAG, "connect: server=${server.id} name='$name' state=$cur")
         ensureKeyPair()
         _lastError.value = null
@@ -129,7 +151,7 @@ class ChatController(private val context: Context) {
             },
         )
         clientHolder[0] = wtClient
-        client = wtClient
+        synchronized(lock) { client = wtClient }
         scope.launch {
             try {
                 val purged = repo.purgeExpired()
@@ -143,33 +165,32 @@ class ChatController(private val context: Context) {
         wtClient.connect(server.getWebTransportUrl())
     }
 
-    private var autoReconnectEnabled = false
-    private var reconnectJob: kotlinx.coroutines.Job? = null
-    private var userDisconnect = false
-
     fun setAutoReconnect(enabled: Boolean) { autoReconnectEnabled = enabled }
 
     fun disconnect() {
-        userDisconnect = true
-        reconnectJob?.cancel()
-        reconnectJob = null
-        heartbeatJob?.cancel()
-        heartbeatJob = null
-        client?.disconnect()
-        client = null
+        synchronized(lock) {
+            userDisconnect = true
+            reconnectJob?.cancel()
+            reconnectJob = null
+            heartbeatJob?.cancel()
+            heartbeatJob = null
+            client?.disconnect()
+            client = null
+        }
+        synchronized(pendingMessagesLock) { pendingMessages.clear() }
         _state.value = ConnectionState.DISCONNECTED
         _lastError.value = null
     }
 
     fun clearError() { _lastError.value = null }
 
-    /** Clears all local messages for the current server and re-syncs from the server. */
     suspend fun clearHistory() {
         val serverId = currentServer?.id ?: return
         LogManager.i(TAG, "clearHistory: clearing local messages for server=$serverId")
         repo.clearServer(serverId)
         if (_state.value == ConnectionState.READY) {
-            val syncOk = client?.send(Protocol.buildSync(0)) ?: false
+            val c = synchronized(lock) { client }
+            val syncOk = withContext(Dispatchers.IO) { c?.send(Protocol.buildSync(0)) ?: false }
             LogManager.i(TAG, "clearHistory: sync request sent (ok=$syncOk)")
         }
     }
@@ -185,8 +206,10 @@ class ChatController(private val context: Context) {
                 _state.value = s
             }
             ConnectionState.ERROR -> {
-                heartbeatJob?.cancel()
-                heartbeatJob = null
+                synchronized(lock) {
+                    heartbeatJob?.cancel()
+                    heartbeatJob = null
+                }
                 _state.value = s
                 cancelAuthTimeout()
                 scheduleReconnect()
@@ -213,7 +236,6 @@ class ChatController(private val context: Context) {
         startAuthTimeout()
     }
 
-    private var authTimeoutJob: kotlinx.coroutines.Job? = null
     private fun startAuthTimeout() {
         cancelAuthTimeout()
         authTimeoutJob = scope.launch {
@@ -237,17 +259,21 @@ class ChatController(private val context: Context) {
     }
 
     private fun scheduleReconnect() {
-        reconnectJob?.cancel()
-        if (!autoReconnectEnabled || userDisconnect) return
+        synchronized(lock) {
+            reconnectJob?.cancel()
+            if (!autoReconnectEnabled || userDisconnect) return
+        }
         val server = currentServer ?: return
         val name = clientName
         if (server.id.isEmpty()) return
-        reconnectJob = scope.launch {
-            delay(RECONNECT_DELAY_MS)
-            if (!autoReconnectEnabled || userDisconnect) return@launch
-            if (_state.value == ConnectionState.ERROR || _state.value == ConnectionState.DISCONNECTED) {
-                LogManager.i(TAG, "auto-reconnecting to ${server.name}")
-                connect(server, name)
+        synchronized(lock) {
+            reconnectJob = scope.launch {
+                delay(RECONNECT_DELAY_MS)
+                if (!autoReconnectEnabled || userDisconnect) return@launch
+                if (_state.value == ConnectionState.ERROR || _state.value == ConnectionState.DISCONNECTED) {
+                    LogManager.i(TAG, "auto-reconnecting to ${server.name}")
+                    connect(server, name)
+                }
             }
         }
     }
@@ -269,7 +295,6 @@ class ChatController(private val context: Context) {
             return false
         }
 
-        // 1. Build and sign the inner envelope
         val innerJson = Protocol.buildInnerEnvelope(clientName, "", plaintext)
         val signature = keyManager.signDsa(innerJson)
         val signedEnvelope = Protocol.buildInnerEnvelope(
@@ -278,27 +303,31 @@ class ChatController(private val context: Context) {
             plaintext
         )
 
-        // 2. For each recipient, encapsulate and encrypt
         val recipients = mutableListOf<Triple<String, ByteArray, ByteArray>>()
         for (pubKey in allKemKeys) {
             val (encKey, sharedSecret) = keyManager.encapsulateKem(pubKey)
-            val ciphertext = PqcCrypto.aesEncrypt(sharedSecret, signedEnvelope)
-            val recipientId = keyManager.fingerprintForBytes(pubKey)
-            recipients.add(Triple(recipientId, encKey, ciphertext))
+            try {
+                val ciphertext = PqcCrypto.aesEncrypt(sharedSecret, signedEnvelope)
+                val recipientId = keyManager.fingerprintForBytes(pubKey)
+                recipients.add(Triple(recipientId, encKey, ciphertext))
+            } finally {
+                sharedSecret.fill(0)
+            }
         }
 
-        // 3. Also add our own recipient entry (for self-decryption)
         val ownPub = keyManager.getKemPublicKey()
         val (ownEncKey, ownSharedSecret) = keyManager.encapsulateKem(ownPub)
-        val ownCiphertext = PqcCrypto.aesEncrypt(ownSharedSecret, signedEnvelope)
-        recipients.add(Triple(keyManager.getFingerprint(), ownEncKey, ownCiphertext))
+        try {
+            val ownCiphertext = PqcCrypto.aesEncrypt(ownSharedSecret, signedEnvelope)
+            recipients.add(Triple(keyManager.getFingerprint(), ownEncKey, ownCiphertext))
+        } finally {
+            ownSharedSecret.fill(0)
+        }
 
-        // 4. Build Per-Recipient blob
         val blob = buildPerRecipientBlob(recipients)
-
-        // 5. Send via OP_DATA
         val frame = Protocol.buildData(blob)
-        val ok = client?.send(frame) ?: false
+        val c = synchronized(lock) { client }
+        val ok = withContext(Dispatchers.IO) { c?.send(frame) ?: false }
 
         if (ok) {
             val tempId = -(System.currentTimeMillis())
@@ -310,19 +339,14 @@ class ChatController(private val context: Context) {
 
     private fun buildPerRecipientBlob(recipients: List<Triple<String, ByteArray, ByteArray>>): ByteArray {
         val w = Protocol.Writer()
-        // sender_kem_pubhash: 32 bytes (SHA-256 of own KEM public key, first 32 bytes)
         val senderPubHash = java.security.MessageDigest.getInstance("SHA-256")
             .digest(keyManager.getKemPublicKey()).copyOf(32)
         w.bytes(senderPubHash)
-        // count: u32
         w.u32(recipients.size.toLong())
         for ((id, encKey, ciphertext) in recipients) {
-            // recipient_id: 32 bytes
             val idBytes = hexToBytes(id)
             w.bytes(idBytes)
-            // encKey
             w.bytes(encKey)
-            // ciphertext
             w.bytes(ciphertext)
         }
         return w.toByteArray()
@@ -340,14 +364,11 @@ class ChatController(private val context: Context) {
             val payload = frame.payload
             val pr = Protocol.Reader(payload)
 
-            // sender_kem_pubhash: 32 bytes
             val senderPubHash = pr.readBytes(32)
             val senderFingerprint = senderPubHash.joinToString("") { "%02x".format(it) }
 
-            // count: u32
             val count = pr.u32().toInt()
 
-            // Find our recipient entry
             val ownFingerprint = keyManager.getFingerprint()
             var found = false
 
@@ -359,27 +380,46 @@ class ChatController(private val context: Context) {
 
                 if (recipientFp == ownFingerprint && !found) {
                     found = true
-                    // Decapsulate and decrypt
                     val sharedSecret = keyManager.decapsulateKem(encKey)
-                    val innerBytes = PqcCrypto.aesDecrypt(sharedSecret, ciphertext)
+                    val innerBytes: ByteArray
+                    try {
+                        innerBytes = PqcCrypto.aesDecrypt(sharedSecret, ciphertext)
+                    } finally {
+                        sharedSecret.fill(0)
+                    }
                     val env = Protocol.parseInnerEnvelope(innerBytes) ?: return
 
                     val isOwn = env.sender == clientName
                     val realId = frame.serverMsgId
+                    val ts = if (frame.timestamp != 0L) frame.timestamp else System.currentTimeMillis()
 
                     scope.launch {
-                        // Verify ML-DSA-65 signature
                         val dsaPub = keyRepo.getDsaPublicKey(serverId, senderFingerprint)
-                        if (dsaPub != null) {
-                            val canonical = Protocol.buildInnerEnvelope(env.sender, "", env.content)
-                            val sigBytes = runCatching {
-                                android.util.Base64.decode(env.signature, android.util.Base64.NO_WRAP)
-                            }.getOrNull()
-                            if (sigBytes != null && sigBytes.isNotEmpty()) {
-                                if (!keyManager.verifyDsa(dsaPub, canonical, sigBytes)) {
-                                    LogManager.w(TAG, "ML-DSA-65 signature verification failed")
-                                    return@launch
-                                }
+                        if (dsaPub == null) {
+                            LogManager.w(TAG, "DSA key missing for $senderFingerprint, queuing pending message")
+                            val pending = PendingMessage(
+                                serverMsgId = realId,
+                                senderFingerprint = senderFingerprint,
+                                env = env,
+                                ciphertext = ciphertext,
+                                timestamp = ts,
+                                isOwn = isOwn
+                            )
+                            synchronized(pendingMessagesLock) {
+                                pendingMessages.getOrPut(senderFingerprint) { mutableListOf() }.add(pending)
+                            }
+                            sendKeyExchangeRequest(senderFingerprint)
+                            return@launch
+                        }
+
+                        val canonical = Protocol.buildInnerEnvelope(env.sender, "", env.content)
+                        val sigBytes = runCatching {
+                            android.util.Base64.decode(env.signature, android.util.Base64.NO_WRAP)
+                        }.getOrNull()
+                        if (sigBytes != null && sigBytes.isNotEmpty()) {
+                            if (!keyManager.verifyDsa(dsaPub, canonical, sigBytes)) {
+                                LogManager.w(TAG, "ML-DSA-65 signature verification failed for msg $realId from ${env.sender}")
+                                return@launch
                             }
                         }
 
@@ -390,15 +430,14 @@ class ChatController(private val context: Context) {
                                 sender = env.sender,
                                 ciphertext = ciphertext,
                                 iv = byteArrayOf(),
-                                timestamp = if (frame.timestamp != 0L) frame.timestamp else System.currentTimeMillis(),
+                                timestamp = ts,
                                 isOwn = isOwn
                             )
                         )
-                    }
 
-                    val msg = DecryptedMessage(realId, env.sender, env.content, isOwn,
-                        if (frame.timestamp != 0L) frame.timestamp else System.currentTimeMillis())
-                    synchronized(listeners) { listeners.forEach { it(msg) } }
+                        val msg = DecryptedMessage(realId, env.sender, env.content, isOwn, ts)
+                        synchronized(listeners) { listeners.forEach { it(msg) } }
+                    }
                 }
             }
 
@@ -407,6 +446,78 @@ class ChatController(private val context: Context) {
             }
         } catch (e: Exception) {
             LogManager.e(TAG, "Per-Recipient parse failed", e)
+        }
+    }
+
+    private fun sendKeyExchangeRequest(senderFingerprint: String) {
+        scope.launch {
+            try {
+                val ownKemPub = keyManager.getKemPublicKey()
+                val ownDsaPub = keyManager.getDsaPublicKey()
+                val c = synchronized(lock) { client }
+                val kemOk = c?.send(Protocol.buildKeyExchange(ownKemPub, Protocol.OP_KEY_EXCHANGE_KEM)) ?: false
+                val dsaOk = c?.send(Protocol.buildKeyExchange(ownDsaPub, Protocol.OP_KEY_EXCHANGE_DSA)) ?: false
+                LogManager.i(TAG, "Key exchange request sent (KEM=$kemOk, DSA=$dsaOk) for pending msgs from $senderFingerprint")
+            } catch (e: Exception) {
+                LogManager.w(TAG, "Failed to send key exchange request", e)
+            }
+        }
+    }
+
+    private fun processPendingMessages(senderFingerprint: String) {
+        val pendingList: List<PendingMessage>
+        val now = System.currentTimeMillis()
+        synchronized(pendingMessagesLock) {
+            val all = pendingMessages.remove(senderFingerprint) ?: return
+            val (fresh, expired) = all.partition { now - it.queuedAt < PENDING_MSG_TTL_MS }
+            if (expired.isNotEmpty()) {
+                LogManager.w(TAG, "Discarding ${expired.size} expired pending messages from $senderFingerprint")
+            }
+            if (fresh.isEmpty()) return
+            pendingList = fresh
+        }
+        val serverId = currentServer?.id ?: return
+        LogManager.i(TAG, "Processing ${pendingList.size} pending messages from $senderFingerprint")
+
+        for (pending in pendingList) {
+            scope.launch {
+                val dsaPub = keyRepo.getDsaPublicKey(serverId, pending.senderFingerprint) ?: run {
+                    LogManager.w(TAG, "DSA key still missing for ${pending.senderFingerprint}, re-queuing")
+                    synchronized(pendingMessagesLock) {
+                        pendingMessages.getOrPut(pending.senderFingerprint) { mutableListOf() }.add(pending)
+                    }
+                    return@launch
+                }
+
+                val canonical = Protocol.buildInnerEnvelope(pending.env.sender, "", pending.env.content)
+                val sigBytes = runCatching {
+                    android.util.Base64.decode(pending.env.signature, android.util.Base64.NO_WRAP)
+                }.getOrNull()
+                if (sigBytes != null && sigBytes.isNotEmpty()) {
+                    if (!keyManager.verifyDsa(dsaPub, canonical, sigBytes)) {
+                        LogManager.w(TAG, "ML-DSA-65 signature verification failed for pending msg ${pending.serverMsgId}")
+                        return@launch
+                    }
+                }
+
+                repo.upsert(
+                    MessageEntity(
+                        serverId = serverId,
+                        serverMsgId = pending.serverMsgId,
+                        sender = pending.env.sender,
+                        ciphertext = pending.ciphertext,
+                        iv = byteArrayOf(),
+                        timestamp = pending.timestamp,
+                        isOwn = pending.isOwn
+                    )
+                )
+
+                val msg = DecryptedMessage(
+                    pending.serverMsgId, pending.env.sender, pending.env.content,
+                    pending.isOwn, pending.timestamp
+                )
+                synchronized(listeners) { listeners.forEach { it(msg) } }
+            }
         }
     }
 
@@ -434,9 +545,13 @@ class ChatController(private val context: Context) {
 
             if (recipientFp == ownFingerprint) {
                 val sharedSecret = keyManager.decapsulateKem(encKey)
-                val innerBytes = PqcCrypto.aesDecrypt(sharedSecret, ciphertext)
-                val env = Protocol.parseInnerEnvelope(innerBytes) ?: return null
-                return Triple(senderFingerprint, env.sender, env.content)
+                try {
+                    val innerBytes = PqcCrypto.aesDecrypt(sharedSecret, ciphertext)
+                    val env = Protocol.parseInnerEnvelope(innerBytes) ?: return null
+                    return Triple(senderFingerprint, env.sender, env.content)
+                } finally {
+                    sharedSecret.fill(0)
+                }
             }
         }
         return null
@@ -455,7 +570,29 @@ class ChatController(private val context: Context) {
             val (senderFingerprint, sender, content) = result
             val isOwn = sender == clientName
             LogManager.d(TAG, "onSyncResponse: msgId=${m.id} sender='$sender' isOwn=$isOwn")
+
             scope.launch {
+                // Sync response messages don't carry per-message signatures in the
+                // per-recipient envelope format. The signature was verified on initial
+                // receipt. We require the sender's DSA key to be present before storing.
+                val dsaPub = keyRepo.getDsaPublicKey(serverId, senderFingerprint)
+                if (dsaPub == null) {
+                    LogManager.w(TAG, "DSA key missing for sync msg from $senderFingerprint, queuing")
+                    val pending = PendingMessage(
+                        serverMsgId = m.id,
+                        senderFingerprint = senderFingerprint,
+                        env = Protocol.InnerEnvelope(sender, "", content),
+                        ciphertext = m.payload,
+                        timestamp = m.timestamp,
+                        isOwn = isOwn
+                    )
+                    synchronized(pendingMessagesLock) {
+                        pendingMessages.getOrPut(senderFingerprint) { mutableListOf() }.add(pending)
+                    }
+                    sendKeyExchangeRequest(senderFingerprint)
+                    return@launch
+                }
+
                 repo.upsert(
                     MessageEntity(
                         serverId = serverId,
@@ -467,9 +604,10 @@ class ChatController(private val context: Context) {
                         isOwn = isOwn
                     )
                 )
+
+                val msg = DecryptedMessage(m.id, sender, content, isOwn, m.timestamp)
+                synchronized(listeners) { listeners.forEach { it(msg) } }
             }
-            val msg = DecryptedMessage(m.id, sender, content, isOwn, m.timestamp)
-            synchronized(listeners) { listeners.forEach { it(msg) } }
         }
     }
 
@@ -478,17 +616,19 @@ class ChatController(private val context: Context) {
     }
 
     private fun startHeartbeat() {
-        heartbeatJob?.cancel()
-        heartbeatJob = scope.launch {
-            LogManager.i(TAG, "heartbeat started (interval=${HEARTBEAT_INTERVAL_MS}ms)")
-            while (isActive) {
-                delay(HEARTBEAT_INTERVAL_MS)
-                if (!isActive) break
-                val c = client ?: break
-                val ok = c.send(Protocol.buildHeartbeat())
-                LogManager.d(TAG, "heartbeat sent (ok=$ok)")
+        synchronized(lock) {
+            heartbeatJob?.cancel()
+            heartbeatJob = scope.launch {
+                LogManager.i(TAG, "heartbeat started (interval=${HEARTBEAT_INTERVAL_MS}ms)")
+                while (isActive) {
+                    delay(HEARTBEAT_INTERVAL_MS)
+                    if (!isActive) break
+                    val c = synchronized(lock) { client } ?: break
+                    val ok = c.send(Protocol.buildHeartbeat())
+                    LogManager.d(TAG, "heartbeat sent (ok=$ok)")
+                }
+                LogManager.i(TAG, "heartbeat loop exited")
             }
-            LogManager.i(TAG, "heartbeat loop exited")
         }
     }
 
@@ -580,7 +720,6 @@ class ChatController(private val context: Context) {
         LogManager.i(TAG, "AUTH SUCCESS — publishing keys + requesting sync (clientName='$clientName')")
         _state.value = ConnectionState.AUTHENTICATING
         scope.launch {
-            // Cache own KEM public key for self-decryption
             val ownFp = keyManager.getFingerprint()
             keyRepo.cacheKey(
                 currentServer?.id ?: "",
@@ -589,25 +728,22 @@ class ChatController(private val context: Context) {
                 keyManager.getDsaPublicKey()
             )
 
-            // Send KEM and DSA keys with new opcodes
-            val kemOk = keyManager.getKemPublicKey().let { pub ->
-                client?.send(Protocol.buildKeyExchange(pub, Protocol.OP_KEY_EXCHANGE_KEM))
-            } ?: false
+            val kemPub = keyManager.getKemPublicKey()
+            val c = synchronized(lock) { client }
+            val kemOk = withContext(Dispatchers.IO) { c?.send(Protocol.buildKeyExchange(kemPub, Protocol.OP_KEY_EXCHANGE_KEM)) ?: false }
             LogManager.i(TAG, "KeyExchange ML-KEM sent (ok=$kemOk)")
-            val dsaOk = keyManager.getDsaPublicKey().let { pub ->
-                client?.send(Protocol.buildKeyExchange(pub, Protocol.OP_KEY_EXCHANGE_DSA))
-            } ?: false
+            val dsaPub = keyManager.getDsaPublicKey()
+            val dsaOk = withContext(Dispatchers.IO) { c?.send(Protocol.buildKeyExchange(dsaPub, Protocol.OP_KEY_EXCHANGE_DSA)) ?: false }
             LogManager.i(TAG, "KeyExchange ML-DSA-65 sent (ok=$dsaOk)")
 
             val lastSeen = repo.lastSeenId(currentServer?.id ?: "")
-            val syncOk = client?.send(Protocol.buildSync(lastSeen)) ?: false
+            val syncOk = withContext(Dispatchers.IO) { c?.send(Protocol.buildSync(lastSeen)) ?: false }
             LogManager.i(TAG, "Sync request sent (ok=$syncOk, lastSeen=$lastSeen)")
 
             _state.value = ConnectionState.AUTHENTICATED
             _state.value = ConnectionState.READY
             LogManager.i(TAG, "READY")
 
-            // Notify new participants
             val messages = repo.load(currentServer?.id ?: "")
             if (messages.isEmpty()) {
                 _lastError.value = "Вы присоединились к чату. Сообщения до вашего подключения недоступны."
@@ -627,6 +763,7 @@ class ChatController(private val context: Context) {
             val fp = keyManager.fingerprintForBytes(key)
             scope.launch { keyRepo.cacheKey(serverId, fp, null, key) }
             LogManager.i(TAG, "KeyExchange ML-DSA-65 received, cached")
+            processPendingMessages(fp)
         } catch (_: Exception) {
             try {
                 val kf = java.security.KeyFactory.getInstance("Kyber", "BCPQC")
@@ -652,6 +789,7 @@ class ChatController(private val context: Context) {
                 val fp = keyManager.fingerprintForBytes(key)
                 scope.launch { keyRepo.cacheKey(serverId, fp, null, key) }
                 LogManager.i(TAG, "KeyExchange ML-DSA-65 received, cached")
+                processPendingMessages(fp)
             } else {
                 val kf = java.security.KeyFactory.getInstance("Kyber", "BCPQC")
                 kf.generatePublic(java.security.spec.X509EncodedKeySpec(key))
@@ -681,5 +819,6 @@ class ChatController(private val context: Context) {
         private const val HEARTBEAT_INTERVAL_MS = 30_000L
         private const val AUTH_TIMEOUT_MS = 15_000L
         private const val RECONNECT_DELAY_MS = 5_000L
+        private const val PENDING_MSG_TTL_MS = 30_000L
     }
 }

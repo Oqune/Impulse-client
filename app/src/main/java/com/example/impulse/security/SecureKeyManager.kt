@@ -22,7 +22,7 @@ object SecureKeyManager {
     private const val GCM_IV_LENGTH = 12
     private const val GCM_TAG_LENGTH = 128
     private const val SALT_LENGTH = 16
-    private const val BACKUP_VERSION: Byte = 0x01
+    private const val BACKUP_VERSION: Byte = 0x02
     private const val BACKUP_FILENAME = "key_backup.enc"
 
     fun ensureKeyPair(context: Context) {
@@ -84,6 +84,10 @@ object SecureKeyManager {
         PqcCrypto.verifyMlDsa65(publicKey, data, signature)
 
     fun reset() {
+        kemKeyPair?.privateEncoded?.fill(0)
+        kemKeyPair?.publicEncoded?.fill(0)
+        dsaKeyPair?.privateEncoded?.fill(0)
+        dsaKeyPair?.publicEncoded?.fill(0)
         kemKeyPair = null
         dsaKeyPair = null
     }
@@ -96,6 +100,8 @@ object SecureKeyManager {
         val secure = SecureStorage(context)
         val kemPriv = secure.getBytes(SecureStorage.KEY_KEM_PRIVATE)
             ?: throw IllegalStateException("No ML-KEM private key to export")
+        val kemPub = secure.getBytes(SecureStorage.KEY_KEM_PUBLIC)
+            ?: throw IllegalStateException("No ML-KEM public key to export")
 
         val aesKey = pbkdf2(password.toCharArray(), salt, PBKDF2_ITERATIONS, AES_KEY_LENGTH)
         val encrypted = aesGcmEncrypt(aesKey, iv, kemPriv)
@@ -106,6 +112,8 @@ object SecureKeyManager {
         bytes.write(iv)
         bytes.write(intToLittleEndian(encrypted.size))
         bytes.write(encrypted)
+        bytes.write(intToLittleEndian(kemPub.size))
+        bytes.write(kemPub)
 
         val resolver = context.contentResolver
         val contentValues = android.content.ContentValues().apply {
@@ -118,6 +126,7 @@ object SecureKeyManager {
             ?: throw IOException("Failed to write backup file")
 
         kemPriv.fill(0)
+        kemPub.fill(0)
         encrypted.fill(0)
         aesKey.fill(0)
 
@@ -131,27 +140,38 @@ object SecureKeyManager {
 
         require(bytes.size > 33) { "Backup file too small" }
         val version = bytes[0]
-        require(version == BACKUP_VERSION) { "Unsupported backup version: $version" }
+        require(version == BACKUP_VERSION || version == 0x01.toByte()) {
+            "Unsupported backup version: $version"
+        }
 
         val salt = bytes.copyOfRange(1, 1 + SALT_LENGTH)
         val iv = bytes.copyOfRange(1 + SALT_LENGTH, 1 + SALT_LENGTH + GCM_IV_LENGTH)
         val encKeyLenOffset = 1 + SALT_LENGTH + GCM_IV_LENGTH
         val encKeyLen = intFromLittleEndian(bytes, encKeyLenOffset)
-        val encrypted = bytes.copyOfRange(encKeyLenOffset + 4, encKeyLenOffset + 4 + encKeyLen)
+        val encKeyDataEnd = encKeyLenOffset + 4 + encKeyLen
+        val encrypted = bytes.copyOfRange(encKeyLenOffset + 4, encKeyDataEnd)
 
         val aesKey = pbkdf2(password.toCharArray(), salt, PBKDF2_ITERATIONS, AES_KEY_LENGTH)
         val kemPriv = aesGcmDecrypt(aesKey, iv, encrypted)
 
         val secure = SecureStorage(context)
+
+        val kemPub: ByteArray
+        if (version >= 0x02.toByte() && encKeyDataEnd + 4 <= bytes.size) {
+            val pubLen = intFromLittleEndian(bytes, encKeyDataEnd)
+            kemPub = bytes.copyOfRange(encKeyDataEnd + 4, encKeyDataEnd + 4 + pubLen)
+        } else {
+            val fresh = PqcCrypto.generateKeyPair()
+            kemPub = fresh.publicEncoded
+        }
+
         secure.putBytes(SecureStorage.KEY_KEM_PRIVATE, kemPriv)
+        secure.putBytes(SecureStorage.KEY_KEM_PUBLIC, kemPub)
+        kemKeyPair = PqcCrypto.KeyPair(kemPriv, kemPub)
 
         val dsa = PqcCrypto.generateMlDsa65KeyPair()
         secure.putBytes(SecureStorage.KEY_DSA_PRIVATE, dsa.privateEncoded)
         secure.putBytes(SecureStorage.KEY_DSA_PUBLIC, dsa.publicEncoded)
-
-        val newPub = PqcCrypto.generateKeyPair()
-        secure.putBytes(SecureStorage.KEY_KEM_PUBLIC, newPub.publicEncoded)
-        kemKeyPair = PqcCrypto.KeyPair(kemPriv, newPub.publicEncoded)
         dsaKeyPair = dsa
 
         resolver.delete(file, null, null)
