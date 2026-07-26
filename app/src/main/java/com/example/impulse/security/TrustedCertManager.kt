@@ -62,6 +62,10 @@ class TrustedCertManager(context: Context) {
     /** Trust a fingerprint obtained out-of-band (QR scan / manual entry). */
     fun trustHash(serverId: String, hash: String) = synchronized(this) {
         val normalized = hash.lowercase().trim()
+        if (!normalized.matches(HASH_PATTERN)) {
+            LogManager.w(TAG, "trustHash: malformed hash for server=$serverId")
+            return@synchronized
+        }
         val current = getCertInfos(serverId).toMutableList()
         if (current.any { it.sha256Hex == normalized }) {
             LogManager.i(TAG, "trustHash: hash already trusted for server=$serverId")
@@ -112,9 +116,10 @@ class TrustedCertManager(context: Context) {
         LogManager.i(TAG, "confirmPendingHashes: promoted ${pending.size} pending hashes for server=$serverId")
     }
 
-    fun forget(serverId: String) {
+    fun forget(serverId: String) = synchronized(this) {
         LogManager.i(TAG, "forget: removing cert for server=$serverId")
         storage.remove(keyFor(serverId))
+        clearPending(serverId)
     }
 
     private fun persist(serverId: String, infos: List<CertInfo>) {

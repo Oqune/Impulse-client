@@ -48,12 +48,6 @@ object CrashLog {
         }
     }
 
-    /** Returns the text of the most recent crash, or null if none. */
-    fun lastCrash(context: Context): String? {
-        val f = File(context.filesDir, CRASH_FILE)
-        return if (f.exists()) f.readText() else null
-    }
-
     /** Call once at startup (Application.onCreate) so we know where to write. */
     fun init(context: Context) {
         lastContext = context.applicationContext

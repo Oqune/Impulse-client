@@ -19,7 +19,6 @@ class ThemePreferences(context: Context) {
         private const val ACCENT_SATURATION_KEY = "accent_saturation"
         private const val ACCENT_LIGHTNESS_KEY = "accent_lightness"
         private const val ACCENT_ALPHA_KEY = "accent_alpha"
-        private const val FONT_SIZE_KEY = "font_size"
         private const val FONT_SCALE_KEY = "font_scale"
         private const val THEME_PRESET_KEY = "theme_preset"
         private const val HUE_KEY = "theme_hue"
@@ -84,16 +83,6 @@ class ThemePreferences(context: Context) {
         _themeModeFlow.value = themeMode
     }
 
-    fun saveAccentColor(accentColor: DynamicColor) {
-        prefs.edit()
-            .putFloat(ACCENT_HUE_KEY, accentColor.hue)
-            .putFloat(ACCENT_SATURATION_KEY, accentColor.saturation)
-            .putFloat(ACCENT_LIGHTNESS_KEY, accentColor.lightness)
-            .putFloat(ACCENT_ALPHA_KEY, accentColor.alpha)
-            .apply()
-        _accentColorFlow.value = accentColor
-    }
-
     fun saveFontScale(scale: Float) {
         prefs.edit().putFloat(FONT_SCALE_KEY, scale).apply()
         _fontScaleFlow.value = scale
@@ -101,11 +90,6 @@ class ThemePreferences(context: Context) {
 
     private fun getFontScale(): Float {
         return prefs.getFloat(FONT_SCALE_KEY, 1.0f).coerceIn(0.8f, 1.4f)
-    }
-
-    fun saveThemePreset(preset: ThemePreset) {
-        prefs.edit().putString(THEME_PRESET_KEY, preset.name).apply()
-        _themePresetFlow.value = preset
     }
 
     fun saveHue(hue: Float) {
