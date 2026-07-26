@@ -191,6 +191,17 @@ object Protocol {
         return w.toByteArray()
     }
 
+    /**
+     * KeyExchange with explicit opcode: opcode + key_len(u32) + public_key(bytes).
+     * Used for OP_KEY_EXCHANGE_KEM (0x09) and OP_KEY_EXCHANGE_DSA (0x0A).
+     */
+    fun buildKeyExchange(publicKey: ByteArray, opcode: Byte): ByteArray {
+        val w = Writer()
+        w.u8(opcode.toInt())
+        w.bytes(publicKey)
+        return w.toByteArray()
+    }
+
     /** AuthResult: opcode + success(u8) [error_message bytes if !success]. */
     fun buildAuthResult(success: Boolean, errorMessage: String? = null): ByteArray {
         val w = Writer()

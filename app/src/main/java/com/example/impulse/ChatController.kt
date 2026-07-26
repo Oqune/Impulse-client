@@ -2,9 +2,11 @@ package com.example.impulse
 
 import android.content.Context
 import com.example.impulse.data.MessageRepository
+import com.example.impulse.data.PublicKeyRepository
 import com.example.impulse.data.ServerConfig
 import com.example.impulse.data.db.MessageEntity
 import com.example.impulse.security.PqcCrypto
+import com.example.impulse.security.SecureKeyManager
 import com.example.impulse.security.SecureStorage
 import com.example.impulse.security.TrustedCertManager
 import com.example.impulse.transport.ConnectionState
@@ -22,7 +24,6 @@ import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.CoroutineExceptionHandler
-import java.util.concurrent.ConcurrentHashMap
 
 class ChatController(private val context: Context) {
 
@@ -41,26 +42,18 @@ class ChatController(private val context: Context) {
     var clientName: String = ""
         private set
 
-    private var myPrivateKey: ByteArray? = null
-    private var myPublicKey: ByteArray? = null
+    private lateinit var keyManager: SecureKeyManager
+    private lateinit var keyRepo: PublicKeyRepository
 
     val publicKeyHash: String
         get() {
-            val pub = myPublicKey ?: return ""
-            val md = java.security.MessageDigest.getInstance("SHA-256")
-            val digest = md.digest(pub)
-            return digest.joinToString("") { "%02x".format(it) }.take(8)
+            if (!::keyManager.isInitialized) return ""
+            return try {
+                keyManager.fingerprintForBytes(keyManager.getKemPublicKey()).take(8)
+            } catch (_: Exception) {
+                ""
+            }
         }
-
-    private var myMlDsa65Private: ByteArray? = null
-    private var myMlDsa65Public: ByteArray? = null
-
-    private val peerPublicKeys = ConcurrentHashMap<String, ByteArray>()
-    private val peerMlDsa65Keys = ConcurrentHashMap<String, ByteArray>()
-    private var groupSecret: ByteArray? = null
-
-    private fun fingerprint(key: ByteArray): String =
-        android.util.Base64.encodeToString(key, android.util.Base64.NO_WRAP)
 
     private val _state = MutableStateFlow(ConnectionState.DISCONNECTED)
     val state: StateFlow<ConnectionState> = _state.asStateFlow()
@@ -84,30 +77,9 @@ class ChatController(private val context: Context) {
     fun removeMessageListener(l: (DecryptedMessage) -> Unit) = synchronized(listeners) { listeners.remove(l) }
 
     private fun ensureKeyPair() {
-        val priv = secure.getBytes(SecureStorage.KEY_PQ_PRIVATE)
-        val pub = secure.getBytes(SecureStorage.KEY_PQ_PUBLIC)
-        if (priv != null && pub != null) {
-            myPrivateKey = priv
-            myPublicKey = pub
-        } else {
-            val kp = PqcCrypto.generateKeyPair()
-            myPrivateKey = kp.privateEncoded
-            myPublicKey = kp.publicEncoded
-            secure.putBytes(SecureStorage.KEY_PQ_PRIVATE, kp.privateEncoded)
-            secure.putBytes(SecureStorage.KEY_PQ_PUBLIC, kp.publicEncoded)
-        }
-        val dsaPriv = secure.getBytes(SecureStorage.KEY_MLDSA65_PRIVATE)
-        val dsaPub = secure.getBytes(SecureStorage.KEY_MLDSA65_PUBLIC)
-        if (dsaPriv != null && dsaPub != null) {
-            myMlDsa65Private = dsaPriv
-            myMlDsa65Public = dsaPub
-        } else {
-            val dsa = PqcCrypto.generateMlDsa65KeyPair()
-            myMlDsa65Private = dsa.privateEncoded
-            myMlDsa65Public = dsa.publicEncoded
-            secure.putBytes(SecureStorage.KEY_MLDSA65_PRIVATE, dsa.privateEncoded)
-            secure.putBytes(SecureStorage.KEY_MLDSA65_PUBLIC, dsa.publicEncoded)
-        }
+        keyManager = SecureKeyManager
+        keyManager.ensureKeyPair(context)
+        keyRepo = PublicKeyRepository(context)
     }
 
     fun connect(server: ServerConfig, name: String) {
@@ -129,11 +101,6 @@ class ChatController(private val context: Context) {
         LogManager.i(TAG, "connect: server=${server.id} name='$name' state=$cur")
         ensureKeyPair()
         _lastError.value = null
-
-        // Reset crypto state from any previous session
-        peerPublicKeys.clear()
-        peerMlDsa65Keys.clear()
-        groupSecret = null
 
         val hashes = certManager.getHashes(server.id)
 
@@ -201,7 +168,6 @@ class ChatController(private val context: Context) {
         val serverId = currentServer?.id ?: return
         LogManager.i(TAG, "clearHistory: clearing local messages for server=$serverId")
         repo.clearServer(serverId)
-        // Re-request sync from the server to repopulate history
         if (_state.value == ConnectionState.READY) {
             val syncOk = client?.send(Protocol.buildSync(0)) ?: false
             LogManager.i(TAG, "clearHistory: sync request sent (ok=$syncOk)")
@@ -286,37 +252,55 @@ class ChatController(private val context: Context) {
         }
     }
 
+    // ------------------------------------------------------------------
+    // Per-Recipient KEM Wrapping — send
+    // ------------------------------------------------------------------
+
     suspend fun sendChat(plaintext: String): Boolean {
         if (_state.value != ConnectionState.READY) {
             LogManager.w(TAG, "sendChat ignored: not READY (state=${_state.value})")
             return false
         }
-        val secret = groupSecret ?: run {
-            LogManager.w(TAG, "No group secret yet; cannot encrypt message.")
+        val serverId = currentServer?.id ?: return false
+
+        val allKemKeys = keyRepo.getAllKemPublicKeys(serverId)
+        if (allKemKeys.isEmpty()) {
+            LogManager.w(TAG, "No peer keys cached; cannot send.")
             return false
         }
-        val innerJson = Protocol.buildInnerEnvelope(
-            sender = clientName,
-            signature = "",
-            content = plaintext
+
+        // 1. Build and sign the inner envelope
+        val innerJson = Protocol.buildInnerEnvelope(clientName, "", plaintext)
+        val signature = keyManager.signDsa(innerJson)
+        val signedEnvelope = Protocol.buildInnerEnvelope(
+            clientName,
+            android.util.Base64.encodeToString(signature, android.util.Base64.NO_WRAP),
+            plaintext
         )
-        val signature = myMlDsa65Private?.let { priv ->
-            PqcCrypto.signMlDsa65(priv, innerJson)
-        } ?: run {
-            LogManager.e(TAG, "ML-DSA-65 key not available; cannot sign outgoing message")
-            return false
+
+        // 2. For each recipient, encapsulate and encrypt
+        val recipients = mutableListOf<Triple<String, ByteArray, ByteArray>>()
+        for (pubKey in allKemKeys) {
+            val (encKey, sharedSecret) = keyManager.encapsulateKem(pubKey)
+            val ciphertext = PqcCrypto.aesEncrypt(sharedSecret, signedEnvelope)
+            val recipientId = keyManager.fingerprintForBytes(pubKey)
+            recipients.add(Triple(recipientId, encKey, ciphertext))
         }
-        val signedInner = Protocol.buildInnerEnvelope(
-            sender = clientName,
-            signature = android.util.Base64.encodeToString(signature, android.util.Base64.NO_WRAP),
-            content = plaintext
-        )
-        val blob = PqcCrypto.aesEncrypt(secret, signedInner)
+
+        // 3. Also add our own recipient entry (for self-decryption)
+        val ownPub = keyManager.getKemPublicKey()
+        val (ownEncKey, ownSharedSecret) = keyManager.encapsulateKem(ownPub)
+        val ownCiphertext = PqcCrypto.aesEncrypt(ownSharedSecret, signedEnvelope)
+        recipients.add(Triple(keyManager.getFingerprint(), ownEncKey, ownCiphertext))
+
+        // 4. Build Per-Recipient blob
+        val blob = buildPerRecipientBlob(recipients)
+
+        // 5. Send via OP_DATA
         val frame = Protocol.buildData(blob)
         val ok = client?.send(frame) ?: false
+
         if (ok) {
-            // Emit optimistic placeholder to UI listeners only (NOT persisted to DB).
-            // The real message will arrive via onData → DB observer replaces it.
             val tempId = -(System.currentTimeMillis())
             val msg = DecryptedMessage(tempId, clientName, plaintext, true, System.currentTimeMillis())
             synchronized(listeners) { listeners.forEach { it(msg) } }
@@ -324,204 +308,159 @@ class ChatController(private val context: Context) {
         return ok
     }
 
-    private fun handleIncoming(raw: ByteArray) {
-        if (raw.isEmpty()) return
-        val opcode = raw[0]
-        val opcodeName = when (opcode) {
-            Protocol.OP_AUTH_RESULT -> "AuthResult"
-            Protocol.OP_SYNC_RESPONSE -> "SyncResponse"
-            Protocol.OP_DATA -> "Data"
-            Protocol.OP_HEARTBEAT -> "Heartbeat"
-            Protocol.OP_KEY_EXCHANGE -> "KeyExchange"
-            Protocol.OP_KEY_EXCHANGE_KEM -> "KeyExchangeKem"
-            Protocol.OP_KEY_EXCHANGE_DSA -> "KeyExchangeDsa"
-            Protocol.OP_NEW_CERT_HASH -> "NewCertHash"
-            else -> "0x%02x".format(opcode)
+    private fun buildPerRecipientBlob(recipients: List<Triple<String, ByteArray, ByteArray>>): ByteArray {
+        val w = Protocol.Writer()
+        // sender_kem_pubhash: 32 bytes (SHA-256 of own KEM public key, first 32 bytes)
+        val senderPubHash = java.security.MessageDigest.getInstance("SHA-256")
+            .digest(keyManager.getKemPublicKey()).copyOf(32)
+        w.bytes(senderPubHash)
+        // count: u32
+        w.u32(recipients.size.toLong())
+        for ((id, encKey, ciphertext) in recipients) {
+            // recipient_id: 32 bytes
+            val idBytes = hexToBytes(id)
+            w.bytes(idBytes)
+            // encKey
+            w.bytes(encKey)
+            // ciphertext
+            w.bytes(ciphertext)
         }
-        LogManager.d(TAG, "RX $opcodeName (${raw.size} bytes)")
-        try {
-            val r = Protocol.Reader(raw, 1)
-            when (opcode) {
-                Protocol.OP_AUTH_RESULT -> onAuthResult(r)
-                Protocol.OP_SYNC_RESPONSE -> onSyncResponse(r)
-                Protocol.OP_DATA -> onData(r)
-                Protocol.OP_HEARTBEAT -> onHeartbeat()
-                Protocol.OP_KEY_EXCHANGE -> onKeyExchange(r)
-                Protocol.OP_NEW_CERT_HASH -> { }
-                else -> LogManager.w(TAG, "UNKNOWN opcode 0x%02x (${raw.size} bytes)".format(opcode))
-            }
-        } catch (e: Exception) {
-            LogManager.e(TAG, "PARSE FAILED opcode=0x%02x: ${e.message}".format(opcode), e)
-        }
+        return w.toByteArray()
     }
 
-    private fun onAuthResult(r: Protocol.Reader) {
-        val res = Protocol.parseAuthResult(r)
-        if (!res.success) {
-            LogManager.e(TAG, "AUTH REJECTED by server: ${res.errorMessage ?: "no reason"}")
-            cancelAuthTimeout()
-            _state.value = ConnectionState.ERROR
-            _lastError.value = "Аутентификация отклонена сервером: ${res.errorMessage ?: "нет причины"}"
-            return
-        }
-        cancelAuthTimeout()
-        LogManager.i(TAG, "AUTH SUCCESS — publishing keys + requesting sync (clientName='$clientName')")
-        _state.value = ConnectionState.AUTHENTICATING
-        scope.launch {
-            // Derive group secret FIRST so sync response can be decrypted immediately
-            if (groupSecret == null && myPublicKey != null) {
-                val fp = fingerprint(myPublicKey!!)
-                peerPublicKeys[fp] = myPublicKey!!
-                LogManager.i(TAG, "single-peer: added own key to peerPublicKeys, deriving group secret")
-                recomputeGroupSecret()
-                if (groupSecret != null) {
-                    LogManager.i(TAG, "group secret derived, now sending keys + sync")
-                } else {
-                    LogManager.e(TAG, "deriveGroupKey failed for single-peer")
-                    _state.value = ConnectionState.ERROR
-                    _lastError.value = "Не удалось вывести групповый ключ"
-                    return@launch
-                }
-            }
-
-            val kemOk = myPublicKey?.let { pub -> client?.send(Protocol.buildKeyExchange(pub)) } ?: false
-            LogManager.i(TAG, "KeyExchange ML-KEM sent (ok=$kemOk)")
-            val dsaOk = myMlDsa65Public?.let { pub -> client?.send(Protocol.buildKeyExchange(pub)) } ?: false
-            LogManager.i(TAG, "KeyExchange ML-DSA-65 sent (ok=$dsaOk)")
-            val lastSeen = repo.lastSeenId(currentServer?.id ?: "")
-            val syncOk = client?.send(Protocol.buildSync(lastSeen)) ?: false
-            LogManager.i(TAG, "Sync request sent (ok=$syncOk, lastSeen=$lastSeen)")
-
-            if (groupSecret != null) {
-                _state.value = ConnectionState.AUTHENTICATED
-                _state.value = ConnectionState.READY
-                LogManager.i(TAG, "READY")
-            }
-        }
-        startHeartbeat()
-    }
-
-    private fun onKeyExchange(r: Protocol.Reader) {
-        val frame = Protocol.parseKeyExchange(r)
-        val key = frame.publicKey
-
-        try {
-            val kf = java.security.KeyFactory.getInstance("Dilithium", "BCPQC")
-            kf.generatePublic(java.security.spec.X509EncodedKeySpec(key))
-            val fp = fingerprint(key)
-            val wasNew = !peerMlDsa65Keys.containsKey(fp)
-            peerMlDsa65Keys[fp] = key
-            LogManager.i(TAG, "KeyExchange ML-DSA-65 received (${key.size} bytes, peers=${peerMlDsa65Keys.size})")
-            if (wasNew) reSendOwnKeys()
-            return
-        } catch (_: Exception) { }
-
-        val fp = fingerprint(key)
-        val wasNew = !peerPublicKeys.containsKey(fp)
-        peerPublicKeys[fp] = key
-        LogManager.i(TAG, "KeyExchange ML-KEM received (${key.size} bytes, peers=${peerPublicKeys.size})")
-        if (wasNew) reSendOwnKeys()
-        recomputeGroupSecret()
-        if (groupSecret != null) {
-            LogManager.i(TAG, "GROUP SECRET ESTABLISHED — channel ready")
-            _state.value = ConnectionState.AUTHENTICATED
-            _state.value = ConnectionState.READY
-            LogManager.i(TAG, "READY — secure chat enabled")
-        }
-    }
-
-    private fun reSendOwnKeys() {
-        scope.launch {
-            val kemOk = myPublicKey?.let { pub -> client?.send(Protocol.buildKeyExchange(pub)) } ?: false
-            val dsaOk = myMlDsa65Public?.let { pub -> client?.send(Protocol.buildKeyExchange(pub)) } ?: false
-            LogManager.i(TAG, "Re-broadcast own keys (kem=$kemOk dsa=$dsaOk)")
-        }
-    }
-
-    private fun recomputeGroupSecret() {
-        if (myPublicKey == null) return
-        val allKeys = ArrayList(peerPublicKeys.values)
-        try {
-            groupSecret = PqcCrypto.deriveGroupKey(allKeys)
-            LogManager.i(TAG, "group secret derived from ${allKeys.size} keys")
-        } catch (e: Exception) {
-            LogManager.e(TAG, "deriveGroupKey failed", e)
-        }
-    }
+    // ------------------------------------------------------------------
+    // Per-Recipient KEM Wrapping — receive
+    // ------------------------------------------------------------------
 
     private fun onData(r: Protocol.Reader) {
         val frame = Protocol.parseData(r)
-        val secret = groupSecret ?: run {
-            LogManager.w(TAG, "Data received but no group secret yet; dropping.")
-            return
-        }
-        val innerBytes = try {
-            PqcCrypto.aesDecrypt(secret, frame.payload)
+        val serverId = currentServer?.id ?: return
+
+        try {
+            val payload = frame.payload
+            val pr = Protocol.Reader(payload)
+
+            // sender_kem_pubhash: 32 bytes
+            val senderPubHash = pr.readBytes(32)
+            val senderFingerprint = senderPubHash.joinToString("") { "%02x".format(it) }
+
+            // count: u32
+            val count = pr.u32().toInt()
+
+            // Find our recipient entry
+            val ownFingerprint = keyManager.getFingerprint()
+            var found = false
+
+            repeat(count) {
+                val recipientId = pr.readBytes(32)
+                val recipientFp = recipientId.joinToString("") { "%02x".format(it) }
+                val encKey = pr.bytes()
+                val ciphertext = pr.bytes()
+
+                if (recipientFp == ownFingerprint && !found) {
+                    found = true
+                    // Decapsulate and decrypt
+                    val sharedSecret = keyManager.decapsulateKem(encKey)
+                    val innerBytes = PqcCrypto.aesDecrypt(sharedSecret, ciphertext)
+                    val env = Protocol.parseInnerEnvelope(innerBytes) ?: return
+
+                    val isOwn = env.sender == clientName
+                    val realId = frame.serverMsgId
+
+                    scope.launch {
+                        // Verify ML-DSA-65 signature
+                        val dsaPub = keyRepo.getDsaPublicKey(serverId, senderFingerprint)
+                        if (dsaPub != null) {
+                            val canonical = Protocol.buildInnerEnvelope(env.sender, "", env.content)
+                            val sigBytes = runCatching {
+                                android.util.Base64.decode(env.signature, android.util.Base64.NO_WRAP)
+                            }.getOrNull()
+                            if (sigBytes != null && sigBytes.isNotEmpty()) {
+                                if (!keyManager.verifyDsa(dsaPub, canonical, sigBytes)) {
+                                    LogManager.w(TAG, "ML-DSA-65 signature verification failed")
+                                    return@launch
+                                }
+                            }
+                        }
+
+                        repo.upsert(
+                            MessageEntity(
+                                serverId = serverId,
+                                serverMsgId = realId,
+                                sender = env.sender,
+                                ciphertext = ciphertext,
+                                iv = byteArrayOf(),
+                                timestamp = if (frame.timestamp != 0L) frame.timestamp else System.currentTimeMillis(),
+                                isOwn = isOwn
+                            )
+                        )
+                    }
+
+                    val msg = DecryptedMessage(realId, env.sender, env.content, isOwn,
+                        if (frame.timestamp != 0L) frame.timestamp else System.currentTimeMillis())
+                    synchronized(listeners) { listeners.forEach { it(msg) } }
+                }
+            }
+
+            if (!found) {
+                LogManager.d(TAG, "Per-Recipient message not for us, skipping")
+            }
         } catch (e: Exception) {
-            LogManager.e(TAG, "decrypt failed", e)
-            return
+            LogManager.e(TAG, "Per-Recipient parse failed", e)
         }
-        val env = Protocol.parseInnerEnvelope(innerBytes) ?: run {
-            LogManager.e(TAG, "inner envelope parse failed")
-            return
-        }
-        val canonical = Protocol.buildInnerEnvelope(env.sender, "", env.content)
-        val sigBytes = runCatching {
-            android.util.Base64.decode(env.signature, android.util.Base64.NO_WRAP)
-        }.getOrNull()
-        if (sigBytes != null && sigBytes.isNotEmpty()) {
-            val pub = peerMlDsa65Keys.values.firstOrNull { pub ->
-                PqcCrypto.verifyMlDsa65(pub, canonical, sigBytes)
+    }
+
+    /**
+     * Decrypts a per-recipient blob from a sync response or stored message.
+     * Returns (senderFingerprint, plaintext, isOwn, sender) or null on failure.
+     */
+    private fun decryptPerRecipientBlob(
+        payload: ByteArray,
+        serverId: String
+    ): Triple<String, String, String>? {
+        val pr = Protocol.Reader(payload)
+
+        val senderPubHash = pr.readBytes(32)
+        val senderFingerprint = senderPubHash.joinToString("") { "%02x".format(it) }
+
+        val count = pr.u32().toInt()
+        val ownFingerprint = keyManager.getFingerprint()
+
+        repeat(count) {
+            val recipientId = pr.readBytes(32)
+            val recipientFp = recipientId.joinToString("") { "%02x".format(it) }
+            val encKey = pr.bytes()
+            val ciphertext = pr.bytes()
+
+            if (recipientFp == ownFingerprint) {
+                val sharedSecret = keyManager.decapsulateKem(encKey)
+                val innerBytes = PqcCrypto.aesDecrypt(sharedSecret, ciphertext)
+                val env = Protocol.parseInnerEnvelope(innerBytes) ?: return null
+                return Triple(senderFingerprint, env.sender, env.content)
             }
-            if (pub == null) {
-                LogManager.w(TAG, "ML-DSA-65 signature verification failed for '${env.sender}'; dropping")
-                return
-            }
         }
-        val isOwn = env.sender == clientName
-        val realId = frame.serverMsgId
-        LogManager.d(TAG, "onData: sender='${env.sender}' clientName='$clientName' isOwn=$isOwn id=$realId")
-        scope.launch {
-            repo.upsert(
-                MessageEntity(
-                    serverId = currentServer?.id ?: "",
-                    serverMsgId = realId,
-                    sender = env.sender,
-                    ciphertext = frame.payload,
-                    iv = byteArrayOf(),
-                    timestamp = if (frame.timestamp != 0L) frame.timestamp else System.currentTimeMillis(),
-                    isOwn = isOwn
-                )
-            )
-        }
-        val msg = DecryptedMessage(realId, env.sender, env.content, isOwn,
-            if (frame.timestamp != 0L) frame.timestamp else System.currentTimeMillis())
-        synchronized(listeners) { listeners.forEach { it(msg) } }
+        return null
     }
 
     private fun onSyncResponse(r: Protocol.Reader) {
         val resp = Protocol.parseSyncResponse(r)
-        val secret = groupSecret ?: run {
-            LogManager.w(TAG, "SyncResponse but no group secret yet; cannot decrypt history.")
-            return
-        }
+        val serverId = currentServer?.id ?: return
         LogManager.i(TAG, "SyncResponse: ${resp.messages.size} messages")
         for (m in resp.messages) {
-            val innerBytes = try {
-                PqcCrypto.aesDecrypt(secret, m.payload)
-            } catch (e: Exception) {
-                LogManager.e(TAG, "history decrypt failed for ${m.id}", e)
+            val result = runCatching { decryptPerRecipientBlob(m.payload, serverId) }.getOrNull()
+            if (result == null) {
+                LogManager.w(TAG, "SyncResponse decrypt failed for ${m.id}")
                 continue
             }
-            val env = Protocol.parseInnerEnvelope(innerBytes) ?: continue
-            val isOwn = env.sender == clientName
-            LogManager.d(TAG, "onSyncResponse: msgId=${m.id} sender='${env.sender}' clientName='$clientName' isOwn=$isOwn")
+            val (senderFingerprint, sender, content) = result
+            val isOwn = sender == clientName
+            LogManager.d(TAG, "onSyncResponse: msgId=${m.id} sender='$sender' isOwn=$isOwn")
             scope.launch {
                 repo.upsert(
                     MessageEntity(
-                        serverId = currentServer?.id ?: "",
+                        serverId = serverId,
                         serverMsgId = m.id,
-                        sender = env.sender,
+                        sender = sender,
                         ciphertext = m.payload,
                         iv = byteArrayOf(),
                         timestamp = m.timestamp,
@@ -529,7 +468,7 @@ class ChatController(private val context: Context) {
                     )
                 )
             }
-            val msg = DecryptedMessage(m.id, env.sender, env.content, isOwn, m.timestamp)
+            val msg = DecryptedMessage(m.id, sender, content, isOwn, m.timestamp)
             synchronized(listeners) { listeners.forEach { it(msg) } }
         }
     }
@@ -554,45 +493,187 @@ class ChatController(private val context: Context) {
     }
 
     fun decryptEntity(entity: MessageEntity): DecryptedMessage? {
-        val secret = groupSecret ?: return null
-        val env = try {
-            Protocol.parseInnerEnvelope(PqcCrypto.aesDecrypt(secret, entity.ciphertext))
+        val serverId = currentServer?.id ?: return null
+        return try {
+            val result = decryptPerRecipientBlob(entity.ciphertext, serverId) ?: return null
+            val (_, sender, content) = result
+            DecryptedMessage(
+                serverMsgId = entity.serverMsgId,
+                sender = sender,
+                plaintext = content,
+                isOwn = entity.isOwn,
+                timestamp = entity.timestamp
+            )
         } catch (ex: Exception) {
             LogManager.w(TAG, "decryptEntity failed for ${entity.serverMsgId}", ex)
-            return null
-        } ?: return null
-        val recomputedIsOwn = env.sender == clientName
-        if (recomputedIsOwn != entity.isOwn) {
-            LogManager.w(TAG, "decryptEntity: isOwn mismatch for msgId=${entity.serverMsgId}: " +
-                "stored=${entity.isOwn} recomputed=$recomputedIsOwn sender='${env.sender}' clientName='$clientName'")
+            null
         }
-        return DecryptedMessage(
-            serverMsgId = entity.serverMsgId,
-            sender = env.sender,
-            plaintext = env.content,
-            isOwn = entity.isOwn,
-            timestamp = entity.timestamp
-        )
     }
 
     suspend fun decryptHistory(serverId: String): List<DecryptedMessage> {
-        val secret = groupSecret ?: return emptyList()
         val entities = repo.load(serverId)
         return entities.mapNotNull { e ->
-            val env = try {
-                Protocol.parseInnerEnvelope(PqcCrypto.aesDecrypt(secret, e.ciphertext))
+            try {
+                val result = decryptPerRecipientBlob(e.ciphertext, serverId) ?: return@mapNotNull null
+                val (_, sender, content) = result
+                DecryptedMessage(
+                    serverMsgId = e.serverMsgId,
+                    sender = sender,
+                    plaintext = content,
+                    isOwn = e.isOwn,
+                    timestamp = e.timestamp
+                )
             } catch (ex: Exception) {
                 LogManager.w(TAG, "history decrypt failed for ${e.serverMsgId}", ex)
-                return@mapNotNull null
-            } ?: return@mapNotNull null
-            DecryptedMessage(
-                serverMsgId = e.serverMsgId,
-                sender = env.sender,
-                plaintext = env.content,
-                isOwn = e.isOwn,
-                timestamp = e.timestamp
-            )
+                null
+            }
         }
+    }
+
+    // ------------------------------------------------------------------
+    // Key exchange handling
+    // ------------------------------------------------------------------
+
+    private fun handleIncoming(raw: ByteArray) {
+        if (raw.isEmpty()) return
+        val opcode = raw[0]
+        val opcodeName = when (opcode) {
+            Protocol.OP_AUTH_RESULT -> "AuthResult"
+            Protocol.OP_SYNC_RESPONSE -> "SyncResponse"
+            Protocol.OP_DATA -> "Data"
+            Protocol.OP_HEARTBEAT -> "Heartbeat"
+            Protocol.OP_KEY_EXCHANGE -> "KeyExchange"
+            Protocol.OP_KEY_EXCHANGE_KEM -> "KeyExchangeKem"
+            Protocol.OP_KEY_EXCHANGE_DSA -> "KeyExchangeDsa"
+            Protocol.OP_NEW_CERT_HASH -> "NewCertHash"
+            else -> "0x%02x".format(opcode)
+        }
+        LogManager.d(TAG, "RX $opcodeName (${raw.size} bytes)")
+        try {
+            val r = Protocol.Reader(raw, 1)
+            when (opcode) {
+                Protocol.OP_AUTH_RESULT -> onAuthResult(r)
+                Protocol.OP_SYNC_RESPONSE -> onSyncResponse(r)
+                Protocol.OP_DATA -> onData(r)
+                Protocol.OP_HEARTBEAT -> onHeartbeat()
+                Protocol.OP_KEY_EXCHANGE -> onKeyExchange(r)
+                Protocol.OP_KEY_EXCHANGE_KEM -> onKeyExchange(r, Protocol.OP_KEY_EXCHANGE_KEM)
+                Protocol.OP_KEY_EXCHANGE_DSA -> onKeyExchange(r, Protocol.OP_KEY_EXCHANGE_DSA)
+                Protocol.OP_NEW_CERT_HASH -> { }
+                else -> LogManager.w(TAG, "UNKNOWN opcode 0x%02x (${raw.size} bytes)".format(opcode))
+            }
+        } catch (e: Exception) {
+            LogManager.e(TAG, "PARSE FAILED opcode=0x%02x: ${e.message}".format(opcode), e)
+        }
+    }
+
+    private fun onAuthResult(r: Protocol.Reader) {
+        val res = Protocol.parseAuthResult(r)
+        if (!res.success) {
+            LogManager.e(TAG, "AUTH REJECTED by server: ${res.errorMessage ?: "no reason"}")
+            cancelAuthTimeout()
+            _state.value = ConnectionState.ERROR
+            _lastError.value = "Аутентификация отклонена сервером: ${res.errorMessage ?: "нет причины"}"
+            return
+        }
+        cancelAuthTimeout()
+        LogManager.i(TAG, "AUTH SUCCESS — publishing keys + requesting sync (clientName='$clientName')")
+        _state.value = ConnectionState.AUTHENTICATING
+        scope.launch {
+            // Cache own KEM public key for self-decryption
+            val ownFp = keyManager.getFingerprint()
+            keyRepo.cacheKey(
+                currentServer?.id ?: "",
+                ownFp,
+                keyManager.getKemPublicKey(),
+                keyManager.getDsaPublicKey()
+            )
+
+            // Send KEM and DSA keys with new opcodes
+            val kemOk = keyManager.getKemPublicKey().let { pub ->
+                client?.send(Protocol.buildKeyExchange(pub, Protocol.OP_KEY_EXCHANGE_KEM))
+            } ?: false
+            LogManager.i(TAG, "KeyExchange ML-KEM sent (ok=$kemOk)")
+            val dsaOk = keyManager.getDsaPublicKey().let { pub ->
+                client?.send(Protocol.buildKeyExchange(pub, Protocol.OP_KEY_EXCHANGE_DSA))
+            } ?: false
+            LogManager.i(TAG, "KeyExchange ML-DSA-65 sent (ok=$dsaOk)")
+
+            val lastSeen = repo.lastSeenId(currentServer?.id ?: "")
+            val syncOk = client?.send(Protocol.buildSync(lastSeen)) ?: false
+            LogManager.i(TAG, "Sync request sent (ok=$syncOk, lastSeen=$lastSeen)")
+
+            _state.value = ConnectionState.AUTHENTICATED
+            _state.value = ConnectionState.READY
+            LogManager.i(TAG, "READY")
+
+            // Notify new participants
+            val messages = repo.load(currentServer?.id ?: "")
+            if (messages.isEmpty()) {
+                _lastError.value = "Вы присоединились к чату. Сообщения до вашего подключения недоступны."
+            }
+        }
+        startHeartbeat()
+    }
+
+    private fun onKeyExchange(r: Protocol.Reader) {
+        val frame = Protocol.parseKeyExchange(r)
+        val key = frame.publicKey
+        val serverId = currentServer?.id ?: return
+
+        try {
+            val kf = java.security.KeyFactory.getInstance("Dilithium", "BCPQC")
+            kf.generatePublic(java.security.spec.X509EncodedKeySpec(key))
+            val fp = keyManager.fingerprintForBytes(key)
+            scope.launch { keyRepo.cacheKey(serverId, fp, null, key) }
+            LogManager.i(TAG, "KeyExchange ML-DSA-65 received, cached")
+        } catch (_: Exception) {
+            try {
+                val kf = java.security.KeyFactory.getInstance("Kyber", "BCPQC")
+                kf.generatePublic(java.security.spec.X509EncodedKeySpec(key))
+                val fp = keyManager.fingerprintForBytes(key)
+                scope.launch { keyRepo.cacheKey(serverId, fp, key, null) }
+                LogManager.i(TAG, "KeyExchange ML-KEM received, cached")
+            } catch (e: Exception) {
+                LogManager.w(TAG, "KeyExchange validation failed", e)
+            }
+        }
+    }
+
+    private fun onKeyExchange(r: Protocol.Reader, opcode: Byte) {
+        val frame = Protocol.parseKeyExchange(r)
+        val key = frame.publicKey
+        val serverId = currentServer?.id ?: return
+
+        try {
+            if (opcode == Protocol.OP_KEY_EXCHANGE_DSA) {
+                val kf = java.security.KeyFactory.getInstance("Dilithium", "BCPQC")
+                kf.generatePublic(java.security.spec.X509EncodedKeySpec(key))
+                val fp = keyManager.fingerprintForBytes(key)
+                scope.launch { keyRepo.cacheKey(serverId, fp, null, key) }
+                LogManager.i(TAG, "KeyExchange ML-DSA-65 received, cached")
+            } else {
+                val kf = java.security.KeyFactory.getInstance("Kyber", "BCPQC")
+                kf.generatePublic(java.security.spec.X509EncodedKeySpec(key))
+                val fp = keyManager.fingerprintForBytes(key)
+                scope.launch { keyRepo.cacheKey(serverId, fp, key, null) }
+                LogManager.i(TAG, "KeyExchange ML-KEM received, cached")
+            }
+        } catch (e: Exception) {
+            LogManager.w(TAG, "KeyExchange validation failed", e)
+        }
+    }
+
+    // ------------------------------------------------------------------
+    // Helpers
+    // ------------------------------------------------------------------
+
+    private fun hexToBytes(hex: String): ByteArray {
+        val bytes = ByteArray(hex.length / 2)
+        for (i in bytes.indices) {
+            bytes[i] = Integer.parseInt(hex.substring(i * 2, i * 2 + 2), 16).toByte()
+        }
+        return bytes
     }
 
     companion object {
