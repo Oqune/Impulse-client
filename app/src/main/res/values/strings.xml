@@ -1,3 +1,185 @@
+<?xml version="1.0" encoding="utf-8"?>
 <resources>
+    <!-- App -->
     <string name="app_name">Impulse</string>
+
+    <!-- Common -->
+    <string name="common_ok">OK</string>
+    <string name="common_cancel">Cancel</string>
+    <string name="common_save">Save</string>
+    <string name="common_back">Back</string>
+    <string name="common_error">Error</string>
+    <string name="common_yes">Yes</string>
+    <string name="common_no">No</string>
+
+    <!-- Navigation (MainScreen) -->
+    <string name="nav_home">Home</string>
+    <string name="nav_chats">Chats</string>
+    <string name="nav_settings">Settings</string>
+
+    <!-- HomeScreen -->
+    <string name="home_subtitle">Post-Quantum Encrypted Relay</string>
+    <string name="home_stat_total">Total</string>
+    <string name="home_stat_online">Online</string>
+    <string name="home_stat_errors">Errors</string>
+    <string name="home_connect_all">Connect all</string>
+    <string name="home_disconnect_all">Disconnect all</string>
+    <string name="home_powered_by">Powered by</string>
+
+    <!-- ChatListScreen -->
+    <string name="chat_list_title">Chats</string>
+    <string name="chat_list_empty">No servers in list</string>
+    <string name="chat_list_open_chat">Open chat</string>
+
+    <!-- ChatScreen -->
+    <string name="chat_placeholder_message">Message\u2026</string>
+    <string name="chat_placeholder_no_connection">No connection</string>
+    <string name="chat_send">Send</string>
+    <string name="chat_connect">Connect</string>
+    <string name="chat_disconnect">Disconnect</string>
+    <string name="chat_clear_history">Clear history</string>
+    <string name="chat_clear_history_title">Clear history?</string>
+    <string name="chat_clear_history_message">Local message history will be deleted. The server will send the current history again.</string>
+    <string name="chat_clear_history_confirm">Clear</string>
+    <string name="chat_scroll_down">Scroll to bottom</string>
+
+    <!-- Connection status -->
+    <string name="status_offline">[OFFLINE]</string>
+    <string name="status_connecting">[CONNECTING\u2026]</string>
+    <string name="status_auth">[AUTH\u2026]</string>
+    <string name="status_establishing">[ESTABLISHING\u2026]</string>
+    <string name="status_online">[ONLINE]</string>
+    <string name="status_error">[ERROR]</string>
+
+    <!-- ChatController user-facing messages -->
+    <string name="chat_welcome">You have joined the chat. Messages sent before your connection are not available.</string>
+    <string name="error_no_trusted_cert">No trusted server certificate. Scan the QR code from the server screen.</string>
+    <string name="error_session">WebTransport session error (code=%1$d). The server may not support HTTP/3 (QUIC) or may be unavailable at %2$s:%3$d.</string>
+    <string name="error_auth_rejected">Authentication rejected by server: %1$s</string>
+
+    <!-- SettingsScreen -->
+    <string name="settings_title">Settings</string>
+    <string name="settings_servers">Servers</string>
+    <string name="settings_user">User</string>
+    <string name="settings_app">App</string>
+    <string name="settings_backup">Backup</string>
+
+    <!-- Settings - Server list -->
+    <string name="settings_scan_qr">Scan QR code</string>
+    <string name="settings_certificates">Certificates</string>
+    <string name="settings_cert_none">None</string>
+    <string name="settings_cert_added">Added: %1$s</string>
+    <string name="settings_cert_ok">OK</string>
+    <string name="settings_cert_delete_all">Delete all certificates</string>
+    <string name="settings_cert_empty">No certificates. Scan the QR code from the server.</string>
+    <string name="settings_conn_and_display">Connection and display</string>
+    <string name="settings_conn_status_connected">Connected</string>
+    <string name="settings_conn_status_connecting">Connecting\u2026</string>
+    <string name="settings_conn_status_error">Error</string>
+    <string name="settings_conn_status_disconnected">Disconnected</string>
+    <string name="settings_auto_connect">Auto-connect</string>
+    <string name="settings_auto_connect_desc">Connect on launch</string>
+    <string name="settings_auto_reconnect">Auto-reconnect</string>
+    <string name="settings_auto_reconnect_desc">Reconnect on disconnect</string>
+    <string name="settings_show_in_chats">Show in chats</string>
+    <string name="settings_show_in_chats_desc">Display in chat list</string>
+    <string name="settings_address_and_config">Address and config</string>
+    <string name="settings_name">Name</string>
+    <string name="settings_ip_domain">IP / Domain</string>
+    <string name="settings_port">Port</string>
+    <string name="settings_password_optional">Password (optional)</string>
+    <string name="settings_invalid_format">Invalid format</string>
+    <string name="settings_port_range">1-65535</string>
+    <string name="settings_delete_server">Delete server</string>
+
+    <!-- Add Server Dialog -->
+    <string name="dialog_new_server">New server</string>
+    <string name="dialog_add">Add</string>
+
+    <!-- UserSettingsScreen -->
+    <string name="user_chat_name">Chat name</string>
+    <string name="user_displayed_name">Displayed name</string>
+    <string name="user_change_name">Change name</string>
+    <string name="user_change_name_title">Change name</string>
+    <string name="user_change_name_desc">Enter a new name to display in chat:</string>
+    <string name="user_username_label">Username</string>
+    <string name="user_enter_name">Enter name</string>
+    <string name="user_name_empty_error">Name cannot be empty</string>
+    <string name="user_name_too_long_error">Name too long (max 30 characters)</string>
+
+    <!-- AppSettingsScreen -->
+    <string name="app_settings_display_mode">Display mode</string>
+    <string name="app_settings_theme_light">Light</string>
+    <string name="app_settings_theme_dark">Dark</string>
+    <string name="app_settings_theme_system">System</string>
+    <string name="app_settings_oled">OLED</string>
+    <string name="app_settings_oled_desc_dark">Black background for AMOLED screens</string>
+    <string name="app_settings_oled_desc_light">Dark theme only</string>
+    <string name="app_settings_ultra_contrast">Ultra contrast</string>
+    <string name="app_settings_ultra_contrast_desc_dark">Maximum contrast, white on black</string>
+    <string name="app_settings_ultra_contrast_desc_light">Maximum contrast, black on white</string>
+    <string name="app_settings_hue">Hue</string>
+    <string name="app_settings_font_scale">Font scale</string>
+    <string name="app_settings_scale">Scale</string>
+    <string name="app_settings_security">Security</string>
+    <string name="app_settings_biometric">Biometric lock</string>
+    <string name="app_settings_biometric_desc">Fingerprint/face on launch</string>
+    <string name="app_settings_debug">Debug</string>
+    <string name="app_settings_send_logs">Send logs</string>
+    <string name="app_settings_session_log">Session log: %1$s KB</string>
+    <string name="app_settings_log_empty">Log is empty</string>
+    <string name="app_settings_share_logs">Share logs</string>
+
+    <!-- BackupScreen -->
+    <string name="backup_encryption_keys">Encryption keys</string>
+    <string name="backup_encryption_keys_desc">Backup protects your ML-KEM encryption keys. The key file is encrypted with AES-256-GCM with a password (PBKDF2, 100K iterations).</string>
+    <string name="backup_export_keys">Export keys</string>
+    <string name="backup_export_desc">Save an encrypted key file to the device</string>
+    <string name="backup_export">Export</string>
+    <string name="backup_exporting">Creating file\u2026</string>
+    <string name="backup_import_keys">Import keys</string>
+    <string name="backup_import_desc">Restore keys from a previously saved file</string>
+    <string name="backup_import">Select file</string>
+    <string name="backup_importing">Restoring\u2026</string>
+    <string name="backup_warning">Important</string>
+    <string name="backup_warning_desc">Save the password in a safe place. Without it, key recovery is impossible. When importing, keys are replaced entirely.</string>
+    <string name="backup_password_title">Backup password</string>
+    <string name="backup_password_desc">Copy the password and save it in a safe place. Without it, key recovery is impossible.</string>
+    <string name="backup_copy_password">Copy password</string>
+    <string name="backup_password_copied">Password copied</string>
+    <string name="backup_done">Done</string>
+    <string name="backup_restore_title">Restore keys</string>
+    <string name="backup_restore_desc">Enter the backup password to restore keys.</string>
+    <string name="backup_restore_password_label">Password</string>
+    <string name="backup_restore_warning">Keys will be replaced entirely.</string>
+    <string name="backup_restore_confirm">Restore</string>
+    <string name="backup_keys_restored">Keys restored</string>
+    <string name="backup_error_export">Export error: %1$s</string>
+    <string name="backup_error_import">Import error: %1$s</string>
+
+    <!-- BiometricLockScreen -->
+    <string name="biometric_title">Biometric lock</string>
+    <string name="biometric_desc">Use your fingerprint or face to unlock the app</string>
+    <string name="biometric_failed">Fingerprint recognition failed</string>
+    <string name="biometric_unavailable">Biometric lock is not available on this device</string>
+    <string name="biometric_retry">Try again</string>
+
+    <!-- QrScanScreen -->
+    <string name="qr_connect_to_server">Connect to server</string>
+    <string name="qr_scan_instruction">Scan the QR code from the server screen</string>
+    <string name="qr_code_found">Code found</string>
+    <string name="qr_camera_unavailable">Camera unavailable</string>
+    <string name="qr_searching">Searching for code\u2026</string>
+    <string name="qr_no_camera_access">No camera access</string>
+    <string name="qr_allow">Allow</string>
+    <string name="qr_invalid">Invalid QR code</string>
+    <string name="qr_torch_on">On</string>
+    <string name="qr_torch_off">Flashlight</string>
+    <string name="qr_manual">Manual</string>
+    <string name="qr_manual_title">Enter certificate hash</string>
+    <string name="qr_manual_desc">Enter the hash in the format impulse-cert:&lt;64 hex&gt;.</string>
+    <string name="qr_manual_label">Certificate hash</string>
+    <string name="qr_manual_expected">Expected impulse-cert:&lt;64 hex&gt;</string>
+    <string name="qr_manual_valid">Format is valid</string>
+    <string name="qr_manual_paste">Paste from clipboard</string>
 </resources>
