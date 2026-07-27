@@ -13,6 +13,8 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
+import androidx.compose.ui.graphics.Color
+
 import androidx.compose.material.icons.filled.*
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
@@ -28,10 +30,12 @@ import com.example.impulse.ConnectionManager
 import com.example.impulse.data.ServerConfig
 import com.example.impulse.data.ServerPreferences
 import com.example.impulse.transport.ConnectionState
+import androidx.compose.ui.res.stringResource
+import com.example.impulse.R
 import com.example.impulse.ui.theme.*
 
 enum class SettingsSection {
-    MAIN, SERVER, USER, APP
+    MAIN, SERVER, USER, APP, BACKUP
 }
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -59,35 +63,37 @@ fun SettingsScreen(
     }
 
     val title = when (currentSection) {
-        SettingsSection.SERVER -> "Серверы"
-        SettingsSection.USER -> "Профиль"
-        SettingsSection.APP -> "Приложение"
-        else -> "Настройки"
+        SettingsSection.SERVER -> stringResource(R.string.settings_servers)
+        SettingsSection.USER -> stringResource(R.string.settings_user)
+        SettingsSection.APP -> stringResource(R.string.settings_app)
+        SettingsSection.BACKUP -> stringResource(R.string.settings_backup)
+        else -> stringResource(R.string.settings_title)
     }
 
     val showBack = currentSection != SettingsSection.MAIN
 
     Box(modifier = modifier) {
         Scaffold(
+            contentWindowInsets = WindowInsets(0, 0, 0, 0),
             topBar = {
                 TopAppBar(
                     title = { Text(title, fontWeight = FontWeight.SemiBold) },
                     navigationIcon = {
                         if (showBack) {
                             IconButton(onClick = { goBack() }) {
-                                Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Назад")
+                                Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = stringResource(R.string.common_back))
                             }
                         }
                     },
                     actions = {
                         if (currentSection == SettingsSection.SERVER) {
                             IconButton(onClick = { showAddServerDialog = true }) {
-                                Icon(Icons.Default.Add, contentDescription = "Добавить сервер")
+                                Icon(Icons.Default.Add, contentDescription = stringResource(R.string.dialog_add))
                             }
                         }
                     },
                     colors = TopAppBarDefaults.topAppBarColors(
-                        containerColor = MaterialTheme.colorScheme.surface
+                        containerColor = Color.Transparent
                     )
                 )
             }
@@ -101,35 +107,60 @@ fun SettingsScreen(
                         onNavigateToServer = { currentSection = SettingsSection.SERVER },
                         onNavigateToUser = { currentSection = SettingsSection.USER },
                         onNavigateToApp = { currentSection = SettingsSection.APP },
+                        onNavigateToBackup = { currentSection = SettingsSection.BACKUP },
                     )
                 }
                 SettingsSection.SERVER -> {
-                    ServerListContent(
+                    DecorativeBackground(
                         modifier = Modifier
                             .fillMaxSize()
                             .padding(padding),
+                    ) {
+                    ServerListContent(
+                        modifier = Modifier.fillMaxSize(),
                         availableServers = availableServers,
                         connectionManager = connectionManager,
                         onVisibilityChanged = onVisibilityChanged,
                         onServerDeleted = onServerDeleted,
                         onScanQr = onScanQr,
+                        onServerUpdated = onServerUpdated,
                     )
+                    }
                 }
                 SettingsSection.USER -> {
-                    UserSettingsContent(
+                    DecorativeBackground(
                         modifier = Modifier
                             .fillMaxSize()
                             .padding(padding),
+                    ) {
+                    UserSettingsContent(
+                        modifier = Modifier.fillMaxSize(),
                         clientName = clientName,
                         onClientNameChange = onClientNameChange
                     )
+                    }
                 }
                 SettingsSection.APP -> {
-                    AppSettingsContent(
+                    DecorativeBackground(
                         modifier = Modifier
                             .fillMaxSize()
-                            .padding(padding)
+                            .padding(padding),
+                    ) {
+                    AppSettingsContent(
+                        modifier = Modifier.fillMaxSize(),
                     )
+                    }
+                }
+                SettingsSection.BACKUP -> {
+                    DecorativeBackground(
+                        modifier = Modifier
+                            .fillMaxSize()
+                            .padding(padding),
+                    ) {
+                    BackupScreen(
+                        modifier = Modifier.fillMaxSize(),
+                    )
+                    }
                 }
             }
         }
@@ -158,6 +189,7 @@ private fun ServerListContent(
     onVisibilityChanged: () -> Unit,
     onServerDeleted: (ServerConfig) -> Unit,
     onScanQr: (ServerConfig) -> Unit = {},
+    onServerUpdated: (ServerConfig) -> Unit = {},
 ) {
     val context = LocalContext.current
     val serverPreferences = remember { ServerPreferences(context) }
@@ -227,7 +259,8 @@ private fun ServerListContent(
                         Icon(
                             if (isExpanded) Icons.Default.KeyboardArrowUp else Icons.Default.KeyboardArrowDown,
                             contentDescription = null,
-                            tint = MaterialTheme.colorScheme.onSurfaceVariant
+                            tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                            modifier = Modifier.size(18.dp)
                         )
                     }
 
@@ -244,10 +277,8 @@ private fun ServerListContent(
                             onVisibilityChanged = onVisibilityChanged,
                             onServerDeleted = onServerDeleted,
                             onScanQr = onScanQr,
-                            onServerUpdated = { updated ->
-                                serverPreferences.updateCustomServer(updated)
-                            },
-                            modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp)
+                            onServerUpdated = onServerUpdated,
+                            modifier = Modifier.padding(vertical = 8.dp)
                         )
                     }
                 }
@@ -325,14 +356,14 @@ private fun ServerExpandableSettings(
                     modifier = Modifier.size(18.dp),
                 )
                 Spacer(Modifier.width(10.dp))
-                Text("Сертификаты", style = MaterialTheme.typography.bodyMedium, modifier = Modifier.weight(1f))
+                Text(stringResource(R.string.settings_certificates), style = MaterialTheme.typography.bodyMedium, modifier = Modifier.weight(1f))
                 if (!isCertTrusted) {
                     Surface(
                         shape = RoundedCornerShape(6.dp),
                         color = MaterialTheme.colorScheme.error.copy(alpha = 0.1f),
                     ) {
                         Text(
-                            "Нет",
+                            stringResource(R.string.settings_cert_none),
                             modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp),
                             style = MaterialTheme.typography.labelSmall,
                             color = MaterialTheme.colorScheme.error,
@@ -357,7 +388,7 @@ private fun ServerExpandableSettings(
                     ) {
                         Icon(Icons.Default.QrCodeScanner, contentDescription = null, modifier = Modifier.size(16.dp))
                         Spacer(Modifier.width(6.dp))
-                        Text("Сканировать QR-код", style = MaterialTheme.typography.labelMedium)
+                        Text(stringResource(R.string.settings_scan_qr), style = MaterialTheme.typography.labelMedium)
                     }
 
                     // Cert info
@@ -383,21 +414,21 @@ private fun ServerExpandableSettings(
                                             color = MaterialTheme.colorScheme.onSurfaceVariant,
                                         )
                                         Text(
-                                            "Добавлен: ${java.text.SimpleDateFormat("dd.MM.yy HH:mm", java.util.Locale.getDefault()).format(java.util.Date(info.issuedAt))}",
+                                            stringResource(R.string.settings_cert_added, java.text.SimpleDateFormat("dd.MM.yy HH:mm", java.util.Locale.getDefault()).format(java.util.Date(info.issuedAt))),
                                             style = MaterialTheme.typography.labelSmall,
                                             fontSize = 9.sp,
                                             color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.6f),
                                         )
                                     }
                                     ShieldBadge(
-                                        text = "OK",
+                                        text = stringResource(R.string.settings_cert_ok),
                                         color = MaterialTheme.colorScheme.primary,
                                     )
                             }
                         }
                         // Forget button
                         Text(
-                            "Удалить все сертификаты",
+                            stringResource(R.string.settings_cert_delete_all),
                             style = MaterialTheme.typography.labelMedium,
                             color = MaterialTheme.colorScheme.error,
                             modifier = Modifier
@@ -412,7 +443,7 @@ private fun ServerExpandableSettings(
                         Row(verticalAlignment = Alignment.CenterVertically) {
                             Icon(Icons.Default.Lock, contentDescription = null, tint = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.size(14.dp))
                             Spacer(Modifier.width(8.dp))
-                            Text("Нет сертификатов. Отсканируйте QR-код с сервера.", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                            Text(stringResource(R.string.settings_cert_empty), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
                     }
                 }
         }
@@ -436,15 +467,15 @@ private fun ServerExpandableSettings(
                 )
                 Spacer(Modifier.width(10.dp))
                 Column(modifier = Modifier.weight(1f)) {
-                    Text("Подключение и отображение", style = MaterialTheme.typography.bodyMedium)
+                    Text(stringResource(R.string.settings_conn_and_display), style = MaterialTheme.typography.bodyMedium)
                     Text(
                         when {
-                            connectionState == ConnectionState.READY -> "Подключено"
+                            connectionState == ConnectionState.READY -> stringResource(R.string.settings_conn_status_connected)
                             connectionState == ConnectionState.CONNECTING ||
                             connectionState == ConnectionState.AUTHENTICATING ||
-                            connectionState == ConnectionState.AUTHENTICATED -> "Подключение..."
-                            connectionState == ConnectionState.ERROR -> "Ошибка"
-                            else -> "Отключено"
+                            connectionState == ConnectionState.AUTHENTICATED -> stringResource(R.string.settings_conn_status_connecting)
+                            connectionState == ConnectionState.ERROR -> stringResource(R.string.settings_conn_status_error)
+                            else -> stringResource(R.string.settings_conn_status_disconnected)
                         },
                         style = MaterialTheme.typography.labelSmall,
                         color = when {
@@ -462,7 +493,7 @@ private fun ServerExpandableSettings(
                 )
             }
             AnimatedVisibility(visible = connSectionOpen, enter = expandVertically(), exit = shrinkVertically()) {
-                Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
                     // Connect/disconnect
                     if (connectionManager != null) {
                         val isConnected = connectionState == ConnectionState.READY
@@ -483,13 +514,13 @@ private fun ServerExpandableSettings(
                                 modifier = Modifier.size(16.dp)
                             )
                             Spacer(Modifier.width(6.dp))
-                            Text(if (isConnected) "Отключить" else "Подключить", style = MaterialTheme.typography.labelMedium)
+                            Text(if (isConnected) stringResource(R.string.chat_disconnect) else stringResource(R.string.chat_connect), style = MaterialTheme.typography.labelMedium)
                         }
                     }
 
                     ImpulseToggle(
-                        title = "Автоподключение",
-                        description = "Подключаться при запуске",
+                        title = stringResource(R.string.settings_auto_connect),
+                        description = stringResource(R.string.settings_auto_connect_desc),
                         checked = autoConnect,
                         onCheckedChange = { enabled ->
                             autoConnect = enabled
@@ -498,8 +529,8 @@ private fun ServerExpandableSettings(
                     )
 
                     ImpulseToggle(
-                        title = "Автопереподключение",
-                        description = "Переподключаться при обрыве",
+                        title = stringResource(R.string.settings_auto_reconnect),
+                        description = stringResource(R.string.settings_auto_reconnect_desc),
                         checked = autoReconnect,
                         onCheckedChange = { enabled ->
                             autoReconnect = enabled
@@ -508,11 +539,9 @@ private fun ServerExpandableSettings(
                         }
                     )
 
-                    HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.3f))
-
                     ImpulseToggle(
-                        title = "Показывать в чатах",
-                        description = "Отображать в списке чатов",
+                        title = stringResource(R.string.settings_show_in_chats),
+                        description = stringResource(R.string.settings_show_in_chats_desc),
                         checked = isServerVisible,
                         onCheckedChange = { enabled ->
                             isServerVisible = enabled
@@ -541,7 +570,7 @@ private fun ServerExpandableSettings(
                         modifier = Modifier.size(18.dp),
                     )
                     Spacer(Modifier.width(10.dp))
-                    Text("Адрес и конфигурация", style = MaterialTheme.typography.bodyMedium, modifier = Modifier.weight(1f))
+                    Text(stringResource(R.string.settings_address_and_config), style = MaterialTheme.typography.bodyMedium, modifier = Modifier.weight(1f))
                     Icon(
                         if (addrSectionOpen) Icons.Default.KeyboardArrowUp else Icons.Default.KeyboardArrowDown,
                         contentDescription = null,
@@ -554,7 +583,7 @@ private fun ServerExpandableSettings(
                         OutlinedTextField(
                             value = editName,
                             onValueChange = { editName = it },
-                            label = { Text("Название") },
+                            label = { Text(stringResource(R.string.settings_name)) },
                             singleLine = true,
                             modifier = Modifier.fillMaxWidth(),
                             shape = RoundedCornerShape(12.dp),
@@ -563,29 +592,29 @@ private fun ServerExpandableSettings(
                         OutlinedTextField(
                             value = editAddress,
                             onValueChange = { editAddress = it; addressError = false },
-                            label = { Text("IP / Домен") },
+                            label = { Text(stringResource(R.string.settings_ip_domain)) },
                             singleLine = true,
                             modifier = Modifier.fillMaxWidth(),
                             shape = RoundedCornerShape(12.dp),
                             textStyle = MaterialTheme.typography.bodyMedium,
                             isError = addressError,
-                            supportingText = if (addressError) {{ Text("Неверный формат") }} else null,
+                            supportingText = if (addressError) {{ Text(stringResource(R.string.settings_invalid_format)) }} else null,
                         )
                         OutlinedTextField(
                             value = editPort,
                             onValueChange = { editPort = it.filter { c -> c.isDigit() }; portError = false },
-                            label = { Text("Порт") },
+                            label = { Text(stringResource(R.string.settings_port)) },
                             singleLine = true,
                             modifier = Modifier.fillMaxWidth(),
                             shape = RoundedCornerShape(12.dp),
                             textStyle = MaterialTheme.typography.bodyMedium,
                             isError = portError,
-                            supportingText = if (portError) {{ Text("1-65535") }} else null,
+                            supportingText = if (portError) {{ Text(stringResource(R.string.settings_port_range)) }} else null,
                         )
                         OutlinedTextField(
                             value = editPassword,
                             onValueChange = { editPassword = it },
-                            label = { Text("Пароль (опционально)") },
+                            label = { Text(stringResource(R.string.settings_password_optional)) },
                             singleLine = true,
                             modifier = Modifier.fillMaxWidth(),
                             shape = RoundedCornerShape(12.dp),
@@ -603,19 +632,20 @@ private fun ServerExpandableSettings(
                                         port = portInt!!,
                                         password = editPassword.trim()
                                     )
+                                    serverPreferences.updateCustomServer(updated)
                                     onServerUpdated(updated)
                                 }
                             },
                             modifier = Modifier.fillMaxWidth(),
                             shape = RoundedCornerShape(12.dp)
                         ) {
-                            Text("Сохранить")
+                            Text(stringResource(R.string.common_save))
                         }
 
                         HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.3f))
 
                         Text(
-                            "Удалить сервер",
+                            stringResource(R.string.settings_delete_server),
                             style = MaterialTheme.typography.bodyMedium,
                             color = MaterialTheme.colorScheme.error,
                             modifier = Modifier
@@ -624,7 +654,7 @@ private fun ServerExpandableSettings(
                                     onServerDeleted(server)
                                     onVisibilityChanged()
                                 }
-                                .padding(vertical = 4.dp)
+                                .padding(vertical = 8.dp)
                         )
                     }
                 }
@@ -643,6 +673,7 @@ private fun SettingsMainContent(
     onNavigateToServer: () -> Unit,
     onNavigateToUser: () -> Unit,
     onNavigateToApp: () -> Unit,
+    onNavigateToBackup: () -> Unit,
 ) {
     DecorativeBackground(
         modifier = modifier,
@@ -658,7 +689,7 @@ private fun SettingsMainContent(
         ) {
 
             Text(
-                text = "Настройки",
+                text = stringResource(R.string.settings_title),
                 style = MaterialTheme.typography.headlineMedium,
                 fontWeight = FontWeight.Bold,
                 textAlign = androidx.compose.ui.text.style.TextAlign.Center,
@@ -666,21 +697,27 @@ private fun SettingsMainContent(
             )
 
             ImpulseMenuCard(
-                title = "Серверы",
+                title = stringResource(R.string.settings_servers),
                 icon = Icons.Default.Build,
                 onClick = onNavigateToServer
             )
 
             ImpulseMenuCard(
-                title = "Пользователь",
+                title = stringResource(R.string.settings_user),
                 icon = Icons.Default.Person,
                 onClick = onNavigateToUser
             )
 
             ImpulseMenuCard(
-                title = "Приложение",
+                title = stringResource(R.string.settings_app),
                 icon = Icons.Default.Settings,
                 onClick = onNavigateToApp
+            )
+
+            ImpulseMenuCard(
+                title = stringResource(R.string.settings_backup),
+                icon = Icons.Default.Security,
+                onClick = onNavigateToBackup
             )
         }
     }
@@ -704,13 +741,13 @@ private fun AddServerDialog(
 
     AlertDialog(
         onDismissRequest = onDismiss,
-        title = { Text("Новый сервер") },
+        title = { Text(stringResource(R.string.dialog_new_server)) },
         text = {
             Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
                 OutlinedTextField(
                     value = name,
                     onValueChange = { name = it },
-                    label = { Text("Название") },
+                    label = { Text(stringResource(R.string.settings_name)) },
                     singleLine = true,
                     modifier = Modifier.fillMaxWidth(),
                     shape = RoundedCornerShape(12.dp),
@@ -718,27 +755,27 @@ private fun AddServerDialog(
                 OutlinedTextField(
                     value = address,
                     onValueChange = { address = it; addressError = false },
-                    label = { Text("IP / Домен") },
+                    label = { Text(stringResource(R.string.settings_ip_domain)) },
                     singleLine = true,
                     modifier = Modifier.fillMaxWidth(),
                     shape = RoundedCornerShape(12.dp),
                     isError = addressError,
-                    supportingText = if (addressError) {{ Text("Неверный формат") }} else null,
+                    supportingText = if (addressError) {{ Text(stringResource(R.string.settings_invalid_format)) }} else null,
                 )
                 OutlinedTextField(
                     value = port,
                     onValueChange = { port = it.filter { c -> c.isDigit() }; portError = false },
-                    label = { Text("Порт") },
+                    label = { Text(stringResource(R.string.settings_port)) },
                     singleLine = true,
                     modifier = Modifier.fillMaxWidth(),
                     shape = RoundedCornerShape(12.dp),
                     isError = portError,
-                    supportingText = if (portError) {{ Text("1-65535") }} else null,
+                    supportingText = if (portError) {{ Text(stringResource(R.string.settings_port_range)) }} else null,
                 )
                 OutlinedTextField(
                     value = password,
                     onValueChange = { password = it },
-                    label = { Text("Пароль (опционально)") },
+                    label = { Text(stringResource(R.string.settings_password_optional)) },
                     singleLine = true,
                     modifier = Modifier.fillMaxWidth(),
                     shape = RoundedCornerShape(12.dp),
@@ -760,11 +797,11 @@ private fun AddServerDialog(
                     ))
                 }
             }) {
-                Text("Добавить")
+                Text(stringResource(R.string.dialog_add))
             }
         },
         dismissButton = {
-            TextButton(onClick = onDismiss) { Text("Отмена") }
+            TextButton(onClick = onDismiss) { Text(stringResource(R.string.common_cancel)) }
         },
         shape = RoundedCornerShape(16.dp),
     )
