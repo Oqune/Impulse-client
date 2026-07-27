@@ -4,11 +4,15 @@ import android.content.Intent
 import android.os.Bundle
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
+import androidx.appcompat.app.AppCompatDelegate
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.core.content.ContextCompat
+import androidx.core.os.LocaleListCompat
 import androidx.fragment.app.FragmentActivity
 import com.example.impulse.data.ServerPreferences
+import com.example.impulse.locale.LocalePreferences
+import com.example.impulse.locale.LocaleSettings
 import com.example.impulse.ui.theme.ThemePreferences
 import com.example.impulse.service.WebTransportForegroundService
 import com.example.impulse.ui.screens.BiometricLockScreen
@@ -19,6 +23,13 @@ import com.example.impulse.ui.theme.ThemeSettings
 class MainActivity : FragmentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+
+        val localePreferences = LocalePreferences(applicationContext)
+        LocaleSettings.initialize(localePreferences)
+        AppCompatDelegate.setApplicationLocales(
+            LocaleListCompat.forLanguageTags(LocaleSettings.languageCode)
+        )
+
         enableEdgeToEdge()
 
         val themePreferences = ThemePreferences(applicationContext)
