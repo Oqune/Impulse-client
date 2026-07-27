@@ -130,6 +130,11 @@
     <string name="app_settings_log_empty">Лог пуст</string>
     <string name="app_settings_share_logs">Поделиться логами</string>
 
+    <!-- Language selector -->
+    <string name="app_settings_language">Язык / Language</string>
+    <string name="lang_english">English</string>
+    <string name="lang_russian">Русский</string>
+
     <!-- BackupScreen -->
     <string name="backup_encryption_keys">Ключи шифрования</string>
     <string name="backup_encryption_keys_desc">Резервное копирование защищает ваши ML-KEM ключи шифрования. Файл ключей шифруется AES-256-GCM с паролем (PBKDF2, 100K итераций).</string>

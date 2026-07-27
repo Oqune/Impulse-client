@@ -130,6 +130,11 @@
     <string name="app_settings_log_empty">Log is empty</string>
     <string name="app_settings_share_logs">Share logs</string>
 
+    <!-- Language selector -->
+    <string name="app_settings_language">Язык / Language</string>
+    <string name="lang_english">English</string>
+    <string name="lang_russian">Русский</string>
+
     <!-- BackupScreen -->
     <string name="backup_encryption_keys">Encryption keys</string>
     <string name="backup_encryption_keys_desc">Backup protects your ML-KEM encryption keys. The key file is encrypted with AES-256-GCM with a password (PBKDF2, 100K iterations).</string>

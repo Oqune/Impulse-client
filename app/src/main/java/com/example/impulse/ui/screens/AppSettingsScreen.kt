@@ -23,10 +23,20 @@ import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
+import com.example.impulse.R
+import com.example.impulse.locale.LocaleSettings
+import androidx.appcompat.app.AppCompatDelegate
+import androidx.core.os.LocaleListCompat
+import android.content.Intent
+import android.widget.Toast
+import androidx.core.content.FileProvider
 import com.example.impulse.data.ServerPreferences
 import com.example.impulse.ui.theme.*
+import com.example.impulse.util.FileLogger
+import java.io.File
 
 @Composable
 fun AppSettingsContent(
@@ -53,11 +63,11 @@ fun AppSettingsContent(
         modifier = modifier
             .verticalScroll(rememberScrollState())
             .padding(16.dp),
-        verticalArrangement = Arrangement.spacedBy(14.dp)
+        verticalArrangement = Arrangement.spacedBy(16.dp)
     ) {
         // ── Theme mode ──────────────────────────────────────────────
         ImpulseCard {
-            ImpulseSection(title = "Режим отображения") {
+            ImpulseSection(title = stringResource(R.string.app_settings_display_mode)) {
                 Row(
                     modifier = Modifier.fillMaxWidth(),
                     horizontalArrangement = Arrangement.spacedBy(8.dp)
@@ -101,7 +111,7 @@ fun AppSettingsContent(
                         ) {
                             Icon(
                                 imageVector = entry.icon,
-                                contentDescription = entry.label,
+                                contentDescription = stringResource(entry.labelRes),
                                 tint = if (isSelected)
                                     MaterialTheme.colorScheme.primary
                                 else
@@ -109,7 +119,7 @@ fun AppSettingsContent(
                                 modifier = Modifier.size(22.dp)
                             )
                             Text(
-                                text = entry.label,
+                                text = stringResource(entry.labelRes),
                                 style = MaterialTheme.typography.labelSmall,
                                 fontWeight = if (isSelected) FontWeight.SemiBold else FontWeight.Normal,
                                 color = if (isSelected)
@@ -127,8 +137,8 @@ fun AppSettingsContent(
                 Spacer(Modifier.height(10.dp))
 
                 ImpulseToggle(
-                    title = "OLED",
-                    description = if (isDarkActive) "Чёрный фон для AMOLED-экранов" else "Только для тёмной темы",
+                    title = stringResource(R.string.app_settings_oled),
+                    description = if (isDarkActive) stringResource(R.string.app_settings_oled_desc_dark) else stringResource(R.string.app_settings_oled_desc_light),
                     checked = oledEnabled && isDarkActive,
                     enabled = isDarkActive,
                     onCheckedChange = {
@@ -140,8 +150,8 @@ fun AppSettingsContent(
                     }
                 )
                 ImpulseToggle(
-                    title = "Ультра контраст",
-                    description = if (isDarkActive) "Максимальный контраст, белый на чёрном" else "Максимальный контраст, чёрный на белом",
+                    title = stringResource(R.string.app_settings_ultra_contrast),
+                    description = if (isDarkActive) stringResource(R.string.app_settings_ultra_contrast_desc_dark) else stringResource(R.string.app_settings_ultra_contrast_desc_light),
                     checked = ultraContrastEnabled,
                     onCheckedChange = {
                         ultraContrastEnabled = it
@@ -154,9 +164,74 @@ fun AppSettingsContent(
             }
         }
 
+        // ── Language selector ──────────────────────────────────────
+        ImpulseCard {
+            ImpulseSection(title = stringResource(R.string.app_settings_language)) {
+                val currentLang = LocaleSettings.languageCode
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    listOf(
+                        "en" to R.string.lang_english,
+                        "ru" to R.string.lang_russian,
+                    ).forEach { (code, labelRes) ->
+                        val isSelected = currentLang == code
+                        val bgColor by animateColorAsState(
+                            targetValue = if (isSelected)
+                                MaterialTheme.colorScheme.primary.copy(alpha = 0.15f)
+                            else
+                                MaterialTheme.colorScheme.surfaceContainerHigh,
+                            label = "lang_bg"
+                        )
+                        val borderColor by animateColorAsState(
+                            targetValue = if (isSelected)
+                                MaterialTheme.colorScheme.primary
+                            else
+                                MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.4f),
+                            label = "lang_border"
+                        )
+
+                        Column(
+                            modifier = Modifier
+                                .weight(1f)
+                                .clip(RoundedCornerShape(14.dp))
+                                .background(bgColor)
+                                .border(
+                                    BorderStroke(
+                                        width = if (isSelected) 1.5.dp else 1.dp,
+                                        color = borderColor
+                                    ),
+                                    RoundedCornerShape(14.dp)
+                                )
+                                .clickable {
+                                    LocaleSettings.setLanguage(code)
+                                    AppCompatDelegate.setApplicationLocales(
+                                        LocaleListCompat.forLanguageTags(code)
+                                    )
+                                }
+                                .padding(vertical = 14.dp, horizontal = 4.dp),
+                            horizontalAlignment = Alignment.CenterHorizontally,
+                        ) {
+                            Text(
+                                text = stringResource(labelRes),
+                                style = MaterialTheme.typography.labelSmall,
+                                fontWeight = if (isSelected) FontWeight.SemiBold else FontWeight.Normal,
+                                color = if (isSelected)
+                                    MaterialTheme.colorScheme.primary
+                                else
+                                    MaterialTheme.colorScheme.onSurfaceVariant,
+                                maxLines = 1,
+                            )
+                        }
+                    }
+                }
+            }
+        }
+
         // ── Hue slider ──────────────────────────────────────────────
         ImpulseCard {
-            ImpulseSection(title = "Оттенок") {
+            ImpulseSection(title = stringResource(R.string.app_settings_hue)) {
                 val previewColor = hslToColor(hue, 0.88f, 0.58f)
                 val shiftedHue = if (isDarkActive) hue + 8f else hue - 6f
                 val previewBg = hslToColor(shiftedHue, 0.35f, if (isDarkActive) 0.06f else 0.96f)
@@ -252,7 +327,7 @@ fun AppSettingsContent(
 
         // ── Font scale ─────────────────────────────────────────────
         ImpulseCard {
-            ImpulseSection(title = "Масштаб шрифта") {
+            ImpulseSection(title = stringResource(R.string.app_settings_font_scale)) {
                 Box(
                     modifier = Modifier
                         .fillMaxWidth()
@@ -276,7 +351,7 @@ fun AppSettingsContent(
                     verticalAlignment = Alignment.CenterVertically,
                 ) {
                     Text(
-                        text = "Масштаб",
+                        text = stringResource(R.string.app_settings_scale),
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
@@ -299,14 +374,50 @@ fun AppSettingsContent(
 
         // ── Security ──────────────────────────────────────────────
         ImpulseCard {
-            ImpulseSection(title = "Безопасность") {
+            ImpulseSection(title = stringResource(R.string.app_settings_security)) {
                 ImpulseToggle(
-                    title = "Биометрическая защита",
-                    description = "Отпечаток/лицо при запуске",
+                    title = stringResource(R.string.app_settings_biometric),
+                    description = stringResource(R.string.app_settings_biometric_desc),
                     checked = biometricEnabled,
                     onCheckedChange = {
                         biometricEnabled = it
                         serverPreferences.saveBiometricEnabled(it)
+                    }
+                )
+            }
+        }
+
+        // ── Debug ──────────────────────────────────────────────
+        ImpulseCard {
+            ImpulseSection(title = stringResource(R.string.app_settings_debug)) {
+                val logPath = FileLogger.getLogPath()
+                val logSize = FileLogger.getLogSize()
+                val sizeKB = "%.1f".format(logSize / 1024.0)
+                ImpulseClickableRow(
+                    title = stringResource(R.string.app_settings_send_logs),
+                    description = stringResource(R.string.app_settings_session_log, sizeKB),
+                    onClick = {
+                        val logFile = logPath?.let { File(it) }
+                        if (logFile == null || !logFile.exists()) {
+                            Toast.makeText(context, context.getString(R.string.app_settings_log_empty), Toast.LENGTH_SHORT).show()
+                            return@ImpulseClickableRow
+                        }
+                        try {
+                            val uri = FileProvider.getUriForFile(
+                                context,
+                                "${context.packageName}.fileprovider",
+                                logFile
+                            )
+                            val share = Intent(Intent.ACTION_SEND).apply {
+                                type = "text/plain"
+                                putExtra(Intent.EXTRA_STREAM, uri)
+                                putExtra(Intent.EXTRA_SUBJECT, "Impulse session log")
+                                addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+                            }
+                            context.startActivity(Intent.createChooser(share, context.getString(R.string.app_settings_share_logs)))
+                        } catch (e: Exception) {
+                            Toast.makeText(context, "${context.getString(R.string.common_error)}: ${e.message}", Toast.LENGTH_SHORT).show()
+                        }
                     }
                 )
             }
@@ -319,9 +430,9 @@ fun AppSettingsContent(
 private enum class ThemeModeData(
     val mode: ThemeMode,
     val icon: ImageVector,
-    val label: String,
+    val labelRes: Int,
 ) {
-    LIGHT(ThemeMode.LIGHT, Icons.Default.LightMode, "Светлая"),
-    DARK(ThemeMode.DARK, Icons.Default.DarkMode, "Тёмная"),
-    SYSTEM(ThemeMode.SYSTEM, Icons.Default.PhoneAndroid, "Система"),
+    LIGHT(ThemeMode.LIGHT, Icons.Default.LightMode, R.string.app_settings_theme_light),
+    DARK(ThemeMode.DARK, Icons.Default.DarkMode, R.string.app_settings_theme_dark),
+    SYSTEM(ThemeMode.SYSTEM, Icons.Default.PhoneAndroid, R.string.app_settings_theme_system),
 }
