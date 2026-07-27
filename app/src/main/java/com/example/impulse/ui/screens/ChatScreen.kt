@@ -31,6 +31,8 @@ import com.example.impulse.data.ServerConfig
 import com.example.impulse.transport.ConnectionState
 import com.example.impulse.ui.theme.*
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.res.stringResource
+import com.example.impulse.R
 import kotlinx.coroutines.launch
 import java.text.SimpleDateFormat
 import java.util.Date
@@ -144,23 +146,27 @@ fun FullWidthInfoMessage(message: ChatMessage) {
 
 @Composable
 fun ConnectionStatusIndicator(connectionState: ConnectionState) {
-    val statusData = when (connectionState) {
-        ConnectionState.DISCONNECTED ->
-            Triple("[OFFLINE]", MaterialTheme.colorScheme.outline, MaterialTheme.colorScheme.surfaceContainerHighest)
-        ConnectionState.CONNECTING ->
-            Triple("[CONNECTING...]", MaterialTheme.colorScheme.tertiary, MaterialTheme.colorScheme.tertiaryContainer)
-        ConnectionState.CONNECTED ->
-            Triple("[AUTH...]", MaterialTheme.colorScheme.tertiary, MaterialTheme.colorScheme.tertiaryContainer)
-        ConnectionState.AUTHENTICATING ->
-            Triple("[AUTH...]", MaterialTheme.colorScheme.tertiary, MaterialTheme.colorScheme.tertiaryContainer)
-        ConnectionState.AUTHENTICATED ->
-            Triple("[ESTABLISHING...]", MaterialTheme.colorScheme.tertiary, MaterialTheme.colorScheme.tertiaryContainer)
-        ConnectionState.READY ->
-            Triple("[ONLINE]", MaterialTheme.colorScheme.primary, MaterialTheme.colorScheme.primaryContainer)
-        ConnectionState.ERROR ->
-            Triple("[ERROR]", MaterialTheme.colorScheme.error, MaterialTheme.colorScheme.errorContainer)
+    val statusText = when (connectionState) {
+        ConnectionState.DISCONNECTED -> stringResource(R.string.status_offline)
+        ConnectionState.CONNECTING -> stringResource(R.string.status_connecting)
+        ConnectionState.CONNECTED -> stringResource(R.string.status_auth)
+        ConnectionState.AUTHENTICATING -> stringResource(R.string.status_auth)
+        ConnectionState.AUTHENTICATED -> stringResource(R.string.status_establishing)
+        ConnectionState.READY -> stringResource(R.string.status_online)
+        ConnectionState.ERROR -> stringResource(R.string.status_error)
     }
-    val (statusText, statusColor, backgroundColor) = statusData
+    val statusColor = when (connectionState) {
+        ConnectionState.DISCONNECTED -> MaterialTheme.colorScheme.error
+        ConnectionState.ERROR -> MaterialTheme.colorScheme.error
+        else -> MaterialTheme.colorScheme.tertiary
+    }
+    val backgroundColor = when (connectionState) {
+        ConnectionState.DISCONNECTED -> MaterialTheme.colorScheme.errorContainer
+        ConnectionState.ERROR -> MaterialTheme.colorScheme.errorContainer
+        ConnectionState.READY -> MaterialTheme.colorScheme.primaryContainer
+        else -> MaterialTheme.colorScheme.tertiaryContainer
+    }
+    val statusData = Triple(statusText, statusColor, backgroundColor)
 
     val animatedBgColor by animateColorAsState(
         targetValue = backgroundColor.copy(alpha = 0.2f),
@@ -241,7 +247,7 @@ fun MessageInputArea(
                     .padding(end = 8.dp),
                 placeholder = {
                     Text(
-                        text = if (isConnected) "Сообщение..." else "Нет подключения",
+                        text = if (isConnected) stringResource(R.string.chat_placeholder_message) else stringResource(R.string.chat_placeholder_no_connection),
                         style = MaterialTheme.typography.bodyMedium,
                         color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
@@ -273,7 +279,7 @@ fun MessageInputArea(
             ) {
                 Icon(
                     imageVector = Icons.AutoMirrored.Filled.Send,
-                    contentDescription = "Отправить",
+                    contentDescription = stringResource(R.string.chat_send),
                     modifier = Modifier.size(22.dp)
                 )
             }
@@ -303,7 +309,7 @@ fun BoxScope.ScrollToBottomButton(
         ) {
             Icon(
                 imageVector = Icons.Default.KeyboardArrowDown,
-                contentDescription = "Прокрутить вниз",
+                contentDescription = stringResource(R.string.chat_scroll_down),
                 modifier = Modifier.size(24.dp)
             )
         }
@@ -333,6 +339,8 @@ private fun getSenderColor(messageType: MessageType, isOwn: Boolean, sender: Str
         isOwn -> MaterialTheme.colorScheme.onPrimaryContainer
         messageType == MessageType.SYSTEM -> MaterialTheme.colorScheme.onTertiaryContainer
         messageType == MessageType.ERROR -> MaterialTheme.colorScheme.onErrorContainer
+        messageType == MessageType.TECHNICAL -> MaterialTheme.colorScheme.onTertiaryContainer
+        messageType == MessageType.INFO -> MaterialTheme.colorScheme.onSurface
         sender == "Система" || sender == "Сервер" -> MaterialTheme.colorScheme.onTertiaryContainer
         else -> MaterialTheme.colorScheme.primary
     }
@@ -344,6 +352,8 @@ private fun getContentColor(messageType: MessageType, isOwn: Boolean, sender: St
         isOwn -> MaterialTheme.colorScheme.onPrimaryContainer
         messageType == MessageType.SYSTEM -> MaterialTheme.colorScheme.onTertiaryContainer
         messageType == MessageType.ERROR -> MaterialTheme.colorScheme.onErrorContainer
+        messageType == MessageType.TECHNICAL -> MaterialTheme.colorScheme.onTertiaryContainer
+        messageType == MessageType.INFO -> MaterialTheme.colorScheme.onSurface
         sender == "Система" || sender == "Сервер" -> MaterialTheme.colorScheme.onTertiaryContainer
         else -> MaterialTheme.colorScheme.onSecondaryContainer
     }
@@ -355,10 +365,12 @@ private fun getTimestampColor(messageType: MessageType, isOwn: Boolean, sender: 
         isOwn -> MaterialTheme.colorScheme.onPrimaryContainer
         messageType == MessageType.SYSTEM -> MaterialTheme.colorScheme.onTertiaryContainer
         messageType == MessageType.ERROR -> MaterialTheme.colorScheme.onErrorContainer
+        messageType == MessageType.TECHNICAL -> MaterialTheme.colorScheme.onTertiaryContainer
+        messageType == MessageType.INFO -> MaterialTheme.colorScheme.onSurface
         sender == "Система" || sender == "Сервер" -> MaterialTheme.colorScheme.onTertiaryContainer
         else -> MaterialTheme.colorScheme.onSecondaryContainer
     }
-    return baseColor.copy(alpha = 0.7f)
+    return baseColor.copy(alpha = 0.8f)
 }
 
 // ============================================================================
@@ -455,7 +467,7 @@ fun ChatScreen(
                         modifier = Modifier
                             .fillMaxWidth()
                             .statusBarsPadding(),
-                        color = MaterialTheme.colorScheme.surface,
+                        color = Color.Transparent,
                         shadowElevation = 2.dp
                     ) {
                         Row(
@@ -467,7 +479,7 @@ fun ChatScreen(
                             IconButton(onClick = { onBack() }) {
                                 Icon(
                                     imageVector = Icons.AutoMirrored.Filled.ArrowBack,
-                                    contentDescription = "Назад"
+                                    contentDescription = stringResource(R.string.common_back)
                                 )
                             }
                             Column(modifier = Modifier.weight(1f)) {
@@ -490,7 +502,7 @@ fun ChatScreen(
                                 ) {
                                     Icon(
                                         imageVector = Icons.Default.Link,
-                                        contentDescription = "Подключить",
+                                        contentDescription = stringResource(R.string.chat_connect),
                                         tint = MaterialTheme.colorScheme.primary
                                     )
                                 }
@@ -500,7 +512,7 @@ fun ChatScreen(
                                 ) {
                                     Icon(
                                         imageVector = Icons.Default.LinkOff,
-                                        contentDescription = "Отключить",
+                                        contentDescription = stringResource(R.string.chat_disconnect),
                                         tint = MaterialTheme.colorScheme.error
                                     )
                                 }
@@ -509,7 +521,7 @@ fun ChatScreen(
                                 ) {
                                     Icon(
                                         imageVector = Icons.Default.DeleteSweep,
-                                        contentDescription = "Сбросить историю",
+                                        contentDescription = stringResource(R.string.chat_clear_history),
                                         tint = MaterialTheme.colorScheme.onSurfaceVariant
                                     )
                                 }
@@ -521,19 +533,19 @@ fun ChatScreen(
                 if (showClearHistoryDialog) {
                     AlertDialog(
                         onDismissRequest = { showClearHistoryDialog = false },
-                        title = { Text("Сбросить историю?") },
-                        text = { Text("Локальная история сообщений будет удалена. Сервер отправит актуальную историю заново.") },
+                        title = { Text(stringResource(R.string.chat_clear_history_title)) },
+                        text = { Text(stringResource(R.string.chat_clear_history_message)) },
                         confirmButton = {
                             TextButton(onClick = {
                                 showClearHistoryDialog = false
                                 scope.launch { viewModel.clearHistory() }
                             }) {
-                                Text("Сбросить")
+                                Text(stringResource(R.string.chat_clear_history_confirm))
                             }
                         },
                         dismissButton = {
                             TextButton(onClick = { showClearHistoryDialog = false }) {
-                                Text("Отмена")
+                                Text(stringResource(R.string.common_cancel))
                             }
                         }
                     )

@@ -9,13 +9,14 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.Edit
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.res.stringResource
+import com.example.impulse.R
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
-import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
@@ -76,7 +77,7 @@ fun UserSettingsContent(
 
                 Column(modifier = Modifier.weight(1f)) {
                     Text(
-                        text = "Имя в чате",
+                        text = stringResource(R.string.user_chat_name),
                         style = MaterialTheme.typography.labelMedium,
                         color = MaterialTheme.colorScheme.onPrimaryContainer.copy(alpha = 0.7f)
                     )
@@ -100,15 +101,18 @@ fun UserSettingsContent(
 
         Card(
             modifier = Modifier.fillMaxWidth(),
-            shape = RoundedCornerShape(16.dp)
+            shape = RoundedCornerShape(16.dp),
+            colors = CardDefaults.cardColors(
+                containerColor = MaterialTheme.colorScheme.surfaceContainerHigh
+            )
         ) {
             Column(
                 modifier = Modifier
                     .fillMaxWidth()
                     .padding(16.dp)
             ) {
-                Text(
-                    text = "Отображаемое имя",
+                    Text(
+                        text = stringResource(R.string.user_displayed_name),
                     style = MaterialTheme.typography.titleMedium,
                     fontWeight = FontWeight.Bold
                 )
@@ -142,7 +146,7 @@ fun UserSettingsContent(
                 ) {
                     Icon(Icons.Default.Edit, contentDescription = null)
                     Spacer(Modifier.width(8.dp))
-                    Text("Изменить имя")
+                    Text(stringResource(R.string.user_change_name))
                 }
             }
         }
@@ -156,10 +160,10 @@ fun UserSettingsContent(
             onDismissRequest = { showNameDialog = false },
             containerColor = MaterialTheme.colorScheme.surface,
             tonalElevation = 8.dp,
-            title = { Text("Изменить имя") },
+            title = { Text(stringResource(R.string.user_change_name_title)) },
             text = {
                 Column {
-                    Text("Введите новое имя для отображения в чате:")
+                    Text(stringResource(R.string.user_change_name_desc))
                     Spacer(modifier = Modifier.height(16.dp))
 
                     OutlinedTextField(
@@ -171,8 +175,8 @@ fun UserSettingsContent(
                         modifier = Modifier
                             .fillMaxWidth()
                             .focusRequester(focusRequester),
-                        label = { Text("Имя пользователя") },
-                        placeholder = { Text("Введите имя") },
+                        label = { Text(stringResource(R.string.user_username_label)) },
+                        placeholder = { Text(stringResource(R.string.user_enter_name)) },
                         isError = nameError.isNotEmpty(),
                         supportingText = {
                             if (nameError.isNotEmpty()) {
@@ -187,21 +191,21 @@ fun UserSettingsContent(
                 TextButton(
                     onClick = {
                         if (tempName.isBlank()) {
-                            nameError = "Имя не может быть пустым"
+                            nameError = context.getString(R.string.user_name_empty_error)
                         } else if (tempName.length > 30) {
-                            nameError = "Имя слишком длинное (макс. 30 символов)"
+                            nameError = context.getString(R.string.user_name_too_long_error)
                         } else {
                             onClientNameChange(tempName)
                             showNameDialog = false
                         }
                     }
                 ) {
-                    Text("Сохранить")
+                    Text(stringResource(R.string.common_save))
                 }
             },
             dismissButton = {
                 TextButton(onClick = { showNameDialog = false }) {
-                    Text("Отмена")
+                    Text(stringResource(R.string.common_cancel))
                 }
             }
         )
