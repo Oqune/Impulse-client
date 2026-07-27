@@ -1,6 +1,5 @@
 package com.example.impulse.ui.screens
 
-import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.*
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Lock
@@ -9,9 +8,11 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
+import com.example.impulse.R
 import com.example.impulse.util.BiometricHelper
 
 @Composable
@@ -40,7 +41,7 @@ fun BiometricLockScreen(
                 },
                 onFailed = {
                     isAuthenticating = false
-                    errorMessage = "Не удалось распознать отпечаток"
+                    errorMessage = context.getString(R.string.biometric_failed)
                 }
             )
         }
@@ -51,18 +52,22 @@ fun BiometricLockScreen(
         if (activity != null && biometricHelper.isBiometricAvailable()) {
             startAuthentication(activity)
         } else {
-            errorMessage = "Биометрическая защита недоступна на этом устройстве"
+            errorMessage = context.getString(R.string.biometric_unavailable)
         }
     }
 
-    Box(
-        modifier = modifier
-            .fillMaxSize()
-            .background(MaterialTheme.colorScheme.background)
-            .padding(24.dp),
-        contentAlignment = Alignment.Center
+    DecorativeBackground(
+        modifier = modifier.fillMaxSize(),
     ) {
-        Column(
+        Box(
+            modifier = Modifier.fillMaxSize(),
+            contentAlignment = Alignment.Center
+        ) {
+            Column(
+                modifier = Modifier
+                    .statusBarsPadding()
+                    .navigationBarsPadding()
+                    .padding(24.dp),
             horizontalAlignment = Alignment.CenterHorizontally,
             verticalArrangement = Arrangement.spacedBy(24.dp)
         ) {
@@ -74,7 +79,7 @@ fun BiometricLockScreen(
             )
 
             Text(
-                text = "Биометрическая защита",
+                text = stringResource(R.string.biometric_title),
                 style = MaterialTheme.typography.headlineSmall,
                 fontWeight = FontWeight.Bold,
                 textAlign = TextAlign.Center,
@@ -82,7 +87,7 @@ fun BiometricLockScreen(
             )
 
             Text(
-                text = "Используйте отпечаток пальца или лицо для разблокировки приложения",
+                text = stringResource(R.string.biometric_desc),
                 style = MaterialTheme.typography.bodyLarge,
                 textAlign = TextAlign.Center,
                 color = MaterialTheme.colorScheme.onSurfaceVariant
@@ -119,9 +124,10 @@ fun BiometricLockScreen(
                         contentColor = MaterialTheme.colorScheme.primary
                     )
                 ) {
-                    Text("Повторить попытку")
+                    Text(stringResource(R.string.biometric_retry))
                 }
             }
         }
+    }
     }
 }

@@ -52,12 +52,14 @@ import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.viewinterop.AndroidView
 import androidx.core.content.ContextCompat
+import com.example.impulse.R
 import com.example.impulse.ui.theme.*
 import com.example.impulse.util.LogManager
 import com.google.mlkit.vision.barcode.BarcodeScanning
@@ -107,7 +109,7 @@ fun QrScanScreen(
                 title = { },
                 navigationIcon = {
                     IconButton(onClick = onBack) {
-                        Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Назад")
+                        Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = stringResource(R.string.common_back))
                     }
                 },
                 colors = TopAppBarDefaults.topAppBarColors(
@@ -115,13 +117,12 @@ fun QrScanScreen(
                 )
             )
         },
-        containerColor = MaterialTheme.colorScheme.background
+        containerColor = Color.Transparent
     ) { padding ->
         Box(
             modifier = Modifier
                 .fillMaxSize()
-                .padding(padding)
-                .navigationBarsPadding(),
+                .padding(padding),
             contentAlignment = Alignment.Center,
         ) {
             Column(
@@ -135,14 +136,14 @@ fun QrScanScreen(
 
                 // ── Header ──────────────────────────────────────────────
                 Text(
-                    "Подключение к серверу",
+                    stringResource(R.string.qr_connect_to_server),
                     style = MaterialTheme.typography.titleLarge,
                     color = MaterialTheme.colorScheme.onBackground,
                     textAlign = TextAlign.Center,
                 )
                 Spacer(Modifier.height(4.dp))
                 Text(
-                    "Отсканируйте QR-код с экрана сервера",
+                    stringResource(R.string.qr_scan_instruction),
                     style = MaterialTheme.typography.bodyMedium,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                     textAlign = TextAlign.Center,
@@ -182,12 +183,12 @@ fun QrScanScreen(
                                                 LogManager.i("QrScan", "cert scanned (short=${LogManager.shortHash(hash)})")
                                                 onCertScanned(hash)
                                             } else {
-                                                scanError = "Невалидный QR-код"
+                                                scanError = context.getString(R.string.qr_invalid)
                                                 LogManager.w("QrScan", "parseCertHash rejected: '$raw'")
+                                                }
                                             }
                                         }
                                     }
-                                }
                                 DisposableEffect(Unit) {
                                     try { controller.start() } catch (e: Exception) {
                                         LogManager.e("QrScan", "camera start failed", e)
@@ -224,13 +225,13 @@ fun QrScanScreen(
                                     )
                                     Spacer(Modifier.height(12.dp))
                                     Text(
-                                        "Нет доступа к камере",
+                                        stringResource(R.string.qr_no_camera_access),
                                         style = MaterialTheme.typography.bodyLarge,
                                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                                     )
                                     Spacer(Modifier.height(12.dp))
                                     Button(onClick = { permissionLauncher.launch(Manifest.permission.CAMERA) }) {
-                                        Text("Разрешить")
+                                        Text(stringResource(R.string.qr_allow))
                                     }
                                 }
                             }
@@ -245,9 +246,9 @@ fun QrScanScreen(
                             horizontalArrangement = Arrangement.Center,
                         ) {
                             val statusText = when {
-                                scanned != null -> "Код найден"
-                                !hasCameraPermission -> "Камера недоступна"
-                                else -> "Поиск кода..."
+                                scanned != null -> stringResource(R.string.qr_code_found)
+                                !hasCameraPermission -> stringResource(R.string.qr_camera_unavailable)
+                                else -> stringResource(R.string.qr_searching)
                             }
                             val statusColor = when {
                                 scanned != null -> MaterialTheme.colorScheme.primary
@@ -291,7 +292,7 @@ fun QrScanScreen(
                                         modifier = Modifier.weight(1f),
                                     )
                                     TextButton(onClick = { scanError = null }) {
-                                        Text("OK")
+                                        Text(stringResource(R.string.common_ok))
                                     }
                                 }
                             }
@@ -320,14 +321,14 @@ fun QrScanScreen(
                                     modifier = Modifier.size(18.dp),
                                 )
                                 Spacer(Modifier.width(6.dp))
-                                Text(if (torchOn) "Вкл" else "Фонарик")
+                                Text(if (torchOn) stringResource(R.string.qr_torch_on) else stringResource(R.string.qr_torch_off))
                             }
                             Button(
                                 onClick = { showManualEntry = true },
                                 modifier = Modifier.weight(1f),
                                 shape = RoundedCornerShape(14.dp),
                             ) {
-                                Text("Вручную")
+                                Text(stringResource(R.string.qr_manual))
                             }
                         }
 
@@ -366,7 +367,7 @@ fun QrScanScreen(
             onConfirm = {
                 val hash = parseCertHash(manualHash)
                 if (hash == null) {
-                    manualError = "Ожидается impulse-cert:<64 hex>"
+                    manualError = context.getString(R.string.qr_manual_expected)
                 } else {
                     showManualEntry = false
                     if (scanned == null) {
@@ -392,11 +393,11 @@ private fun ManualEntryDialog(
 ) {
     AlertDialog(
         onDismissRequest = onDismiss,
-        title = { Text("Ввод хеша сертификата") },
+        title = { Text(stringResource(R.string.qr_manual_title)) },
         text = {
             Column {
                 Text(
-                    "Введите хеш в формате impulse-cert:<64 hex>.",
+                    stringResource(R.string.qr_manual_desc),
                     style = MaterialTheme.typography.bodyMedium,
                     color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
@@ -405,30 +406,30 @@ private fun ManualEntryDialog(
                     value = value,
                     onValueChange = onValueChange,
                     modifier = Modifier.fillMaxWidth(),
-                    label = { Text("Хеш сертификата") },
+                    label = { Text(stringResource(R.string.qr_manual_label)) },
                     isError = error != null || (value.isNotEmpty() && !isValid),
                     supportingText = {
                         when {
                             error != null -> Text(error)
-                            value.isNotEmpty() && !isValid -> Text("Ожидается impulse-cert:<64 hex>")
-                            isValid -> Text("Формат корректен")
+                            value.isNotEmpty() && !isValid -> Text(stringResource(R.string.qr_manual_expected))
+                            isValid -> Text(stringResource(R.string.qr_manual_valid))
                         }
                     },
                     singleLine = true,
                     shape = RoundedCornerShape(12.dp),
                     trailingIcon = {
                         IconButton(onClick = onPaste) {
-                            Icon(Icons.Filled.ContentPaste, contentDescription = "Вставить из буфера")
+                            Icon(Icons.Filled.ContentPaste, contentDescription = stringResource(R.string.qr_manual_paste))
                         }
                     }
                 )
             }
         },
         confirmButton = {
-            TextButton(onClick = onConfirm, enabled = isValid) { Text("Сохранить") }
+            TextButton(onClick = onConfirm, enabled = isValid) { Text(stringResource(R.string.common_save)) }
         },
         dismissButton = {
-            TextButton(onClick = onDismiss) { Text("Отмена") }
+            TextButton(onClick = onDismiss) { Text(stringResource(R.string.common_cancel)) }
         }
     )
 }
