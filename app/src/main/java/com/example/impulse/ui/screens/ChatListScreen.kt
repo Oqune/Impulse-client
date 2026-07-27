@@ -11,12 +11,14 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import com.example.impulse.ConnectionManager
+import com.example.impulse.R
 import com.example.impulse.data.ServerConfig
 import com.example.impulse.data.ServerPreferences
 import com.example.impulse.transport.ConnectionState
@@ -48,7 +50,7 @@ fun ChatListScreen(
                 .padding(horizontal = 20.dp, vertical = 24.dp)
         ) {
             Text(
-                text = "Чаты",
+                text = stringResource(R.string.chat_list_title),
                 style = MaterialTheme.typography.headlineMedium,
                 fontWeight = FontWeight.Bold,
                 textAlign = TextAlign.Center,
@@ -73,7 +75,7 @@ fun ChatListScreen(
                     contentAlignment = Alignment.Center,
                 ) {
                     Text(
-                        text = "Нет серверов в списке",
+                        text = stringResource(R.string.chat_list_empty),
                         style = MaterialTheme.typography.bodyMedium,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                     )
@@ -144,7 +146,7 @@ fun ChatListScreen(
 
                                 Icon(
                                     Icons.AutoMirrored.Filled.KeyboardArrowRight,
-                                    contentDescription = "Открыть чат",
+                                    contentDescription = stringResource(R.string.chat_list_open_chat),
                                     tint = MaterialTheme.colorScheme.onSurfaceVariant,
                                     modifier = Modifier.size(24.dp)
                                 )

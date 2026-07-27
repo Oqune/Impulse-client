@@ -20,9 +20,11 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.example.impulse.ConnectionManager
+import com.example.impulse.R
 import com.example.impulse.data.ServerConfig
 import com.example.impulse.data.ServerPreferences
 import com.example.impulse.transport.ConnectionState
@@ -125,7 +127,7 @@ fun HomeScreen(
                 Box(contentAlignment = Alignment.Center) {
                     // Background gradient layer
                     Text(
-                        text = "Impulse",
+                        text = stringResource(R.string.app_name),
                         style = androidx.compose.ui.text.TextStyle(
                             brush = bgBrush,
                             fontSize = 44.sp,
@@ -138,7 +140,7 @@ fun HomeScreen(
                     )
                     // Shimmer sweep on top
                     Text(
-                        text = "Impulse",
+                        text = stringResource(R.string.app_name),
                         style = androidx.compose.ui.text.TextStyle(
                             brush = shimmerBrush,
                             fontSize = 44.sp,
@@ -152,7 +154,7 @@ fun HomeScreen(
                 }
                 Spacer(Modifier.height(4.dp))
                 Text(
-                    text = "Post-Quantum Encrypted Relay",
+                    text = stringResource(R.string.home_subtitle),
                     style = MaterialTheme.typography.bodySmall,
                     color = onSurfaceVariant,
                     textAlign = TextAlign.Center,
@@ -203,10 +205,10 @@ fun HomeScreen(
                     modifier = Modifier.fillMaxWidth(),
                     horizontalArrangement = Arrangement.SpaceEvenly,
                 ) {
-                    MiniStat(value = "$totalCount", label = "Всего", color = MaterialTheme.colorScheme.onSurface)
-                    MiniStat(value = "$onlineCount", label = "Онлайн", color = MaterialTheme.colorScheme.primary)
+                    MiniStat(value = "$totalCount", label = stringResource(R.string.home_stat_total), color = MaterialTheme.colorScheme.onSurface)
+                    MiniStat(value = "$onlineCount", label = stringResource(R.string.home_stat_online), color = MaterialTheme.colorScheme.primary)
                     if (errorCount > 0) {
-                        MiniStat(value = "$errorCount", label = "Ошибки", color = MaterialTheme.colorScheme.error)
+                        MiniStat(value = "$errorCount", label = stringResource(R.string.home_stat_errors), color = MaterialTheme.colorScheme.error)
                     }
                 }
 
@@ -282,7 +284,7 @@ fun HomeScreen(
                 ) {
                     Icon(Icons.Default.Link, contentDescription = null, modifier = Modifier.size(16.dp))
                     Spacer(Modifier.width(6.dp))
-                    Text("Подключить все", style = MaterialTheme.typography.labelMedium)
+                    Text(stringResource(R.string.home_connect_all), style = MaterialTheme.typography.labelMedium)
                 }
                 OutlinedButton(
                     onClick = {
@@ -298,7 +300,7 @@ fun HomeScreen(
                 ) {
                     Icon(Icons.Default.LinkOff, contentDescription = null, modifier = Modifier.size(16.dp))
                     Spacer(Modifier.width(6.dp))
-                    Text("Отключить все", style = MaterialTheme.typography.labelMedium)
+                    Text(stringResource(R.string.home_disconnect_all), style = MaterialTheme.typography.labelMedium)
                 }
             }
 
@@ -309,7 +311,7 @@ fun HomeScreen(
                 verticalArrangement = Arrangement.spacedBy(8.dp),
             ) {
                 Text(
-                    text = "Powered by",
+                    text = stringResource(R.string.home_powered_by),
                     style = MaterialTheme.typography.labelSmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.5f),
                 )

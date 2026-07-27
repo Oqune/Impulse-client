@@ -19,9 +19,11 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.zIndex
 import com.example.impulse.ConnectionManager
+import com.example.impulse.R
 import com.example.impulse.data.ServerConfig
 import com.example.impulse.data.ServerPreferences
 import com.example.impulse.ui.theme.*
@@ -67,22 +69,19 @@ fun MainScreen() {
     }
 
     val navItems = listOf(
-        Triple(Icons.Default.Home, "Главная", 0),
-        Triple(Icons.AutoMirrored.Filled.List, "Чаты", 1),
-        Triple(Icons.Default.Settings, "Настройки", 2),
+        Triple(Icons.Default.Home, stringResource(R.string.nav_home), 0),
+        Triple(Icons.AutoMirrored.Filled.List, stringResource(R.string.nav_chats), 1),
+        Triple(Icons.Default.Settings, stringResource(R.string.nav_settings), 2),
     )
 
     val navSelectedColor = MaterialTheme.colorScheme.primary
     val navUnselectedColor = MaterialTheme.colorScheme.onSurfaceVariant
 
-    Box(modifier = Modifier.fillMaxSize()) {
-        // Grid background visible under everything
-        DecorativeBackground(modifier = Modifier.fillMaxSize()) {}
-
+    Box(modifier = Modifier.fillMaxSize().background(MaterialTheme.colorScheme.background)) {
         // Main content
         Scaffold(
             modifier = Modifier.fillMaxSize(),
-            containerColor = MaterialTheme.colorScheme.surface.copy(alpha = 0f),
+            containerColor = Color.Transparent,
             contentColor = MaterialTheme.colorScheme.onSurface,
             bottomBar = {
                 Box(
@@ -97,7 +96,7 @@ fun MainScreen() {
                             spotColor = MaterialTheme.colorScheme.primary.copy(alpha = 0.06f),
                         )
                         .clip(RoundedCornerShape(20.dp))
-                        .background(MaterialTheme.colorScheme.surface)
+                        .background(MaterialTheme.colorScheme.background)
                         .zIndex(1f),
                 ) {
                     Row(
@@ -255,6 +254,9 @@ fun MainScreen() {
                     serverId = server.id,
                     onCertScanned = { hash ->
                         certManager.trustHash(server.id, hash)
+                        // Close QR screen and auto-connect after successful scan.
+                        qrScanServer = null
+                        connectionManager.connect(server, clientName)
                     },
                     onBack = { qrScanServer = null }
                 )
