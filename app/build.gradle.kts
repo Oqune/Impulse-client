@@ -12,7 +12,7 @@ android {
     compileSdk = 36
     defaultConfig {
         applicationId = "com.example.impulse"
-        minSdk = 33 // WebTransport API requires Android 13 (API 33)
+        minSdk = 28 // WebTransport via socket-http3 (third-party), no native API 33+ needed
         targetSdk = 36
         versionCode = 2
         versionName = "2.0"
@@ -170,6 +170,8 @@ dependencies {
     implementation(libs.bouncycastle.prov)
     implementation(libs.bouncycastle.pkix)
     implementation(libs.bouncycastle.util)
+
+    // Argon2id password hashing — provided by BouncyCastle (bcprov), no extra dependency needed.
 
     // Coroutines
     implementation(libs.kotlinx.coroutines.android)

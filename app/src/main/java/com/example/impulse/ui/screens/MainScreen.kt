@@ -40,6 +40,7 @@ fun MainScreen() {
     var activeChatServer by remember { mutableStateOf<ServerConfig?>(null) }
     var qrScanServer by remember { mutableStateOf<ServerConfig?>(null) }
     var visibilityRefreshTrigger by remember { mutableIntStateOf(0) }
+    var certRefreshTrigger by remember { mutableIntStateOf(0) }
 
     val connectionManager = remember { ConnectionManager.getInstance(context) }
 
@@ -203,6 +204,7 @@ fun MainScreen() {
                             }
                         },
                         onVisibilityChanged = { visibilityRefreshTrigger++ },
+                        certRefreshTrigger = certRefreshTrigger,
                         connectionManager = connectionManager,
                         onScanQr = { server -> qrScanServer = server },
                         modifier = Modifier.padding(bottom = innerPadding.calculateBottomPadding())
@@ -254,7 +256,7 @@ fun MainScreen() {
                     serverId = server.id,
                     onCertScanned = { hash ->
                         certManager.trustHash(server.id, hash)
-                        // Close QR screen and auto-connect after successful scan.
+                        certRefreshTrigger++
                         qrScanServer = null
                         connectionManager.connect(server, clientName)
                     },

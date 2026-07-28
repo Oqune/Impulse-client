@@ -13,6 +13,7 @@ import com.example.impulse.transport.Protocol
 import com.example.impulse.transport.WebTransportClient
 import com.example.impulse.util.LogManager
 import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
@@ -22,8 +23,11 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.CoroutineExceptionHandler
+import kotlinx.coroutines.withTimeout
 import kotlinx.coroutines.withContext
+import kotlinx.coroutines.runBlocking
 
 class ChatController(private val context: Context) {
 
@@ -69,6 +73,8 @@ class ChatController(private val context: Context) {
     @Volatile private var authTimeoutJob: kotlinx.coroutines.Job? = null
     @Volatile private var autoReconnectEnabled = false
     @Volatile private var userDisconnect = false
+    @Volatile private var authChallengeNonce = CompletableDeferred<ByteArray?>()
+    @Volatile private var pendingSaltB64: String = ""
 
     private data class PendingMessage(
         val serverMsgId: Long,
@@ -96,6 +102,7 @@ class ChatController(private val context: Context) {
 
     private fun ensureKeyPair() {
         keyManager = SecureKeyManager
+        PqcCrypto.ensureProvider()
         keyManager.ensureKeyPair(context)
         keyRepo = PublicKeyRepository(context)
     }
@@ -133,6 +140,13 @@ class ChatController(private val context: Context) {
 
         LogManager.i(TAG, "connect: server=${server.id} ip=${server.ipAddress} pinnedHashes=${hashes.size}")
 
+        synchronized(lock) {
+            client?.destroy()
+            client = null
+        }
+        authChallengeNonce = CompletableDeferred()
+        pendingSaltB64 = ""
+
         val clientHolder = arrayOfNulls<WebTransportClient>(1)
         val wtClient = WebTransportClient(
             context = context,
@@ -143,7 +157,9 @@ class ChatController(private val context: Context) {
             onSessionError = { code -> _lastError.value = "Ошибка сессии WebTransport (code=$code). " +
                 "Возможно, сервер не поддерживает HTTP/3 (QUIC) или недоступен на ${server.ipAddress}:${server.port}." },
             onReady = {
+                LogManager.i(TAG, "onReady FIRED — launching sendAuth")
                 scope.launch {
+                    LogManager.i(TAG, "sendAuth coroutine started, transport=${clientHolder[0] != null}")
                     sendAuth(clientHolder[0])
                 }
             },
@@ -178,6 +194,9 @@ class ChatController(private val context: Context) {
             client = null
         }
         synchronized(pendingMessagesLock) { pendingMessages.clear() }
+        pendingSaltB64 = ""
+        authChallengeNonce.completeExceptionally(IllegalStateException("disconnected"))
+        authChallengeNonce = CompletableDeferred()
         _state.value = ConnectionState.DISCONNECTED
         _lastError.value = null
     }
@@ -223,16 +242,45 @@ class ChatController(private val context: Context) {
     }
 
     private suspend fun sendAuth(transport: WebTransportClient? = client) {
+        LogManager.i(TAG, "sendAuth: STARTED (transport=${transport != null}, server=${currentServer?.id})")
         val server = currentServer ?: run {
             LogManager.e(TAG, "sendAuth: no current server configured")
             _state.value = ConnectionState.ERROR
             return
         }
         val password = server.password
-        val frame = Protocol.buildAuth(password)
-        val ok = transport?.send(frame) ?: false
+        LogManager.i(TAG, "sendAuth: password=${password.length} chars, waiting for challenge nonce...")
+        val nonce = try {
+            withTimeout(5000) { authChallengeNonce.await() }
+        } catch (e: CancellationException) {
+            throw e
+        } catch (e: Exception) {
+            LogManager.e(TAG, "sendAuth: challenge nonce not received after 5s: ${e.message}")
+            _state.value = ConnectionState.ERROR
+            scheduleReconnect()
+            return
+        }
+        LogManager.i(TAG, "sendAuth: building auth frame (password=${password.length} chars, nonce=${nonce?.size} bytes)")
+        val frame: ByteArray
+        try {
+            val saltB64 = pendingSaltB64; pendingSaltB64 = ""
+            frame = Protocol.buildAuth(password, nonce, saltB64)
+            LogManager.i(TAG, "sendAuth: auth frame built OK (${frame.size} bytes)")
+        } catch (e: CancellationException) {
+            throw e
+        } catch (e: Exception) {
+            LogManager.e(TAG, "sendAuth: buildAuth FAILED: ${e.message}", e)
+            _state.value = ConnectionState.ERROR
+            scheduleReconnect()
+            return
+        }
+        LogManager.i(TAG, "sendAuth: sending frame via transport...")
+        val ok = withContext(Dispatchers.IO) { transport?.send(frame) ?: false }
+        LogManager.i(TAG, "sendAuth: transport.send() returned $ok (transport=${transport != null})")
         if (!ok) {
             LogManager.e(TAG, "sendAuth FAILED — transport.send() returned false (state=${_state.value})")
+            _state.value = ConnectionState.ERROR
+            scheduleReconnect()
             return
         }
         _state.value = ConnectionState.AUTHENTICATING
@@ -294,7 +342,9 @@ class ChatController(private val context: Context) {
         val serverId = currentServer?.id ?: return false
 
         val allKemKeys = keyRepo.getAllKemPublicKeys(serverId)
-        if (allKemKeys.isEmpty()) {
+        val ownPub = keyManager.getKemPublicKey()
+        val peerKeys = allKemKeys.filter { !it.contentEquals(ownPub) }
+        if (peerKeys.isEmpty()) {
             LogManager.w(TAG, "No peer keys cached; cannot send.")
             return false
         }
@@ -308,7 +358,7 @@ class ChatController(private val context: Context) {
         )
 
         val recipients = mutableListOf<Triple<String, ByteArray, ByteArray>>()
-        for (pubKey in allKemKeys) {
+        for (pubKey in peerKeys) {
             val (encKey, sharedSecret) = keyManager.encapsulateKem(pubKey)
             try {
                 val ciphertext = PqcCrypto.aesEncrypt(sharedSecret, signedEnvelope)
@@ -319,7 +369,6 @@ class ChatController(private val context: Context) {
             }
         }
 
-        val ownPub = keyManager.getKemPublicKey()
         val (ownEncKey, ownSharedSecret) = keyManager.encapsulateKem(ownPub)
         try {
             val ownCiphertext = PqcCrypto.aesEncrypt(ownSharedSecret, signedEnvelope)
@@ -368,8 +417,8 @@ class ChatController(private val context: Context) {
             val payload = frame.payload
             val pr = Protocol.Reader(payload)
 
-            val senderPubHash = pr.readBytes(32)
-            val senderFingerprint = senderPubHash.joinToString("") { "%02x".format(it) }
+            val senderPubHash = pr.bytes()
+            val senderFingerprint = senderPubHash.joinToString("") { "%02x".format(it) }.take(32)
 
             val count = pr.u32().toInt()
 
@@ -377,8 +426,8 @@ class ChatController(private val context: Context) {
             var found = false
 
             repeat(count) {
-                val recipientId = pr.readBytes(32)
-                val recipientFp = recipientId.joinToString("") { "%02x".format(it) }
+                val recipientId = pr.bytes()
+                val recipientFp = recipientId.joinToString("") { "%02x".format(it) }.take(32)
                 val encKey = pr.bytes()
                 val ciphertext = pr.bytes()
 
@@ -405,7 +454,7 @@ class ChatController(private val context: Context) {
                                 serverMsgId = realId,
                                 senderFingerprint = senderFingerprint,
                                 env = env,
-                                ciphertext = ciphertext,
+                                ciphertext = payload,
                                 timestamp = ts,
                                 isOwn = isOwn
                             )
@@ -434,7 +483,7 @@ class ChatController(private val context: Context) {
                                 serverId = serverId,
                                 serverMsgId = realId,
                                 sender = env.sender,
-                                ciphertext = ciphertext,
+                                ciphertext = payload,
                                 iv = byteArrayOf(),
                                 timestamp = ts,
                                 isOwn = isOwn
@@ -461,8 +510,8 @@ class ChatController(private val context: Context) {
                 val ownKemPub = keyManager.getKemPublicKey()
                 val ownDsaPub = keyManager.getDsaPublicKey()
                 val c = synchronized(lock) { client }
-                val kemOk = c?.send(Protocol.buildKeyExchange(ownKemPub, Protocol.OP_KEY_EXCHANGE_KEM)) ?: false
-                val dsaOk = c?.send(Protocol.buildKeyExchange(ownDsaPub, Protocol.OP_KEY_EXCHANGE_DSA)) ?: false
+                val kemOk = withContext(Dispatchers.IO) { c?.send(Protocol.buildKeyExchange(ownKemPub, Protocol.OP_KEY_EXCHANGE_KEM)) ?: false }
+                val dsaOk = withContext(Dispatchers.IO) { c?.send(Protocol.buildKeyExchange(ownDsaPub, Protocol.OP_KEY_EXCHANGE_DSA)) ?: false }
                 LogManager.i(TAG, "Key exchange request sent (KEM=$kemOk, DSA=$dsaOk) for pending msgs from $senderFingerprint")
             } catch (e: Exception) {
                 LogManager.w(TAG, "Failed to send key exchange request", e)
@@ -539,15 +588,15 @@ class ChatController(private val context: Context) {
     ): Quad<String, String, String, String>? {
         val pr = Protocol.Reader(payload)
 
-        val senderPubHash = pr.readBytes(32)
-        val senderFingerprint = senderPubHash.joinToString("") { "%02x".format(it) }
+        val senderPubHash = pr.bytes()
+        val senderFingerprint = senderPubHash.joinToString("") { "%02x".format(it) }.take(32)
 
         val count = pr.u32().toInt()
         val ownFingerprint = keyManager.getFingerprint()
 
         repeat(count) {
-            val recipientId = pr.readBytes(32)
-            val recipientFp = recipientId.joinToString("") { "%02x".format(it) }
+            val recipientId = pr.bytes()
+            val recipientFp = recipientId.joinToString("") { "%02x".format(it) }.take(32)
             val encKey = pr.bytes()
             val ciphertext = pr.bytes()
 
@@ -555,13 +604,21 @@ class ChatController(private val context: Context) {
                 val sharedSecret = keyManager.decapsulateKem(encKey)
                 try {
                     val innerBytes = PqcCrypto.aesDecrypt(sharedSecret, ciphertext)
-                    val env = Protocol.parseInnerEnvelope(innerBytes) ?: return null
+                    val env = Protocol.parseInnerEnvelope(innerBytes)
+                    if (env == null) {
+                        LogManager.w(TAG, "decryptPerRecipientBlob: parseInnerEnvelope returned null for sender=$senderFingerprint")
+                        return null
+                    }
                     return Quad(senderFingerprint, env.sender, env.content, env.signature)
+                } catch (e: Exception) {
+                    LogManager.w(TAG, "decryptPerRecipientBlob: decrypt failed for sender=$senderFingerprint: ${e.message}")
+                    return null
                 } finally {
                     sharedSecret.fill(0)
                 }
             }
         }
+        LogManager.d(TAG, "decryptPerRecipientBlob: no recipient match (own=$ownFingerprint, recipients=$count, sender=$senderFingerprint)")
         return null
     }
 
@@ -645,7 +702,7 @@ class ChatController(private val context: Context) {
                     delay(HEARTBEAT_INTERVAL_MS)
                     if (!isActive) break
                     val c = synchronized(lock) { client } ?: break
-                    val ok = c.send(Protocol.buildHeartbeat())
+                    val ok = withContext(Dispatchers.IO) { c.send(Protocol.buildHeartbeat()) }
                     LogManager.d(TAG, "heartbeat sent (ok=$ok)")
                 }
                 LogManager.i(TAG, "heartbeat loop exited")
@@ -707,6 +764,7 @@ class ChatController(private val context: Context) {
             Protocol.OP_KEY_EXCHANGE_KEM -> "KeyExchangeKem"
             Protocol.OP_KEY_EXCHANGE_DSA -> "KeyExchangeDsa"
             Protocol.OP_NEW_CERT_HASH -> "NewCertHash"
+            Protocol.OP_AUTH_CHALLENGE -> "AuthChallenge"
             else -> "0x%02x".format(opcode)
         }
         LogManager.d(TAG, "RX $opcodeName (${raw.size} bytes)")
@@ -717,15 +775,30 @@ class ChatController(private val context: Context) {
                 Protocol.OP_SYNC_RESPONSE -> onSyncResponse(r)
                 Protocol.OP_DATA -> onData(r)
                 Protocol.OP_HEARTBEAT -> onHeartbeat()
-            Protocol.OP_KEY_EXCHANGE -> { /* legacy: ignore untagged key exchange */ }
-            Protocol.OP_KEY_EXCHANGE_KEM -> onKeyExchange(r, Protocol.OP_KEY_EXCHANGE_KEM)
+                Protocol.OP_KEY_EXCHANGE -> { /* legacy: ignore untagged key exchange */ }
+                Protocol.OP_KEY_EXCHANGE_KEM -> onKeyExchange(r, Protocol.OP_KEY_EXCHANGE_KEM)
                 Protocol.OP_KEY_EXCHANGE_DSA -> onKeyExchange(r, Protocol.OP_KEY_EXCHANGE_DSA)
-                Protocol.OP_NEW_CERT_HASH -> { }
+                Protocol.OP_NEW_CERT_HASH -> onNewCertHash(r)
+                Protocol.OP_AUTH_CHALLENGE -> onAuthChallenge(r)
                 else -> LogManager.w(TAG, "UNKNOWN opcode 0x%02x (${raw.size} bytes)".format(opcode))
             }
         } catch (e: Exception) {
             LogManager.e(TAG, "PARSE FAILED opcode=0x%02x: ${e.message}".format(opcode), e)
         }
+    }
+
+    private fun onAuthChallenge(r: Protocol.Reader) {
+        val frame = Protocol.parseAuthChallenge(r)
+        pendingSaltB64 = frame.saltB64
+        authChallengeNonce.complete(frame.nonce)
+        LogManager.i(TAG, "AUTH CHALLENGE received (nonce=${frame.nonce.size} bytes, salt=${frame.saltB64.length} chars)")
+    }
+
+    private fun onNewCertHash(r: Protocol.Reader) {
+        val frame = Protocol.parseNewCertHash(r)
+        val serverId = currentServer?.id ?: return
+        certManager.rotateHash(serverId, frame.hash)
+        LogManager.i(TAG, "NEW CERT HASH received and stored as pending: ${frame.hash.take(16)}...")
     }
 
     private fun onAuthResult(r: Protocol.Reader) {
@@ -780,21 +853,19 @@ class ChatController(private val context: Context) {
 
         try {
             if (opcode == Protocol.OP_KEY_EXCHANGE_DSA) {
-                val kf = java.security.KeyFactory.getInstance("Dilithium", "BCPQC")
-                kf.generatePublic(java.security.spec.X509EncodedKeySpec(key))
+                PqcCrypto.validateDsaPublicKey(key)
+                runBlocking { keyRepo.cacheDsaKey(serverId, key) }
                 val fp = keyManager.fingerprintForBytes(key)
-                scope.launch { keyRepo.cacheKey(serverId, fp, null, key) }
-                LogManager.i(TAG, "KeyExchange ML-DSA-65 received, cached")
+                LogManager.i(TAG, "KeyExchange ML-DSA-65 received, fp=$fp, key=${key.size}B, cached")
                 processPendingMessages(fp)
             } else {
-                val kf = java.security.KeyFactory.getInstance("Kyber", "BCPQC")
-                kf.generatePublic(java.security.spec.X509EncodedKeySpec(key))
+                PqcCrypto.validateKemPublicKey(key)
                 val fp = keyManager.fingerprintForBytes(key)
-                scope.launch { keyRepo.cacheKey(serverId, fp, key, null) }
-                LogManager.i(TAG, "KeyExchange ML-KEM received, cached")
+                runBlocking { keyRepo.cacheKey(serverId, fp, key, null) }
+                LogManager.i(TAG, "KeyExchange ML-KEM received, fp=$fp, key=${key.size}B, cached")
             }
         } catch (e: Exception) {
-            LogManager.w(TAG, "KeyExchange validation failed", e)
+            LogManager.w(TAG, "KeyExchange validation failed: opcode=0x${"%02x".format(opcode)} key=${key.size}B error=${e.message}", e)
         }
     }
 
@@ -803,9 +874,13 @@ class ChatController(private val context: Context) {
     // ------------------------------------------------------------------
 
     private fun hexToBytes(hex: String): ByteArray {
-        val bytes = ByteArray(hex.length / 2)
+        if (hex.length % 2 != 0) {
+            LogManager.w(TAG, "hexToBytes: odd-length hex string, padding")
+        }
+        val padded = if (hex.length % 2 != 0) "0$hex" else hex
+        val bytes = ByteArray(padded.length / 2)
         for (i in bytes.indices) {
-            bytes[i] = Integer.parseInt(hex.substring(i * 2, i * 2 + 2), 16).toByte()
+            bytes[i] = Integer.parseInt(padded.substring(i * 2, i * 2 + 2), 16).toByte()
         }
         return bytes
     }

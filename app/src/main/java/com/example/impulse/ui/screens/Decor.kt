@@ -34,8 +34,8 @@ fun DecorativeBackground(
     )
 
     val pulse by infiniteTransition.animateFloat(
-        initialValue = 0.12f,
-        targetValue = 0.22f,
+        initialValue = 0.20f,
+        targetValue = 0.35f,
         animationSpec = infiniteRepeatable(
             animation = tween(4000, easing = FastOutSlowInEasing),
             repeatMode = RepeatMode.Reverse

@@ -58,6 +58,29 @@ object PqcCrypto {
         }
     }
 
+    /**
+     * Ensures the BouncyCastle PQC provider is registered.
+     * Call this before any PQC key operations to guarantee the provider
+     * is available, even if PqcCrypto methods haven't been called yet.
+     */
+    fun ensureProvider() {
+        if (Security.getProvider(PQC_PROVIDER) == null) {
+            Security.addProvider(BouncyCastlePQCProvider())
+        }
+    }
+
+    /** Validates that [key] is a valid X509-encoded ML-KEM-768 public key. Throws on invalid. */
+    fun validateKemPublicKey(key: ByteArray) {
+        val kf = KeyFactory.getInstance("Kyber", PQC_PROVIDER)
+        kf.generatePublic(X509EncodedKeySpec(key))
+    }
+
+    /** Validates that [key] is a valid X509-encoded ML-DSA-65 public key. Throws on invalid. */
+    fun validateDsaPublicKey(key: ByteArray) {
+        val kf = KeyFactory.getInstance("Dilithium", PQC_PROVIDER)
+        kf.generatePublic(X509EncodedKeySpec(key))
+    }
+
     /** A freshly generated ML-KEM-768 (Kyber-768) key pair, encoded for transport. */
     data class KeyPair(
         /** PKCS8-encoded private key (keep secret on device). */

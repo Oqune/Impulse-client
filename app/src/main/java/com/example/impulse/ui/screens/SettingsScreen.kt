@@ -51,6 +51,7 @@ fun SettingsScreen(
     onServerAdded: (ServerConfig) -> Unit = {},
     onServerDeleted: (ServerConfig) -> Unit = {},
     onVisibilityChanged: () -> Unit = {},
+    certRefreshTrigger: Int = 0,
     connectionManager: ConnectionManager? = null,
     onScanQr: (ServerConfig) -> Unit = {},
 ) {
@@ -121,6 +122,7 @@ fun SettingsScreen(
                         availableServers = availableServers,
                         connectionManager = connectionManager,
                         onVisibilityChanged = onVisibilityChanged,
+                        certRefreshTrigger = certRefreshTrigger,
                         onServerDeleted = onServerDeleted,
                         onScanQr = onScanQr,
                         onServerUpdated = onServerUpdated,
@@ -187,6 +189,7 @@ private fun ServerListContent(
     availableServers: List<ServerConfig>,
     connectionManager: ConnectionManager?,
     onVisibilityChanged: () -> Unit,
+    certRefreshTrigger: Int = 0,
     onServerDeleted: (ServerConfig) -> Unit,
     onScanQr: (ServerConfig) -> Unit = {},
     onServerUpdated: (ServerConfig) -> Unit = {},
@@ -275,6 +278,7 @@ private fun ServerListContent(
                             connectionManager = connectionManager,
                             serverPreferences = serverPreferences,
                             onVisibilityChanged = onVisibilityChanged,
+                            certRefreshTrigger = certRefreshTrigger,
                             onServerDeleted = onServerDeleted,
                             onScanQr = onScanQr,
                             onServerUpdated = onServerUpdated,
@@ -293,6 +297,7 @@ private fun ServerExpandableSettings(
     connectionManager: ConnectionManager?,
     serverPreferences: ServerPreferences,
     onVisibilityChanged: () -> Unit,
+    certRefreshTrigger: Int = 0,
     onServerDeleted: (ServerConfig) -> Unit,
     onScanQr: (ServerConfig) -> Unit = {},
     onServerUpdated: ((ServerConfig) -> Unit)? = null,
@@ -327,8 +332,8 @@ private fun ServerExpandableSettings(
         ConnectionState.DISCONNECTED
     }
 
-    val certInfos = remember(server.id, certVersion) { certManager.getCertInfos(server.id) }
-    val isCertTrusted = remember(server.id, certVersion) { certManager.isTrusted(server.id) }
+    val certInfos = remember(server.id, certVersion, certRefreshTrigger) { certManager.getCertInfos(server.id) }
+    val isCertTrusted = remember(server.id, certVersion, certRefreshTrigger) { certManager.isTrusted(server.id) }
 
     var certSectionOpen by remember { mutableStateOf(false) }
     var connSectionOpen by remember { mutableStateOf(false) }

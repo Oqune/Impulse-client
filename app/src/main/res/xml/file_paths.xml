@@ -1,9 +1,9 @@
 <?xml version="1.0" encoding="utf-8"?>
 <paths>
-    <!-- Exposes the app-specific logs directory (context.filesDir/logs) so the
-         in-app "Open folder" action can hand a content:// URI to a file manager
+    <!-- Exposes the app-specific impulse directory (context.filesDir/impulse) so
+         the in-app "Send logs" action can hand a content:// URI to share apps
          without exposing the rest of the app's internal storage. -->
     <files-path
-        name="logs"
-        path="logs/" />
+        name="impulse_logs"
+        path="impulse/" />
 </paths>

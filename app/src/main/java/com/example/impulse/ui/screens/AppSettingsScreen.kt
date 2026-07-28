@@ -14,6 +14,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.DarkMode
 import androidx.compose.material.icons.filled.LightMode
 import androidx.compose.material.icons.filled.PhoneAndroid
+import androidx.compose.material.icons.filled.ArrowDropDown
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
@@ -167,61 +168,71 @@ fun AppSettingsContent(
         // ── Language selector ──────────────────────────────────────
         ImpulseCard {
             ImpulseSection(title = stringResource(R.string.app_settings_language)) {
+                var expanded by remember { mutableStateOf(false) }
+                val languages = listOf(
+                    "en" to R.string.lang_english,
+                    "ru" to R.string.lang_russian,
+                )
                 val currentLang = LocaleSettings.languageCode
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.spacedBy(8.dp)
-                ) {
-                    listOf(
-                        "en" to R.string.lang_english,
-                        "ru" to R.string.lang_russian,
-                    ).forEach { (code, labelRes) ->
-                        val isSelected = currentLang == code
-                        val bgColor by animateColorAsState(
-                            targetValue = if (isSelected)
-                                MaterialTheme.colorScheme.primary.copy(alpha = 0.15f)
-                            else
-                                MaterialTheme.colorScheme.surfaceContainerHigh,
-                            label = "lang_bg"
-                        )
-                        val borderColor by animateColorAsState(
-                            targetValue = if (isSelected)
-                                MaterialTheme.colorScheme.primary
-                            else
-                                MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.4f),
-                            label = "lang_border"
-                        )
+                val currentLabel = stringResource(
+                    languages.firstOrNull { it.first == currentLang }?.second
+                        ?: R.string.lang_english
+                )
 
-                        Column(
+                Box(modifier = Modifier.fillMaxWidth()) {
+                    Surface(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clickable { expanded = true },
+                        shape = RoundedCornerShape(14.dp),
+                        color = MaterialTheme.colorScheme.surfaceContainerHigh,
+                        border = BorderStroke(
+                            1.dp,
+                            MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.4f)
+                        ),
+                        tonalElevation = 0.dp
+                    ) {
+                        Row(
                             modifier = Modifier
-                                .weight(1f)
-                                .clip(RoundedCornerShape(14.dp))
-                                .background(bgColor)
-                                .border(
-                                    BorderStroke(
-                                        width = if (isSelected) 1.5.dp else 1.dp,
-                                        color = borderColor
-                                    ),
-                                    RoundedCornerShape(14.dp)
-                                )
-                                .clickable {
+                                .fillMaxWidth()
+                                .padding(horizontal = 16.dp, vertical = 14.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.SpaceBetween
+                        ) {
+                            Text(
+                                text = currentLabel,
+                                style = MaterialTheme.typography.bodyLarge,
+                                color = MaterialTheme.colorScheme.onSurface
+                            )
+                            Icon(
+                                imageVector = Icons.Filled.ArrowDropDown,
+                                contentDescription = null,
+                                tint = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                        }
+                    }
+                    DropdownMenu(
+                        expanded = expanded,
+                        onDismissRequest = { expanded = false }
+                    ) {
+                        languages.forEach { (code, labelRes) ->
+                            DropdownMenuItem(
+                                text = {
+                                    Text(
+                                        text = stringResource(labelRes),
+                                        color = if (code == currentLang)
+                                            MaterialTheme.colorScheme.primary
+                                        else
+                                            MaterialTheme.colorScheme.onSurface
+                                    )
+                                },
+                                onClick = {
+                                    expanded = false
                                     LocaleSettings.setLanguage(code)
                                     AppCompatDelegate.setApplicationLocales(
                                         LocaleListCompat.forLanguageTags(code)
                                     )
                                 }
-                                .padding(vertical = 14.dp, horizontal = 4.dp),
-                            horizontalAlignment = Alignment.CenterHorizontally,
-                        ) {
-                            Text(
-                                text = stringResource(labelRes),
-                                style = MaterialTheme.typography.labelSmall,
-                                fontWeight = if (isSelected) FontWeight.SemiBold else FontWeight.Normal,
-                                color = if (isSelected)
-                                    MaterialTheme.colorScheme.primary
-                                else
-                                    MaterialTheme.colorScheme.onSurfaceVariant,
-                                maxLines = 1,
                             )
                         }
                     }

@@ -20,9 +20,12 @@ package com.example.impulse.transport
  *  0x03 OP_SYNC         -> last_seen_id (u64)
  *  0x04 OP_SYNC_RESPONSE<- count(u32) { id(u64), timestamp(u64), len(u32), payload(bytes) }
  *  0x05 OP_DATA         -> len(u32), payload(bytes)            (both directions)
- *  0x06 OP_HEARTBEAT    -> (no body)                           (both directions)
+ *  0x06 OP_HEARTBEAT    -> client_timestamp(u64)                (both directions)
  *  0x07 OP_NEW_CERT_HASH<- 32 raw SHA-256 bytes, expiry(u64)
  *  0x08 OP_KEY_EXCHANGE -> key_len(u32), public_key(bytes)     (both directions)
+ *  0x09 OP_KEY_EXCHANGE_KEM -> ML-KEM public key              (both directions)
+ *  0x0A OP_KEY_EXCHANGE_DSA -> ML-DSA public key              (both directions)
+ *  0x0B OP_AUTH_CHALLENGE  <- 16-byte random nonce             (server -> client)
  */
 object Protocol {
 
@@ -53,6 +56,7 @@ object Protocol {
     const val OP_KEY_EXCHANGE: Byte = 0x08
     const val OP_KEY_EXCHANGE_KEM: Byte = 0x09
     const val OP_KEY_EXCHANGE_DSA: Byte = 0x0A
+    const val OP_AUTH_CHALLENGE: Byte = 0x0B
 
     // ======================================================================
     // Binary writer / reader helpers
@@ -79,6 +83,7 @@ object Protocol {
             u32(data.size.toLong())
             buf.write(data)
         }
+        fun rawBytes(data: ByteArray) = buf.write(data)
         fun utf8(s: String) = bytes(s.toByteArray(Charsets.UTF_8))
         fun toByteArray(): ByteArray = buf.toByteArray()
     }
@@ -128,19 +133,73 @@ object Protocol {
     // ======================================================================
 
     /**
-     * Auth: opcode + SHA-256(password) as lowercase hex.
+     * Auth: opcode + raw password bytes + HMAC-SHA-256 challenge response.
      *
-     * The server stores/compares the SHA-256 of the password (the same value
-     * produced by `printf 'pw' | sha256sum` on the server side), NOT the raw
-     * password. Sending the raw password previously caused every auth to be
-     * rejected ("Wrong password hash"). We hash client-side so the plaintext
-     * password is never placed on the wire.
+     * If [challengeNonce] is provided (16 bytes from server's AuthChallenge),
+     * the response is HMAC-SHA-256(key=Argon2id(password)_output, message=nonce)
+     * — proving the client received the challenge and preventing replay attacks.
+     *
+     * Wire format:
+     *   [0x01] [len(u32) raw_password_bytes] [len(u32) hmac_response] (if nonce provided)
      */
-    fun buildAuth(password: String): ByteArray {
+    fun buildAuth(password: String, challengeNonce: ByteArray? = null, argon2SaltB64: String = ""): ByteArray {
         val w = Writer()
         w.u8(OP_AUTH.toInt())
-        w.utf8(sha256Hex(password))
+        w.bytes(password.toByteArray(Charsets.UTF_8))
+        if (challengeNonce != null && challengeNonce.size == 16) {
+            val key = try {
+                argon2DeriveKey(password, argon2SaltB64)
+            } catch (e: UnsatisfiedLinkError) {
+                throw ProtocolException("Argon2 native library not available: ${e.message}")
+            } catch (e: Exception) {
+                throw ProtocolException("Argon2 key derivation failed: ${e.message}")
+            }
+            val response = hmacSha256(key, challengeNonce)
+            w.rawBytes(response)
+        }
         return w.toByteArray()
+    }
+
+    /**
+     * Derive a 32-byte key from a password using Argon2id.
+     * Parameters MUST match the server's Argon2::default() (m=19456, t=2, p=1).
+     */
+    internal fun argon2DeriveKey(password: String, saltB64: String = ""): ByteArray {
+        val saltBytes = if (saltB64.isNotEmpty()) {
+            android.util.Base64.decode(saltB64, android.util.Base64.NO_WRAP)
+        } else ByteArray(0)
+        val params = org.bouncycastle.crypto.params.Argon2Parameters.Builder(
+            org.bouncycastle.crypto.params.Argon2Parameters.ARGON2_id
+        )
+            .withSalt(saltBytes)
+            .withParallelism(1)
+            .withMemoryAsKB(19456)
+            .withIterations(2)
+            .withVersion(0x13)
+            .build()
+        val generator = org.bouncycastle.crypto.generators.Argon2BytesGenerator()
+        generator.init(params)
+        val output = ByteArray(32)
+        generator.generateBytes(password.toByteArray(Charsets.UTF_8), output, 0, output.size)
+        return output
+    }
+
+    /**
+     * HMAC-SHA-256: raw bytes key + raw bytes message → 32-byte MAC.
+     */
+    private fun hmacSha256(key: ByteArray, message: ByteArray): ByteArray {
+        val mac = javax.crypto.Mac.getInstance("HmacSHA256")
+        val secretSpec = javax.crypto.spec.SecretKeySpec(key, "HmacSHA256")
+        mac.init(secretSpec)
+        return mac.doFinal(message)
+    }
+
+    /**
+     * SHA-256 of raw bytes, returned as a raw 32-byte array.
+     */
+    private fun sha256Bytes(input: ByteArray): ByteArray {
+        val md = java.security.MessageDigest.getInstance("SHA-256")
+        return md.digest(input)
     }
 
     /**
@@ -198,6 +257,22 @@ object Protocol {
         val ok = r.u8() != 0
         val msg = if (r.remaining() > 0) r.utf8() else null
         return AuthResultFrame(ok, msg)
+    }
+
+    data class AuthChallengeFrame(val nonce: ByteArray, val saltB64: String = "")
+
+    /** Parses an AuthChallenge frame (opcode already consumed by caller).
+     *  Wire format: 16 raw nonce bytes + optional length-prefixed B64 salt. */
+    fun parseAuthChallenge(r: Reader): AuthChallengeFrame {
+        if (r.remaining() < 16) throw ProtocolException("AuthChallenge: expected 16 bytes, got ${r.remaining()}")
+        val nonce = r.readBytes(16)
+        val saltB64 = if (r.remaining() > 0) {
+            val saltBytes = r.bytes()
+            String(saltBytes, Charsets.UTF_8)
+        } else {
+            ""
+        }
+        return AuthChallengeFrame(nonce, saltB64)
     }
 
     data class SyncMessage(
@@ -332,7 +407,17 @@ object Protocol {
         if (offset >= data.size) throw ProtocolException("frameLength: empty")
         val opcode = data[offset]
         return when (opcode) {
-            OP_AUTH, OP_KEY_EXCHANGE, OP_KEY_EXCHANGE_KEM, OP_KEY_EXCHANGE_DSA -> {
+            OP_AUTH -> {
+                // Auth: [0x01] [u32: pwd_len] [pwd_bytes] [32 raw bytes: HMAC-SHA-256]
+                if (data.size - offset < 5) throw ProtocolException("frameLength: incomplete $opcode")
+                val pwdLen = ((data[offset + 1].toInt() and 0xFF)) or
+                    ((data[offset + 2].toInt() and 0xFF) shl 8) or
+                    ((data[offset + 3].toInt() and 0xFF) shl 16) or
+                    ((data[offset + 4].toInt() and 0xFF) shl 24)
+                if (pwdLen < 0 || pwdLen > MAX_PAYLOAD_BYTES) throw ProtocolException("frameLength: $opcode pwd_len=$pwdLen out of range")
+                1 + 4 + pwdLen + 32
+            }
+            OP_KEY_EXCHANGE, OP_KEY_EXCHANGE_KEM, OP_KEY_EXCHANGE_DSA -> {
                 if (data.size - offset < 5) throw ProtocolException("frameLength: incomplete $opcode")
                 val payloadLen = ((data[offset + 1].toInt() and 0xFF)) or
                     ((data[offset + 2].toInt() and 0xFF) shl 8) or
@@ -354,6 +439,16 @@ object Protocol {
             OP_SYNC -> 1 + 8
             OP_HEARTBEAT -> 1 + 8
             OP_NEW_CERT_HASH -> 1 + 32 + 8
+            OP_AUTH_CHALLENGE -> {
+                // [0x0B] [16 nonce] [u32 salt_len] [salt_bytes]
+                if (data.size - offset < 21) throw ProtocolException("frameLength: incomplete OP_AUTH_CHALLENGE (need 21, have ${data.size - offset})")
+                val saltLen = ((data[offset + 17].toInt() and 0xFF)) or
+                    ((data[offset + 18].toInt() and 0xFF) shl 8) or
+                    ((data[offset + 19].toInt() and 0xFF) shl 16) or
+                    ((data[offset + 20].toInt() and 0xFF) shl 24)
+                if (saltLen < 0 || saltLen > 256) throw ProtocolException("frameLength: OP_AUTH_CHALLENGE salt_len=$saltLen out of range")
+                1 + 16 + 4 + saltLen
+            }
             OP_AUTH_RESULT -> {
                 if (data.size - offset < 2) throw ProtocolException("frameLength: incomplete OP_AUTH_RESULT")
                 val success = data[offset + 1]

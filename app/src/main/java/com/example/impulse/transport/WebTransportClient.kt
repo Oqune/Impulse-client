@@ -25,6 +25,8 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.runBlocking
+import kotlinx.coroutines.withTimeout
 import kotlin.coroutines.coroutineContext
 import java.io.ByteArrayOutputStream
 import java.net.URI
@@ -89,7 +91,18 @@ class WebTransportClient(
 
     /** Release all resources including the coroutine scope. */
     fun destroy() {
-        disconnect()
+        intentionalClose.set(true)
+        val st = synchronized(lock) { stream }
+        val se = synchronized(lock) { session }
+        // close() is suspend — use runBlocking with timeout to avoid hanging
+        runBlocking {
+            try { withTimeout(1000) { st?.close() } } catch (_: Exception) { }
+            try { withTimeout(1000) { se?.close() } } catch (_: Exception) { }
+        }
+        synchronized(lock) {
+            session = null
+            stream = null
+        }
         scope.cancel()
     }
 
@@ -112,11 +125,15 @@ class WebTransportClient(
             try {
                 for (b in frame) buf.writeByte(b)
                 buf.resetForRead()
+                LogManager.d(TAG, "SEND ${frame.size} bytes (opcode=0x%02x) to stream".format(frame[0].toInt()))
                 st.write(buf)
+                LogManager.d(TAG, "SEND OK")
             } finally {
                 buf.freeIfNeeded()
             }
             true
+        } catch (e: CancellationException) {
+            throw e
         } catch (e: Exception) {
             LogManager.e(TAG, "SEND FAILED: ${e.javaClass.simpleName}: ${e.message}", e)
             false
@@ -199,8 +216,16 @@ class WebTransportClient(
 
                     kotlinx.coroutines.yield()
                     LogManager.i(TAG, "invoking onReady callback")
-                    onReady?.invoke()
-                    LogManager.i(TAG, "entering read loop")
+                    try {
+                        onReady?.invoke()
+                    } catch (e: Exception) {
+                        LogManager.e(TAG, "onReady callback failed: ${e.message}", e)
+                        closeSessionAndStream()
+                        cancelConnectTimeout()
+                        setState(ConnectionState.ERROR)
+                        return@withHttp3Connection
+                    }
+                    LogManager.i(TAG, "onReady callback returned, entering read loop")
                     runReadLoop(wtStream)
                     LogManager.i(TAG, "read loop exited normally")
                 }
@@ -288,13 +313,26 @@ class WebTransportClient(
         while (pos < bytes.size) {
             val frameLen = try {
                 Protocol.frameLength(bytes, pos)
-            } catch (_: Exception) {
-                break
+            } catch (e: Exception) {
+                val b = bytes[pos].toInt() and 0xFF
+                val knownOpcode = b in 0x01..0x0B
+                if (knownOpcode) {
+                    // Valid opcode but frame is incomplete (large frame in chunks).
+                    // Break and wait for more data to arrive.
+                    break
+                }
+                LogManager.w(TAG, "frameLength failed at pos=$pos, byte=0x%02x — skipping".format(b))
+                pos++
+                continue
             }
             if (pos + frameLen > bytes.size) break
             val frame = bytes.copyOfRange(pos, pos + frameLen)
             pos += frameLen
-            dispatch(frame)
+            try {
+                dispatch(frame)
+            } catch (e: Exception) {
+                LogManager.w(TAG, "dispatch failed for frame: ${e.message}")
+            }
         }
         if (pos > 0) {
             val remaining = bytes.size - pos
@@ -338,10 +376,8 @@ class WebTransportClient(
         try {
             val st = synchronized(lock) { stream }
             val se = synchronized(lock) { session }
-            if (st != null || se != null) {
-                st?.close()
-                se?.close()
-            }
+            try { st?.close() } catch (_: Exception) { }
+            try { se?.close() } catch (_: Exception) { }
         } catch (_: Exception) { }
         synchronized(lock) {
             stream = null

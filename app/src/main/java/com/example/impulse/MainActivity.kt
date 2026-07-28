@@ -22,13 +22,13 @@ import com.example.impulse.ui.theme.ThemeSettings
 
 class MainActivity : FragmentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
-        super.onCreate(savedInstanceState)
-
         val localePreferences = LocalePreferences(applicationContext)
         LocaleSettings.initialize(localePreferences)
         AppCompatDelegate.setApplicationLocales(
             LocaleListCompat.forLanguageTags(LocaleSettings.languageCode)
         )
+
+        super.onCreate(savedInstanceState)
 
         enableEdgeToEdge()
 
