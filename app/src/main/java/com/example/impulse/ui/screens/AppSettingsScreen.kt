@@ -29,8 +29,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import com.example.impulse.R
 import com.example.impulse.locale.LocaleSettings
-import androidx.appcompat.app.AppCompatDelegate
-import androidx.core.os.LocaleListCompat
+import android.app.Activity
 import android.content.Intent
 import android.widget.Toast
 import androidx.core.content.FileProvider
@@ -134,7 +133,7 @@ fun AppSettingsContent(
                 }
 
                 Spacer(Modifier.height(10.dp))
-                HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.3f))
+                HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
                 Spacer(Modifier.height(10.dp))
 
                 ImpulseToggle(
@@ -229,9 +228,7 @@ fun AppSettingsContent(
                                 onClick = {
                                     expanded = false
                                     LocaleSettings.setLanguage(code)
-                                    AppCompatDelegate.setApplicationLocales(
-                                        LocaleListCompat.forLanguageTags(code)
-                                    )
+                                    (context as? Activity)?.recreate()
                                 }
                             )
                         }

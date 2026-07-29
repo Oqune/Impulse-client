@@ -49,6 +49,7 @@ enum class MessageType {
 data class ChatMessage(
     val id: String = java.util.UUID.randomUUID().toString(),
     val sender: String,
+    val senderFingerprint: String = "",
     val content: String,
     val timestamp: String = formatTimestamp(System.currentTimeMillis()),
     val timestampMillis: Long = System.currentTimeMillis(),
@@ -96,13 +97,22 @@ fun ChatMessageItem(message: ChatMessage) {
         ) {
             Column(modifier = Modifier.padding(12.dp, 10.dp)) {
                 if (message.sender.isNotEmpty() && !isOwn) {
-                    Text(
-                        text = message.sender,
-                        style = MaterialTheme.typography.labelMedium,
-                        fontWeight = FontWeight.Bold,
-                        color = getSenderColor(messageType, isOwn, message.sender),
-                        modifier = Modifier.padding(bottom = 3.dp)
-                    )
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Text(
+                            text = message.sender,
+                            style = MaterialTheme.typography.labelMedium,
+                            fontWeight = FontWeight.Bold,
+                            color = getSenderColor(messageType, isOwn, message.sender),
+                        )
+                        if (message.senderFingerprint.isNotEmpty()) {
+                            Text(
+                                text = " #${message.senderFingerprint}",
+                                style = MaterialTheme.typography.labelSmall,
+                                fontWeight = FontWeight.Normal,
+                                color = getSenderColor(messageType, isOwn, message.sender).copy(alpha = 0.5f),
+                            )
+                        }
+                    }
                 }
                 Text(
                     text = message.content,
@@ -407,6 +417,7 @@ fun ChatScreen(
             ChatMessage(
                 id = dm.serverMsgId.toString(),
                 sender = dm.sender,
+                senderFingerprint = dm.senderFingerprint,
                 content = dm.plaintext,
                 isOwn = dm.isOwn,
                 timestamp = formatTimestamp(dm.timestamp),
@@ -468,6 +479,7 @@ fun ChatScreen(
                             .fillMaxWidth()
                             .statusBarsPadding(),
                         color = Color.Transparent,
+                        contentColor = MaterialTheme.colorScheme.onSurface,
                         shadowElevation = 2.dp
                     ) {
                         Row(

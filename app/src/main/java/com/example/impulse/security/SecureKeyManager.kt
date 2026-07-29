@@ -91,10 +91,18 @@ object SecureKeyManager {
         return fingerprintForBytes(pub)
     }
 
+    /** Null out in-memory key pairs so the next [ensureKeyPair] call regenerates from storage. */
+    fun clearInMemoryKeys() {
+        synchronized(initLock) {
+            kemKeyPair = null
+            dsaKeyPair = null
+        }
+    }
+
     /** SHA-256 fingerprint of arbitrary bytes, truncated to 32 hex chars. */
     fun fingerprintForBytes(data: ByteArray): String {
         val digest = MessageDigest.getInstance("SHA-256")
-        return digest.digest(data).joinToString("") { "%02x".format(it) }.take(32)
+        return com.example.impulse.util.bytesToHex(digest.digest(data)).take(32)
     }
 
     /** ML-KEM-768 encapsulation for [recipientPubKey]. Returns (encapsulatedKey, sharedSecret). */

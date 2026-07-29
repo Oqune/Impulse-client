@@ -12,45 +12,36 @@ class PublicKeyRepository(context: Context) {
 
     suspend fun cacheKey(serverId: String, fingerprint: String, kemPub: ByteArray?, dsaPub: ByteArray?) {
         val existing = dao.getByFingerprint(serverId, fingerprint)
-        val entity = if (existing != null) {
-            existing.copy(
+        if (existing != null) {
+            val merged = existing.copy(
                 kemPublicKey = kemPub ?: existing.kemPublicKey,
                 dsaPublicKey = dsaPub ?: existing.dsaPublicKey,
                 lastSeen = System.currentTimeMillis()
             )
-        } else {
-            PublicKeyEntity(
-                serverId = serverId,
-                fingerprint = fingerprint,
-                kemPublicKey = kemPub,
-                dsaPublicKey = dsaPub
-            )
+            dao.upsert(merged)
+            LogManager.d("PublicKeyRepository", "Cached key: fp=$fingerprint server=$serverId")
+            return
         }
+
+        val entity = PublicKeyEntity(
+            serverId = serverId,
+            fingerprint = fingerprint,
+            kemPublicKey = kemPub,
+            dsaPublicKey = dsaPub
+        )
         dao.upsert(entity)
         LogManager.d("PublicKeyRepository", "Cached key: fp=$fingerprint server=$serverId")
     }
 
-    suspend fun cacheDsaKey(serverId: String, dsaPub: ByteArray): String? {
+    suspend fun cacheDsaKey(serverId: String, dsaPub: ByteArray) {
         val dsaFingerprint = fingerprintForBytes(dsaPub)
-        val kemOnlyEntry = dao.getKemOnlyEntry(serverId)
-        if (kemOnlyEntry != null) {
-            val merged = kemOnlyEntry.copy(
-                dsaPublicKey = dsaPub,
-                lastSeen = System.currentTimeMillis()
-            )
-            dao.upsert(merged)
-            LogManager.d("PublicKeyRepository", "Merged DSA into KEM entry: kem_fp=${kemOnlyEntry.fingerprint} dsa_fp=$dsaFingerprint server=$serverId")
-            return kemOnlyEntry.fingerprint
-        } else {
-            val entity = PublicKeyEntity(
-                serverId = serverId,
-                fingerprint = dsaFingerprint,
-                dsaPublicKey = dsaPub
-            )
-            dao.upsert(entity)
-            LogManager.d("PublicKeyRepository", "Cached DSA key standalone: fp=$dsaFingerprint server=$serverId")
-            return null
-        }
+        val entity = PublicKeyEntity(
+            serverId = serverId,
+            fingerprint = dsaFingerprint,
+            dsaPublicKey = dsaPub
+        )
+        dao.upsert(entity)
+        LogManager.d("PublicKeyRepository", "Cached DSA key standalone: fp=$dsaFingerprint server=$serverId")
     }
 
     suspend fun getAllKemPublicKeys(serverId: String): List<ByteArray> =

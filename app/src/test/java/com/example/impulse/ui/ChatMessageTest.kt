@@ -48,6 +48,7 @@ class ChatMessageTest {
         return ChatController.DecryptedMessage(
             serverMsgId = id,
             sender = sender,
+            senderFingerprint = "",
             plaintext = content,
             isOwn = isOwn,
             timestamp = timestamp

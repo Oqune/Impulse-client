@@ -32,13 +32,16 @@ class ChatViewModel(
     private suspend fun mergeAndSort(
         dbMessages: List<ChatController.DecryptedMessage>
     ): List<ChatController.DecryptedMessage> = optimisticMutex.withLock {
-        val dbIds = dbMessages.map { it.serverMsgId }.toSet()
+        // Build a set of (sender, plaintext) keys from DB for content-based dedup.
+        // This matches optimistic messages (negative temp IDs) to their confirmed
+        // DB counterparts (positive server IDs) — temp IDs never match server IDs.
         val dbContentKeys = dbMessages.map { it.sender to it.plaintext }.toSet()
         pendingOptimistic.removeAll { pending ->
-            pending.serverMsgId in dbIds ||
-                (pending.sender to pending.plaintext) in dbContentKeys
+            (pending.sender to pending.plaintext) in dbContentKeys
         }
-        (dbMessages + pendingOptimistic).distinctBy { it.serverMsgId }.sortedBy { kotlin.math.abs(it.serverMsgId) }
+        // DB messages are authoritative; optimistic fills gaps for messages not yet in DB.
+        val all = dbMessages + pendingOptimistic
+        all.sortedBy { it.timestamp }
     }
 
     private val optimisticListener: (ChatController.DecryptedMessage) -> Unit = { dm ->

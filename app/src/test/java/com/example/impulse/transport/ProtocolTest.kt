@@ -43,15 +43,6 @@ class ProtocolTest {
     }
 
     @Test
-    fun keyExchange_roundTrip_withOpcode() {
-        val pub = ByteArray(1184) { it.toByte() }
-        val frame = Protocol.buildKeyExchange(pub, Protocol.OP_KEY_EXCHANGE_KEM)
-        assertEquals(Protocol.OP_KEY_EXCHANGE_KEM, frame[0])
-        val parsed = Protocol.parseKeyExchange(Protocol.Reader(frame, 1))
-        assertTrue(parsed.publicKey.contentEquals(pub))
-    }
-
-    @Test
     fun auth_sendsRawPassword() {
         val pw = "yourpassword"
         val frame = Protocol.buildAuth(pw)
@@ -184,7 +175,7 @@ class ProtocolTest {
     @Test
     fun auth_unicodePassword() {
         val password = "пароль" // 6 Cyrillic chars × 2 bytes UTF-8 = 12 bytes
-        val nonce = ByteArray(16) { 0xAA }
+        val nonce = ByteArray(16) { 0xAA.toByte() }
         val frame = Protocol.buildAuth(password, nonce)
 
         val reader = Protocol.Reader(frame, 1)
@@ -242,19 +233,8 @@ class ProtocolTest {
     }
 
     @Test
-    fun keyExchangePacket_roundtrip() {
-        val pubKey = ByteArray(64) { (it * 3).toByte() }
-        val frame = Protocol.buildKeyExchange(pubKey, Protocol.OP_KEY_EXCHANGE)
-        assertEquals(Protocol.OP_KEY_EXCHANGE, frame[0])
-        assertEquals(Protocol.frameLength(frame), frame.size)
-
-        val parsed = Protocol.parseKeyExchange(Protocol.Reader(frame, 1))
-        assertArrayEquals(pubKey, parsed.publicKey)
-    }
-
-    @Test
     fun frameLength_unknownOpcode_throws() {
-        val badOpcodes = byteArrayOf(0x00, 0x0C, 0xFF.toByte())
+        val badOpcodes = byteArrayOf(0x00, 0xFF.toByte())
         for (op in badOpcodes) {
             val data = byteArrayOf(op, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00)
             assertThrows(Protocol.ProtocolException::class.java) {
@@ -264,12 +244,10 @@ class ProtocolTest {
     }
 
     @Test
-    fun frameLength_truncatedData_throws() {
-        // OP_SYNC needs 9 bytes but only 3 are available.
+    fun frameLength_truncatedSync_returns9() {
+        // OP_SYNC is fixed-size: 1 + 8 = 9. frameLength returns 9 even with truncated data.
         val truncated = byteArrayOf(Protocol.OP_SYNC, 0x01, 0x02)
-        assertThrows(Protocol.ProtocolException::class.java) {
-            Protocol.frameLength(truncated)
-        }
+        assertEquals(9, Protocol.frameLength(truncated))
     }
 
     @Test
@@ -294,7 +272,9 @@ class ProtocolTest {
 
         val frames = clients.map { (pw, nonce) -> pw to Protocol.buildAuth(pw, nonce) }
 
-        for ((idx, (pw, frame)) in frames.withIndex()) {
+        for ((idx, pair) in frames.withIndex()) {
+            val pw = pair.first
+            val frame = pair.second
             assertEquals("Client $idx: opcode", Protocol.OP_AUTH, frame[0])
             assertEquals("Client $idx: frameLength", Protocol.frameLength(frame), frame.size)
 
@@ -304,7 +284,9 @@ class ProtocolTest {
         }
 
         // Verify each client's HMAC independently with its own Argon2 key.
-        for ((idx, (pw, nonce)) in clients.withIndex()) {
+        for ((idx, client) in clients.withIndex()) {
+            val pw = client.password
+            val nonce = client.nonce
             val frame = frames[idx].second
             val reader = Protocol.Reader(frame, 1)
             reader.bytes()

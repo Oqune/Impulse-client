@@ -9,7 +9,19 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.*
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.material3.MaterialTheme
+
+/**
+ * CompositionLocal that carries the shared dot-pattern animation values.
+ * Provided once by [ImpulseTheme], consumed by every [DecorativeBackground].
+ */
+class DotPatternValues(
+    val drift: Float,
+    val pulse: Float
+)
+
+val LocalDotPattern = compositionLocalOf { DotPatternValues(0f, 0.25f) }
 
 @Composable
 fun DecorativeBackground(
@@ -21,27 +33,9 @@ fun DecorativeBackground(
     val gridColor = MaterialTheme.colorScheme.outlineVariant
     val accentColor = MaterialTheme.colorScheme.primary
 
-    val infiniteTransition = rememberInfiniteTransition(label = "bg")
-
-    val drift by infiniteTransition.animateFloat(
-        initialValue = 0f,
-        targetValue = 1f,
-        animationSpec = infiniteRepeatable(
-            animation = tween(80000, easing = LinearEasing),
-            repeatMode = RepeatMode.Restart
-        ),
-        label = "drift"
-    )
-
-    val pulse by infiniteTransition.animateFloat(
-        initialValue = 0.20f,
-        targetValue = 0.35f,
-        animationSpec = infiniteRepeatable(
-            animation = tween(4000, easing = FastOutSlowInEasing),
-            repeatMode = RepeatMode.Reverse
-        ),
-        label = "pulse"
-    )
+    val dotPattern = LocalDotPattern.current
+    val drift = dotPattern.drift
+    val pulse = dotPattern.pulse
 
     Box(modifier = modifier) {
         Canvas(modifier = Modifier.fillMaxSize()) {

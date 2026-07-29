@@ -107,6 +107,14 @@
     <string name="user_name_empty_error">Name cannot be empty</string>
     <string name="user_name_too_long_error">Name too long (max 30 characters)</string>
 
+    <!-- User Settings — Danger Zone -->
+    <string name="user_danger_zone">Danger zone</string>
+    <string name="user_reset_keys">Reset encryption keys</string>
+    <string name="user_reset_keys_desc">Delete all ML-KEM and ML-DSA key pairs. You will need to re-exchange keys with peers.</string>
+    <string name="user_reset_keys_title">Reset keys?</string>
+    <string name="user_reset_keys_warning">This will permanently delete all encryption keys (ML-KEM and ML-DSA). All peer key caches will become invalid. You will need to re-scan QR codes and re-exchange keys with every peer.</string>
+    <string name="user_reset_keys_done">Keys reset. Restart the app to generate new keys.</string>
+
     <!-- AppSettingsScreen -->
     <string name="app_settings_display_mode">Display mode</string>
     <string name="app_settings_theme_light">Light</string>

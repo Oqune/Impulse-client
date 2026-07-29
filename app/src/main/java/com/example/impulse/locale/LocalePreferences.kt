@@ -23,6 +23,8 @@ class LocalePreferences(context: Context) {
 
     private fun getLanguage(): String = prefs.getString(LANGUAGE_KEY, DEFAULT_LANGUAGE) ?: DEFAULT_LANGUAGE
 
+    fun getSavedLanguage(): String = getLanguage()
+
     fun saveLanguage(code: String) {
         prefs.edit().putString(LANGUAGE_KEY, code).apply()
         _languageFlow.value = code

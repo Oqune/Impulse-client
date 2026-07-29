@@ -320,7 +320,7 @@ fun HomeScreen(
                     "ML-DSA-65" to "Post-Quantum Sign",
                     "WebTransport" to "HTTP/3 + QUIC",
                     "AES-256-GCM" to "AEAD Cipher",
-                    "Ed25519" to "Identity Key",
+                    "Argon2id" to "Key Derivation",
                 )
                 FlowRow(
                     modifier = Modifier.fillMaxWidth(),

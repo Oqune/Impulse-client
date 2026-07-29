@@ -107,6 +107,14 @@
     <string name="user_name_empty_error">Имя не может быть пустым</string>
     <string name="user_name_too_long_error">Имя слишком длинное (макс. 30 символов)</string>
 
+    <!-- User Settings — Danger Zone -->
+    <string name="user_danger_zone">Опасная зона</string>
+    <string name="user_reset_keys">Сбросить ключи шифрования</string>
+    <string name="user_reset_keys_desc">Удалить все пары ключей ML-KEM и ML-DSA. Потребуется повторный обмен ключами с собеседниками.</string>
+    <string name="user_reset_keys_title">Сбросить ключи?</string>
+    <string name="user_reset_keys_warning">Это навсегда удалит все ключи шифрования (ML-KEM и ML-DSA). Все кэши ключей собеседников станут недействительными. Потребуется заново сканировать QR-коды и обмениваться ключами.</string>
+    <string name="user_reset_keys_done">Ключи сброшены. Перезапустите приложение для генерации новых ключей.</string>
+
     <!-- AppSettingsScreen -->
     <string name="app_settings_display_mode">Режим отображения</string>
     <string name="app_settings_theme_light">Светлая</string>

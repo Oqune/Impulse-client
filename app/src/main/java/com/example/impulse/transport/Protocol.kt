@@ -22,10 +22,8 @@ package com.example.impulse.transport
  *  0x05 OP_DATA         -> len(u32), payload(bytes)            (both directions)
  *  0x06 OP_HEARTBEAT    -> client_timestamp(u64)                (both directions)
  *  0x07 OP_NEW_CERT_HASH<- 32 raw SHA-256 bytes, expiry(u64)
- *  0x08 OP_KEY_EXCHANGE -> key_len(u32), public_key(bytes)     (both directions)
- *  0x09 OP_KEY_EXCHANGE_KEM -> ML-KEM public key              (both directions)
- *  0x0A OP_KEY_EXCHANGE_DSA -> ML-DSA public key              (both directions)
  *  0x0B OP_AUTH_CHALLENGE  <- 16-byte random nonce             (server -> client)
+ *  0x0C OP_KEY_EXCHANGE_KEM_DSA -> kem_key(bytes), dsa_key(bytes) (both directions)
  */
 object Protocol {
 
@@ -53,10 +51,8 @@ object Protocol {
     const val OP_DATA: Byte = 0x05
     const val OP_HEARTBEAT: Byte = 0x06
     const val OP_NEW_CERT_HASH: Byte = 0x07
-    const val OP_KEY_EXCHANGE: Byte = 0x08
-    const val OP_KEY_EXCHANGE_KEM: Byte = 0x09
-    const val OP_KEY_EXCHANGE_DSA: Byte = 0x0A
     const val OP_AUTH_CHALLENGE: Byte = 0x0B
+    const val OP_KEY_EXCHANGE_KEM_DSA: Byte = 0x0C
 
     // ======================================================================
     // Binary writer / reader helpers
@@ -109,8 +105,8 @@ object Protocol {
         }
         fun bytes(): ByteArray {
             val len = u32().toInt()
-            if (len > MAX_PAYLOAD_BYTES) {
-                throw ProtocolException("bytes: length $len exceeds MAX_PAYLOAD_BYTES $MAX_PAYLOAD_BYTES")
+            if (len < 0 || len > MAX_PAYLOAD_BYTES) {
+                throw ProtocolException("bytes: length $len out of range (0..$MAX_PAYLOAD_BYTES)")
             }
             if (pos + len > data.size) {
                 throw ProtocolException("bytes: length $len exceeds remaining ${remaining()}")
@@ -209,7 +205,7 @@ object Protocol {
     fun sha256Hex(input: String): String {
         val md = java.security.MessageDigest.getInstance("SHA-256")
         val digest = md.digest(input.toByteArray(Charsets.UTF_8))
-        return digest.joinToString("") { "%02x".format(it) }
+        return com.example.impulse.util.bytesToHex(digest)
     }
 
     /** Sync: opcode + last_seen_id (u64). */
@@ -239,15 +235,25 @@ object Protocol {
         return w.toByteArray()
     }
 
-    /**
-     * KeyExchange with explicit opcode: opcode + key_len(u32) + public_key(bytes).
-     * Used for OP_KEY_EXCHANGE_KEM (0x09) and OP_KEY_EXCHANGE_DSA (0x0A).
-     */
-    fun buildKeyExchange(publicKey: ByteArray, opcode: Byte): ByteArray {
+    fun buildCombinedKeyExchange(kemPub: ByteArray, dsaPub: ByteArray): ByteArray {
+        val inner = Writer()
+        inner.bytes(kemPub)
+        inner.bytes(dsaPub)
+        val innerBytes = inner.toByteArray()
         val w = Writer()
-        w.u8(opcode.toInt())
-        w.bytes(publicKey)
+        w.u8(OP_KEY_EXCHANGE_KEM_DSA.toInt())
+        w.bytes(innerBytes)
         return w.toByteArray()
+    }
+
+    data class CombinedKeyExchangeFrame(val kemPublicKey: ByteArray, val dsaPublicKey: ByteArray)
+
+    fun parseCombinedKeyExchange(r: Reader): CombinedKeyExchangeFrame {
+        val blob = r.bytes()
+        val inner = Reader(blob)
+        val kem = inner.bytes()
+        val dsa = inner.bytes()
+        return CombinedKeyExchangeFrame(kem, dsa)
     }
 
     data class AuthResultFrame(val success: Boolean, val errorMessage: String?)
@@ -343,17 +349,10 @@ object Protocol {
     fun parseNewCertHash(r: Reader): NewCertHashFrame {
         if (r.remaining() < 40) throw ProtocolException("NewCertHash: expected at least 40 bytes, got ${r.remaining()}")
         val raw = r.readBytes(32)
-        val hash = raw.joinToString("") { "%02x".format(it) }
+        val hash = com.example.impulse.util.bytesToHex(raw)
         val expiry = r.u64()
         return NewCertHashFrame(hash, expiry)
     }
-
-    data class KeyExchangeFrame(
-        val publicKey: ByteArray
-    )
-
-    /** Parses a KeyExchange frame (opcode already consumed by caller). */
-    fun parseKeyExchange(r: Reader): KeyExchangeFrame = KeyExchangeFrame(r.bytes())
 
     // ======================================================================
     // Inner encrypted payload (the JSON that lives inside OP_DATA)
@@ -417,7 +416,7 @@ object Protocol {
                 if (pwdLen < 0 || pwdLen > MAX_PAYLOAD_BYTES) throw ProtocolException("frameLength: $opcode pwd_len=$pwdLen out of range")
                 1 + 4 + pwdLen + 32
             }
-            OP_KEY_EXCHANGE, OP_KEY_EXCHANGE_KEM, OP_KEY_EXCHANGE_DSA -> {
+            OP_KEY_EXCHANGE_KEM_DSA -> {
                 if (data.size - offset < 5) throw ProtocolException("frameLength: incomplete $opcode")
                 val payloadLen = ((data[offset + 1].toInt() and 0xFF)) or
                     ((data[offset + 2].toInt() and 0xFF) shl 8) or
@@ -460,6 +459,7 @@ object Protocol {
                         ((data[offset + 3].toInt() and 0xFF) shl 8) or
                         ((data[offset + 4].toInt() and 0xFF) shl 16) or
                         ((data[offset + 5].toInt() and 0xFF) shl 24)
+                    if (msgLen < 0 || msgLen > MAX_PAYLOAD_BYTES) throw ProtocolException("frameLength: OP_AUTH_RESULT msgLen=$msgLen out of range")
                     2 + 4 + msgLen
                 }
             }
@@ -469,13 +469,15 @@ object Protocol {
                     ((data[offset + 2].toInt() and 0xFF) shl 8) or
                     ((data[offset + 3].toInt() and 0xFF) shl 16) or
                     ((data[offset + 4].toInt() and 0xFF) shl 24)
+                if (count < 0 || count > 10_000) throw ProtocolException("frameLength: OP_SYNC_RESPONSE count=$count out of range")
                 var pos = offset + 5
-                repeat(count.toInt()) {
+                repeat(count) {
                     if (data.size - pos < 20) throw ProtocolException("frameLength: incomplete OP_SYNC_RESPONSE message")
                     val payloadLen = ((data[pos + 16].toInt() and 0xFF)) or
                         ((data[pos + 17].toInt() and 0xFF) shl 8) or
                         ((data[pos + 18].toInt() and 0xFF) shl 16) or
                         ((data[pos + 19].toInt() and 0xFF) shl 24)
+                    if (payloadLen < 0 || payloadLen > MAX_PAYLOAD_BYTES * 2) throw ProtocolException("frameLength: OP_SYNC_RESPONSE payloadLen=$payloadLen out of range")
                     pos += 20 + payloadLen
                 }
                 pos - offset

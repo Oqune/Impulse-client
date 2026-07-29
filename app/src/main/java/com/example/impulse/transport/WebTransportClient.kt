@@ -23,6 +23,8 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.runBlocking
@@ -51,6 +53,7 @@ class WebTransportClient(
     )
 
     private val lock = Any()
+    private val writeMutex = Mutex()
     private var session: WebTransportSession? = null
     private var stream: WebTransportStream? = null
     private var connectionJob: Job? = null
@@ -121,17 +124,30 @@ class WebTransportClient(
             return false
         }
         return try {
-            val buf = BufferFactory.Default.allocate(frame.size)
-            try {
-                for (b in frame) buf.writeByte(b)
-                buf.resetForRead()
-                LogManager.d(TAG, "SEND ${frame.size} bytes (opcode=0x%02x) to stream".format(frame[0].toInt()))
-                st.write(buf)
-                LogManager.d(TAG, "SEND OK")
-            } finally {
-                buf.freeIfNeeded()
+            LogManager.d(TAG, "SEND ${frame.size} bytes (opcode=0x%02x) to stream".format(frame[0].toInt()))
+            writeMutex.withLock {
+                var written = 0
+                var attempts = 0
+                while (written < frame.size && attempts < MAX_WRITE_ATTEMPTS) {
+                    val buf = BufferFactory.Default.allocate(frame.size - written)
+                    try {
+                        for (i in written until frame.size) buf.writeByte(frame[i])
+                        buf.resetForRead()
+                        val result = st.write(buf)
+                        written += result.count
+                    } finally {
+                        buf.freeIfNeeded()
+                    }
+                    attempts++
+                }
+                if (written < frame.size) {
+                    LogManager.e(TAG, "SEND FAILED: partial write after $attempts attempts ($written/${frame.size} bytes)")
+                    false
+                } else {
+                    LogManager.d(TAG, "SEND OK ($written bytes)")
+                    true
+                }
             }
-            true
         } catch (e: CancellationException) {
             throw e
         } catch (e: Exception) {
@@ -315,7 +331,9 @@ class WebTransportClient(
                 Protocol.frameLength(bytes, pos)
             } catch (e: Exception) {
                 val b = bytes[pos].toInt() and 0xFF
-                val knownOpcode = b in 0x01..0x0B
+                val knownOpcode = b in setOf(
+                    0x02, 0x04, 0x05, 0x06, 0x07, 0x0B, 0x0C
+                )
                 if (knownOpcode) {
                     // Valid opcode but frame is incomplete (large frame in chunks).
                     // Break and wait for more data to arrive.
@@ -351,9 +369,9 @@ class WebTransportClient(
             Protocol.OP_SYNC -> "Sync"
             Protocol.OP_SYNC_RESPONSE -> "SyncResponse"
             Protocol.OP_DATA -> "Data"
-            Protocol.OP_KEY_EXCHANGE -> "KeyExchange"
             Protocol.OP_HEARTBEAT -> "Heartbeat"
             Protocol.OP_NEW_CERT_HASH -> "NewCertHash"
+            Protocol.OP_KEY_EXCHANGE_KEM_DSA -> "KeyExchangeKemDsa"
             else -> "0x%02x".format(opcode)
         }
         LogManager.d(TAG, "RX frame: opcode=$opcodeName (${raw.size} bytes)")
@@ -393,6 +411,7 @@ class WebTransportClient(
     companion object {
         private const val TAG = "WebTransportClient"
         private const val CONNECT_TIMEOUT_MS = 15_000L
+        private const val MAX_WRITE_ATTEMPTS = 3
 
         private fun isEmulator(): Boolean {
             return Build.HARDWARE.contains("goldfish", ignoreCase = true) ||

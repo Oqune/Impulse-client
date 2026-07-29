@@ -17,7 +17,11 @@ class BiometricHelper(private val context: Context) {
         } else {
             BiometricManager.Authenticators.BIOMETRIC_STRONG
         }
-        return biometricManager.canAuthenticate(authenticators) == BiometricManager.BIOMETRIC_SUCCESS
+        val hardwareOk = biometricManager.canAuthenticate(authenticators) == BiometricManager.BIOMETRIC_SUCCESS
+        if (!hardwareOk) return false
+
+        val settingsEnabled = com.example.impulse.data.ServerPreferences(context).getBiometricEnabled()
+        return settingsEnabled
     }
 
     fun authenticate(

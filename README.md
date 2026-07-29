@@ -5,15 +5,26 @@
 ![logo](logo.png)
 
 [![Kotlin](https://img.shields.io/badge/Kotlin-2.0%2B-purple?logo=kotlin)](https://kotlinlang.org)
-[![Android](https://img.shields.io/badge/Platform-Android%2013%2B-lightgrey)](https://www.android.com)
+[![Android](https://img.shields.io/badge/Platform-Android%209%2B-lightgrey)](https://www.android.com)
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 [![WebTransport](https://img.shields.io/badge/Transport-WebTransport-blue)](https://developer.android.com/reference/android/net/http/WebTransport)
-[![PQC](https://img.shields.io/badge/Crypto-ML--KEM--768%20%2F%20AES--256--GCM-green)](https://en.wikipedia.org/wiki/ML-KEM)
+[![PQC](https://img.shields.io/badge/Crypto-ML--KEM--768%20%2F%20ML--DSA--65%20%2F%20AES--256--GCM-green)](https://en.wikipedia.org/wiki/ML-KEM)
+[![Release](https://img.shields.io/github/v/release/Oqune/Impulse-client?label=latest)](https://github.com/Oqune/Impulse-client/releases)
 
 Minimal, self-hosted, **post-quantum end-to-end-encrypted** LAN chat client for Android.
 Pairs with the [Impulse server](https://github.com/Oqune/Impulse-server/).
 
 </div>
+
+## What changed in v2.5
+
+Message delivery and display reliability fixes:
+
+- **Message ordering** — messages now appear in correct chronological order (sorted by server timestamp, not temp ID).
+- **Optimistic dedup** — confirmed messages correctly replace their optimistic copies (content-based matching).
+- **Sequential sync processing** — `onSyncResponse` and `processPendingMessages` now process messages sequentially to preserve order.
+- **Write atomicity** — `st.write(buf)` retry captures actual bytes written; write failures no longer silently drop data.
+- **Server-side resilience** — unknown opcodes are skipped instead of killing the session; storage races fixed with proper locking.
 
 ## What changed in v2.0 (full rewrite)
 
@@ -21,8 +32,8 @@ The client was completely rewritten around a modern, quantum-resistant stack:
 
 | Area | Old (removed) | New |
 |------|---------------|-----|
-| Transport | `WebSocket` (OkHttp, `wss://`) | **`WebTransport`** (Android `android.net.http`, API 33+, HTTPS/QUIC) |
-| Wire format | newline-delimited JSON | **Binary protocol** (opcodes `0x01`–`0x08`, length-prefixed frames) |
+| Transport | `WebSocket` (OkHttp, `wss://`) | **`WebTransport`** (Android `android.net.http`, API 28+, HTTPS/QUIC) |
+| Wire format | newline-delimited JSON | **Binary protocol** (opcodes `0x01`–`0x0C`, length-prefixed frames) |
 | Server auth | trust-any self-signed cert | **Certificate pinning** via `serverCertificateHashes` (TOFU) |
 | Key exchange | none / static key | **ML-KEM-768** (per-recipient KEM wrapping) + **ML-DSA-65** sender signatures |
 | Group secret | KEM encapsulate | **Per-Recipient KEM** — each message encrypted N times (once per recipient) via ML-KEM-768 encapsulation |
@@ -32,7 +43,7 @@ The client was completely rewritten around a modern, quantum-resistant stack:
 
 ## Features
 
-- 🚀 **WebTransport** transport (Android 13+), replacing WebSocket entirely.
+- 🚀 **WebTransport** transport (Android 9+), replacing WebSocket entirely.
 - 🔐 **Post-quantum E2EE**: Per-Recipient KEM Wrapping — each message is
   individually encrypted for every recipient using **ML-KEM-768** encapsulation.
   The sender generates a random shared secret per recipient, encrypts the message
@@ -60,7 +71,7 @@ The client was completely rewritten around a modern, quantum-resistant stack:
   generated on import for forward secrecy.
 - 🌗 Light / Dark / System themes and optional biometric app lock.
 
-## Binary protocol (opcodes `0x01`–`0x0A`)
+## Binary protocol (opcodes `0x01`–`0x0C`)
 
 Every frame starts with a single opcode byte. Field encoding is little-endian:
 `u8` (1 B), `u32` (4 B length prefix), `u64` (8 B), `bytes`
@@ -69,16 +80,15 @@ signature and content live inside the AES-256-GCM `OP_DATA` payload.
 
 | Opcode | Name | Direction | Body |
 |--------|------|-----------|------|
-| `0x01` | `OP_AUTH` | C→S | `sha256_hex(password)` (64-char lowercase hex utf8, length-prefixed) |
+| `0x0B` | `OP_AUTH_CHALLENGE` | S→C | `[16-byte nonce][u32 LE salt_len][B64 Argon2id salt]` |
+| `0x01` | `OP_AUTH` | C→S | `[u32 LE pwd_len][raw pwd bytes][32 raw HMAC bytes]` |
 | `0x02` | `OP_AUTH_RESULT` | S→C | `success(u8)` [error utf8 if !success] |
 | `0x03` | `OP_SYNC` | C→S | `last_seen_id(u64)` |
 | `0x04` | `OP_SYNC_RESPONSE` | S→C | `count(u32)` { `id(u64)`, `timestamp(u64)`, `len(u32)`, `payload(bytes)` } |
 | `0x05` | `OP_DATA` | both | C→S: `len(u32)`+`payload`. S→C relay: `server_msg_id(u64)`+`timestamp(u64)`+`len(u32)`+`payload` |
 | `0x06` | `OP_HEARTBEAT` | both | `client_timestamp(u64)` |
 | `0x07` | `OP_NEW_CERT_HASH` | S→C | `hash(32 bytes raw)` + `expiry(u64)` (no length prefix) |
-| `0x08` | `OP_KEY_EXCHANGE` | both | `key_len(u32)`+`public_key` (ML-KEM-768, legacy) |
-| `0x09` | `OP_KEY_EXCHANGE_KEM` | both | `key_len(u32)`+`ML-KEM-768 public key` (relayed to other clients) |
-| `0x0A` | `OP_KEY_EXCHANGE_DSA` | both | `key_len(u32)`+`ML-DSA-65 public key` (relayed to other clients) |
+| `0x0C` | `OP_KEY_EXCHANGE_KEM_DSA` | both | `kem_key_len(u32)`+`ML-KEM-768 public key` + `dsa_key_len(u32)`+`ML-DSA-65 public key` (combined, relayed atomically) |
 
 The client sends `OP_DATA` as `len+payload`; the server prepends
 `server_msg_id` + `timestamp` when it relays the message back to all peers. The
@@ -88,27 +98,36 @@ never collide.
 
 ## Server setup & authentication
 
-The server requires a password for client authentication. The password is **never
-sent in plaintext** — the client computes `SHA-256(password)` as a lowercase hex
-string and sends that hash in `OP_AUTH` (0x01).
+The server uses a **challenge-response** protocol. The server never stores the
+plaintext password — it derives a key using **Argon2id** and verifies HMAC proofs.
+
+### Authentication flow
+
+1. Client connects → server sends `OP_AUTH_CHALLENGE` (0x0B) with a random
+   16-byte nonce, a salt, and salt length.
+2. Client derives a key via `Argon2id(salt, password)`, computes
+   `HMAC-SHA-256(key, nonce)`.
+3. Client sends `OP_AUTH` (0x01) with `[pwd_len][raw pwd bytes][32 raw HMAC]`.
+4. Server derives the same key from its stored Argon2id parameters, verifies the
+   HMAC, and replies with `OP_AUTH_RESULT` (0x02).
 
 ### Generating the server password hash
 
 ```bash
 # From the server directory
 cargo run -- --hash-password "your-secret-password"
-# Output: 64-character lowercase hex string
+# Output: Argon2id parameters + salt + derived key hash
 ```
 
 Copy the output and pass it to the server via `config.toml` or CLI:
 
 ```bash
 # Via CLI flag
-impulse-server --password-hash <64-char-hex>
+impulse-server --password-hash <hash>
 
 # Or in config.toml
 [server]
-password_hash = "<64-char-hex>"
+password_hash = "<hash>"
 ```
 
 ### Client configuration
@@ -120,9 +139,9 @@ In the app, go to **Settings → Server settings** and either:
 - Add a custom server with the correct IP, port, and password.
 
 The client stores the **plaintext password** locally (in `ServerConfig`) and
-computes the SHA-256 hex hash at connection time. If the server's stored hash
-doesn't match, authentication is rejected with `OP_AUTH_RESULT` (0x02)
-`success=0` and an error message.
+derives the Argon2id key + HMAC at connection time when the challenge arrives.
+If the server's stored hash doesn't match, authentication is rejected with
+`OP_AUTH_RESULT` (0x02) `success=0` and an error message.
 
 ### Common auth failure causes
 
@@ -165,9 +184,11 @@ shared secret. The server never decrypts — it only relays the opaque blob.
 
 ### Key exchange flow
 
-After authentication, the client sends its ML-KEM public key via `OP_KEY_EXCHANGE_KEM`
-(0x09) and its ML-DSA-65 public key via `OP_KEY_EXCHANGE_DSA` (0x0A). The server
-relays these to all other clients, who cache them for Per-Recipient encryption.
+After authentication, the client sends its ML-KEM and ML-DSA-65 public keys
+**atomically** via a single `OP_KEY_EXCHANGE_KEM_DSA` (0x0C) frame. The server
+relays these combined keys to all other clients, who cache them for
+Per-Recipient encryption. Sending both keys in one frame eliminates the race
+condition where keys from different peers could interleave.
 
 ### Export / Import
 
@@ -178,7 +199,7 @@ device-specific and never exported). The backup file is deleted after import.
 
 ## Requirements
 
-- **Android 13 (API 33)** or newer device/emulator.
+- **Android 9 (API 28)** or newer device/emulator.
 - Android Studio (AGP 8.13+), **JDK 17**, Android SDK 34+.
 - A server that serves the **WebTransport** handshake over HTTPS/QUIC on the
   configured host:port (default `11000`) and speaks the binary protocol above
@@ -193,7 +214,7 @@ cd Impulse-client
 ```
 
 Install the APK from `app/build/outputs/apk/debug/` onto a device/emulator
-(API 33+). Camera permission is requested on first QR scan.
+(API 28+). Camera permission is requested on first QR scan.
 
 ## First-run flow
 
@@ -209,24 +230,25 @@ Install the APK from `app/build/outputs/apk/debug/` onto a device/emulator
     certificate.
  4. After a successful handshake the server may push a *next* cert hash
     (`OP_NEW_CERT_HASH`); it is stored as the second slot for rotation.
-  5. ML-KEM-768 + ML-DSA-65 public keys are exchanged automatically via
-     `OP_KEY_EXCHANGE_KEM` (0x09) and `OP_KEY_EXCHANGE_DSA` (0x0A); once all
+  5. ML-KEM-768 + ML-DSA-65 public keys are exchanged atomically via
+     `OP_KEY_EXCHANGE_KEM_DSA` (0x0C) — both keys in a single frame; once all
      peer keys are cached, the channel becomes `READY` (chat enabled). The
      connection state machine is `CONNECTING → CONNECTED → AUTHENTICATING →
      AUTHENTICATED → READY`; sending is blocked until `READY`.
   6. **Authentication is automatic.** The moment the WebTransport session becomes
-     `CONNECTED`, the client sends `OP_AUTH` (0x01) with the server password
-     (UTF-8). If the server does not answer `OP_AUTH_RESULT` (0x02) within
-     **15 s**, the client transitions to `ERROR` with a clear message instead of
-     hanging in `CONNECTED`. (This auto-send was the root cause of the earlier
-     "client never connects" bug — the session was opened but authentication was
-     never transmitted.) On devices below **API 33** the client fails fast with a
-     clear error, since `android.net.http.WebTransport` is unavailable there.
-   6b. **Password is hashed before sending.** The `OP_AUTH` payload is
-      `SHA-256(password)` as **lowercase hex** (the same value the server computes
-      via `printf 'pw' | sha256sum`), never the raw password. Sending the raw
-      password previously caused every auth to be rejected ("Wrong password
-      hash"). The plaintext password is therefore never placed on the wire.
+     `CONNECTED`, the server sends `OP_AUTH_CHALLENGE` (0x0B) with a nonce and
+     Argon2id salt. The client derives a key via Argon2id, computes
+     `HMAC-SHA-256(key, nonce)`, and sends `OP_AUTH` (0x01) with the raw
+     password + 32-byte HMAC. If the server does not answer `OP_AUTH_RESULT`
+     (0x02) within **15 s**, the client transitions to `ERROR` with a clear
+     message instead of hanging in `CONNECTED`. On devices below **API 28** the
+     client fails fast with a clear error, since `android.net.http.WebTransport`
+     is unavailable there.
+   6b. **Password-derived HMAC.** The `OP_AUTH` payload is
+      `[pwd_len][raw pwd bytes][32 raw HMAC]` — the HMAC is computed as
+      `HMAC-SHA-256(Argon2id(salt, password), nonce)` where the nonce and salt
+      come from the `OP_AUTH_CHALLENGE`. The raw password is sent so the server
+      can derive its own Argon2id key for verification. No hex encoding is used.
    6c. **AuthResult frame parsing fix.** The client's binary frame-length
       calculator (`Protocol.frameLength`) previously inverted the success/failure
       condition for `OP_AUTH_RESULT` (0x02) — the `success` byte 0x01 (success)
@@ -253,7 +275,7 @@ app/src/main/java/com/example/impulse/
 ├── ChatController.kt                   # orchestrates transport + crypto + storage + Per-Recipient KEM
 ├── transport/
 │   ├── WebTransportClient.kt           # WebTransport session + serverCertificateHashes + reconnect
-│   ├── Protocol.kt                     # binary wire protocol (opcodes 0x01–0x0A)
+│   ├── Protocol.kt                     # binary wire protocol (opcodes 0x01–0x0C)
 │   └── ConnectionState.kt
 ├── security/
 │   ├── PqcCrypto.kt                    # ML-KEM-768 + ML-DSA-65 + AES-256-GCM + Per-Recipient KEM
@@ -282,7 +304,7 @@ app/src/main/java/com/example/impulse/
 ## Testing
 
 ```bash
-./gradlew test            # unit tests: PqcCrypto (ML-KEM, ML-DSA-65, AES) + Protocol (opcodes) + SecureKeyManager + PerRecipientPacket
+./gradlew test            # unit tests: PqcCrypto (ML-KEM, ML-DSA-65, AES) + Protocol (opcodes 0x01–0x0C) + SecureKeyManager + PerRecipientPacket
 ./gradlew connectedAndroidTest   # instrumented: TrustedCertManager (TOFU, max-2-hash) + MessageDao (Room, TTL)
 ```
 
@@ -293,7 +315,7 @@ Test coverage includes:
 - `PerRecipientPacketTest` — Per-Recipient blob build/parse round-trip, multi-recipient
   encapsulation (different encKeys, same plaintext).
 - `PublicKeyCacheTest` — Room entity equality, ByteArray key storage.
-- `ProtocolTest` — all opcodes `0x01`–`0x0A` build/parse round-trips.
+- `ProtocolTest` — all opcodes `0x01`–`0x0B` build/parse round-trips.
 - `QrParseTest` — **strict** `impulse-cert:<64 hex>` validation (rejects bare 64-hex).
 - `ChatControllerIntegrationTest` — full protocol cycle simulated without a network:
   two clients derive the same group secret, auth/key-exchange frames round-trip,
@@ -357,7 +379,7 @@ flowchart TD
     CC --> REPO[MessageRepository → Room]
     CC --> PKR[PublicKeyRepository → Room: cached peer ML-KEM/DSA keys]
     CC --> LOG[LogManager: Timber Debug/File/Release trees]
-    WT -->|opcodes 0x01-0x0A| SRV
+    WT -->|opcodes 0x01-0x0B| SRV
     SRV -->|OP_KEY_EXCHANGE_KEM/DSA pubkeys| CC
     CC -->|Per-Recipient KEM: encapsulate per peer| CRYPTO
 ```
@@ -380,9 +402,10 @@ stateDiagram-v2
 
 ## Build notes / implementation details
 
-- **Post-quantum crypto (ML-KEM-768) + ML-DSA-65 (Dilithium3).** Provided by
-  BouncyCastle (`bcprov`/`bcpkix` 1.79). On Android's ART runtime the Kyber/ML-KEM
-  algorithms are only reachable through the dedicated `BouncyCastlePQCProvider`
+- **Post-quantum crypto (ML-KEM-768) + ML-DSA-65.** Provided by
+  BouncyCastle (`bcprov-jdk18on`/`bcpqc-jdk18on` 1.79). On Android's ART runtime
+  the Kyber/ML-KEM algorithms are only reachable through the dedicated
+  `BouncyCastlePQCProvider`
   (`Security.addProvider(BouncyCastlePQCProvider())`); the generic
   `BouncyCastleProvider` does **not** register them. Key generation uses
   `KeyPairGenerator.getInstance("Kyber")` with `KyberParameterSpec.kyber768`.
@@ -404,7 +427,7 @@ stateDiagram-v2
   built directly on the Android `KeyStore` (`AndroidKeyStore`) and
   `AES/GCM/NoPadding`. The public API (`putString`/`getString`/`putBytes`/
   `getBytes`/`remove`/`contains`) is identical, so callers are unchanged.
-- **WebTransport stubs.** The `android.net.http.*` (API 33+) symbols are
+- **WebTransport stubs.** The `android.net.http.*` (API 28+) symbols are
   provided at compile time by a local stub JAR (`app/libs/android-net-http-stub.jar`,
   `compileOnly`) because some SDK platform stubs do not ship these classes. The
   real implementation comes from the device framework at runtime.

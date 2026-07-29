@@ -35,7 +35,7 @@ import com.example.impulse.R
 import com.example.impulse.ui.theme.*
 
 enum class SettingsSection {
-    MAIN, SERVER, USER, APP, BACKUP
+    MAIN, SERVER, USER, APP
 }
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -67,7 +67,6 @@ fun SettingsScreen(
         SettingsSection.SERVER -> stringResource(R.string.settings_servers)
         SettingsSection.USER -> stringResource(R.string.settings_user)
         SettingsSection.APP -> stringResource(R.string.settings_app)
-        SettingsSection.BACKUP -> stringResource(R.string.settings_backup)
         else -> stringResource(R.string.settings_title)
     }
 
@@ -108,7 +107,6 @@ fun SettingsScreen(
                         onNavigateToServer = { currentSection = SettingsSection.SERVER },
                         onNavigateToUser = { currentSection = SettingsSection.USER },
                         onNavigateToApp = { currentSection = SettingsSection.APP },
-                        onNavigateToBackup = { currentSection = SettingsSection.BACKUP },
                     )
                 }
                 SettingsSection.SERVER -> {
@@ -149,17 +147,6 @@ fun SettingsScreen(
                             .padding(padding),
                     ) {
                     AppSettingsContent(
-                        modifier = Modifier.fillMaxSize(),
-                    )
-                    }
-                }
-                SettingsSection.BACKUP -> {
-                    DecorativeBackground(
-                        modifier = Modifier
-                            .fillMaxSize()
-                            .padding(padding),
-                    ) {
-                    BackupScreen(
                         modifier = Modifier.fillMaxSize(),
                     )
                     }
@@ -282,7 +269,7 @@ private fun ServerListContent(
                             onServerDeleted = onServerDeleted,
                             onScanQr = onScanQr,
                             onServerUpdated = onServerUpdated,
-                            modifier = Modifier.padding(vertical = 8.dp)
+                            modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp)
                         )
                     }
                 }
@@ -678,7 +665,6 @@ private fun SettingsMainContent(
     onNavigateToServer: () -> Unit,
     onNavigateToUser: () -> Unit,
     onNavigateToApp: () -> Unit,
-    onNavigateToBackup: () -> Unit,
 ) {
     DecorativeBackground(
         modifier = modifier,
@@ -717,12 +703,6 @@ private fun SettingsMainContent(
                 title = stringResource(R.string.settings_app),
                 icon = Icons.Default.Settings,
                 onClick = onNavigateToApp
-            )
-
-            ImpulseMenuCard(
-                title = stringResource(R.string.settings_backup),
-                icon = Icons.Default.Security,
-                onClick = onNavigateToBackup
             )
         }
     }
