@@ -127,26 +127,22 @@ class WebTransportClient(
             LogManager.d(TAG, "SEND ${frame.size} bytes (opcode=0x%02x) to stream".format(frame[0].toInt()))
             writeMutex.withLock {
                 var written = 0
-                var attempts = 0
-                while (written < frame.size && attempts < MAX_WRITE_ATTEMPTS) {
+                while (written < frame.size) {
                     val buf = BufferFactory.Default.allocate(frame.size - written)
                     try {
                         for (i in written until frame.size) buf.writeByte(frame[i])
                         buf.resetForRead()
-                        val result = st.write(buf)
-                        written += result.count
+                        val count = st.write(buf).count
+                        if (count <= 0) {
+                            throw IllegalStateException("quiche stream write made no progress (count=$count)")
+                        }
+                        written += count
                     } finally {
                         buf.freeIfNeeded()
                     }
-                    attempts++
                 }
-                if (written < frame.size) {
-                    LogManager.e(TAG, "SEND FAILED: partial write after $attempts attempts ($written/${frame.size} bytes)")
-                    false
-                } else {
-                    LogManager.d(TAG, "SEND OK ($written bytes)")
-                    true
-                }
+                LogManager.d(TAG, "SEND OK ($written bytes)")
+                true
             }
         } catch (e: CancellationException) {
             throw e
@@ -411,7 +407,6 @@ class WebTransportClient(
     companion object {
         private const val TAG = "WebTransportClient"
         private const val CONNECT_TIMEOUT_MS = 15_000L
-        private const val MAX_WRITE_ATTEMPTS = 3
 
         private fun isEmulator(): Boolean {
             return Build.HARDWARE.contains("goldfish", ignoreCase = true) ||

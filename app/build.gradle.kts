@@ -29,6 +29,14 @@ android {
             )
         }
     }
+    splits {
+        abi {
+            isEnable = true
+            reset()
+            include("arm64-v8a", "armeabi-v7a", "x86_64")
+            isUniversalApk = true
+        }
+    }
     compileOptions {
         sourceCompatibility = JavaVersion.VERSION_17
         targetCompatibility = JavaVersion.VERSION_17
@@ -96,13 +104,12 @@ configurations.all {
 val align16kbScript = layout.projectDirectory.file("scripts/align16kb.py")
 
 afterEvaluate {
-    val python = "python"
+    // CI runners (ubuntu) ship `python3`; Windows ships `python`.
+    val python = if (org.gradle.internal.os.OperatingSystem.current().isWindows) "python" else "python3"
     listOf("debug", "release").forEach { variant ->
         val cap = variant.replaceFirstChar { it.uppercase() }
         val mergeTaskName = "merge${cap}NativeLibs"
-        val packageTaskName = "package$cap"
         val mergeTask = tasks.findByName(mergeTaskName) ?: return@forEach
-        val packageTask = tasks.findByName(packageTaskName) ?: return@forEach
 
         val fixTask = tasks.register("fixNativeLibsAlign${cap}") {
             dependsOn(mergeTask)
@@ -112,6 +119,17 @@ afterEvaluate {
                     ?: file("$buildDir/intermediates/merged_native_libs/$variant/merge${cap}NativeLibs/out")
                 if (!nativeDir.isDirectory) {
                     logger.lifecycle("fixNativeLibsAlign: $nativeDir not found, skipping")
+                    return@doLast
+                }
+                // Skip alignment when no Python interpreter is on PATH (e.g. a
+                // bare Windows dev box). CI runners have python3, so release APKs
+                // still get the 16 KB fix.
+                val probe = project.exec {
+                    commandLine(if (python == "python3") listOf("sh", "-lc", "command -v python3") else listOf("where", "python"))
+                    isIgnoreExitValue = true
+                }.exitValue
+                if (probe != 0) {
+                    logger.warn("fixNativeLibsAlign: '$python' not found, skipping 16 KB alignment (dev-only build)")
                     return@doLast
                 }
                 nativeDir.walkTopDown().filter { it.name.endsWith(".so") }.forEach { so ->
@@ -126,7 +144,12 @@ afterEvaluate {
         if (stripTask != null) {
             stripTask.dependsOn(fixTask)
         }
-        packageTask.dependsOn(fixTask)
+        // With ABI splits there is one package task per ABI plus the universal one
+        // (packageDebug, packageDebugArm64_v8a, ...) — every one of them must run
+        // after the alignment fix, since they all zip the shared merged_native_libs.
+        tasks.matching { it.name.startsWith("package$cap") }.configureEach {
+            dependsOn(fixTask)
+        }
     }
 }
 

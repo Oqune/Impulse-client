@@ -914,6 +914,13 @@ class ChatController(private val context: Context) {
             _state.value = ConnectionState.READY
             LogManager.i(TAG, "READY")
 
+            synchronized(outboxLock) {
+                if (outbox.isNotEmpty() && !flushOutboxRunning) {
+                    LogManager.i(TAG, "READY: outbox has ${outbox.size} queued messages, flushing")
+                    scope.launch { flushOutbox() }
+                }
+            }
+
             val messages = repo.load(currentServer?.id ?: "")
             if (messages.isEmpty()) {
                 _lastError.value = "Вы присоединились к чату. Сообщения до вашего подключения недоступны."

@@ -24,22 +24,34 @@ class ChatViewModel(
     val messages: StateFlow<List<ChatController.DecryptedMessage>> = _messages.asStateFlow()
 
     // Optimistic (temp) messages not yet echoed back by the server.
-    // Keyed by (sender + plaintext) so we can deduplicate when the real
-    // message arrives via the DB observer.
+    // Removed only when a NEW DB row with the same (sender, plaintext) arrives
+    // (the server echo) — one echo confirms at most one optimistic copy, so a
+    // repeated message text never causes a just-sent message to disappear.
     private val pendingOptimistic = mutableListOf<ChatController.DecryptedMessage>()
     private val optimisticMutex = Mutex()
+    private var lastRawDb: List<ChatController.DecryptedMessage> = emptyList()
+    private var lastDbContentCounts: Map<Pair<String, String>, Int> = emptyMap()
 
     private suspend fun mergeAndSort(
         dbMessages: List<ChatController.DecryptedMessage>
     ): List<ChatController.DecryptedMessage> = optimisticMutex.withLock {
-        // Build a set of (sender, plaintext) keys from DB for content-based dedup.
-        // This matches optimistic messages (negative temp IDs) to their confirmed
-        // DB counterparts (positive server IDs) — temp IDs never match server IDs.
-        val dbContentKeys = dbMessages.map { it.sender to it.plaintext }.toSet()
-        pendingOptimistic.removeAll { pending ->
-            (pending.sender to pending.plaintext) in dbContentKeys
+        lastRawDb = dbMessages
+        val dbContentCounts = dbMessages.groupingBy { it.sender to it.plaintext }.eachCount()
+        val prevCounts = lastDbContentCounts
+        lastDbContentCounts = dbContentCounts
+        // Only remove optimistic copies confirmed by a newly-arrived DB row.
+        val consumed = mutableMapOf<Pair<String, String>, Int>()
+        val iter = pendingOptimistic.iterator()
+        while (iter.hasNext()) {
+            val pending = iter.next()
+            val key = pending.sender to pending.plaintext
+            val arrived = (dbContentCounts[key] ?: 0) - (prevCounts[key] ?: 0)
+            val used = consumed[key] ?: 0
+            if (arrived > used) {
+                consumed[key] = used + 1
+                iter.remove()
+            }
         }
-        // DB messages are authoritative; optimistic fills gaps for messages not yet in DB.
         val all = dbMessages + pendingOptimistic
         all.sortedBy { it.timestamp }
     }
@@ -48,7 +60,7 @@ class ChatViewModel(
         if (dm.serverMsgId < 0) {
             viewModelScope.launch {
                 optimisticMutex.withLock { pendingOptimistic.add(dm) }
-                _messages.value = mergeAndSort(_messages.value)
+                _messages.value = mergeAndSort(lastRawDb)
             }
         }
     }

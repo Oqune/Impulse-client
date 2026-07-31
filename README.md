@@ -16,31 +16,6 @@ Pairs with the [Impulse server](https://github.com/Oqune/Impulse-server/).
 
 </div>
 
-## What changed in v2.5
-
-Message delivery and display reliability fixes:
-
-- **Message ordering** — messages now appear in correct chronological order (sorted by server timestamp, not temp ID).
-- **Optimistic dedup** — confirmed messages correctly replace their optimistic copies (content-based matching).
-- **Sequential sync processing** — `onSyncResponse` and `processPendingMessages` now process messages sequentially to preserve order.
-- **Write atomicity** — `st.write(buf)` retry captures actual bytes written; write failures no longer silently drop data.
-- **Server-side resilience** — unknown opcodes are skipped instead of killing the session; storage races fixed with proper locking.
-
-## What changed in v2.0 (full rewrite)
-
-The client was completely rewritten around a modern, quantum-resistant stack:
-
-| Area | Old (removed) | New |
-|------|---------------|-----|
-| Transport | `WebSocket` (OkHttp, `wss://`) | **`WebTransport`** (Android `android.net.http`, API 28+, HTTPS/QUIC) |
-| Wire format | newline-delimited JSON | **Binary protocol** (opcodes `0x01`–`0x0C`, length-prefixed frames) |
-| Server auth | trust-any self-signed cert | **Certificate pinning** via `serverCertificateHashes` (TOFU) |
-| Key exchange | none / static key | **ML-KEM-768** (per-recipient KEM wrapping) + **ML-DSA-65** sender signatures |
-| Group secret | KEM encapsulate | **Per-Recipient KEM** — each message encrypted N times (once per recipient) via ML-KEM-768 encapsulation |
-| Message crypto | weak AES-ECB | **AES-256-GCM** with the per-recipient shared secret |
-| Local store | plaintext `SharedPreferences` | **Room** (message bodies AES-256-GCM encrypted at the app layer, 72 h TTL) |
-| Onboarding | manual URL + key | **QR-code scan** for the server cert hash |
-
 ## Features
 
 - 🚀 **WebTransport** transport (Android 9+), replacing WebSocket entirely.
