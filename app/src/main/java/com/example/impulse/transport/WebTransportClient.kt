@@ -178,8 +178,8 @@ class WebTransportClient(
         setState(ConnectionState.CONNECTING)
         val startTime = System.currentTimeMillis()
 
-        if (isEmulator()) {
-            LogManager.e(TAG, "ABORT: WebTransport requires a physical device (QUIC native libs unavailable on x86 emulators)")
+        if (isEmulatorBuild(Build.HARDWARE, Build.MODEL, Build.FINGERPRINT)) {
+            LogManager.e(TAG, "ABORT: WebTransport requires a physical device (QUIC native libs unavailable on emulators)")
             cancelConnectTimeout()
             setState(ConnectionState.ERROR)
             return
@@ -407,19 +407,6 @@ class WebTransportClient(
     companion object {
         private const val TAG = "WebTransportClient"
         private const val CONNECT_TIMEOUT_MS = 15_000L
-
-        private fun isEmulator(): Boolean {
-            return Build.HARDWARE.contains("goldfish", ignoreCase = true) ||
-                Build.HARDWARE.contains("ranchu", ignoreCase = true) ||
-                Build.MODEL.contains("google_sdk", ignoreCase = true) ||
-                Build.MODEL.contains("Emulator", ignoreCase = true) ||
-                Build.MODEL.contains("Android SDK built for x86", ignoreCase = true) ||
-                Build.FINGERPRINT.startsWith("generic", ignoreCase = true) ||
-                Build.FINGERPRINT.startsWith("unknown", ignoreCase = true) ||
-                Build.PRODUCT.contains("sdk", ignoreCase = true) ||
-                Build.PRODUCT.contains("emulator", ignoreCase = true) ||
-                Build.PRODUCT.contains("simulator", ignoreCase = true)
-        }
 
         /** Convert a 64-char lowercase/uppercase hex SHA-256 fingerprint into a
          *  [CertificateHash] pinning the server leaf cert (DER encoding). */
