@@ -71,7 +71,6 @@ import com.google.mlkit.vision.common.InputImage
 
 import java.util.concurrent.Executors
 import java.util.concurrent.Semaphore
-import kotlin.math.abs
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -759,14 +758,11 @@ private class Camera2Controller(
     }
 
     private fun chooseSize(sizes: Array<CameraSize>, targetRatio: Float): CameraSize {
-        val matched = sizes.filter {
-            val r = it.width.toFloat() / it.height.toFloat()
-            abs(r - targetRatio) < 0.05f
-        }
-        val pool = if (matched.isNotEmpty()) matched else sizes.toList()
-        return pool.maxByOrNull { it.width * it.height }
-            ?: sizes.firstOrNull()
-            ?: CameraSize(1280, 1280)
+        val pick = pickPreviewSize(
+            sizes = sizes.map { it.width to it.height },
+            targetRatio = targetRatio,
+        ) ?: return CameraSize(1280, 1280)
+        return CameraSize(pick.first, pick.second)
     }
 
     fun stop() {
@@ -875,6 +871,27 @@ private class Camera2Controller(
             LogManager.w("QrScan", "setTorch failed", e)
         }
     }
+}
+
+/**
+ * Picks the largest preview size no larger than [maxDimension] on either side,
+ * preferring sizes whose aspect ratio is close to [targetRatio]. Falls back to
+ * the largest available size when every option is oversized.
+ */
+internal fun pickPreviewSize(
+    sizes: List<Pair<Int, Int>>,
+    targetRatio: Float,
+    maxDimension: Int = 1280,
+): Pair<Int, Int>? {
+    if (sizes.isEmpty()) return null
+    val ratioMatched = sizes.filter {
+        val r = it.first.toFloat() / it.second.toFloat()
+        kotlin.math.abs(r - targetRatio) < 0.05f
+    }
+    val pool = if (ratioMatched.isNotEmpty()) ratioMatched else sizes
+    val capped = pool.filter { it.first <= maxDimension && it.second <= maxDimension }
+    val effective = if (capped.isNotEmpty()) capped else pool
+    return effective.maxByOrNull { it.first.toLong() * it.second }
 }
 
 /**
