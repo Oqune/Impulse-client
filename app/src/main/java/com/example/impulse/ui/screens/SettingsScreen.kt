@@ -74,7 +74,6 @@ fun SettingsScreen(
 
     Box(modifier = modifier) {
         Scaffold(
-            contentWindowInsets = WindowInsets(0, 0, 0, 0),
             topBar = {
                 TopAppBar(
                     title = { Text(title, fontWeight = FontWeight.SemiBold) },
