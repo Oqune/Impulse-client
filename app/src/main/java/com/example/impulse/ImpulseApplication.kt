@@ -6,8 +6,6 @@ import android.util.Log
 import com.example.impulse.util.CrashLog
 import com.example.impulse.util.LogManager
 import com.example.impulse.service.TtlPurgeWorker
-import java.io.PrintWriter
-import java.io.StringWriter
 
 /**
  * Application entry point.
@@ -38,17 +36,20 @@ class ImpulseApplication : Application() {
         val defaultHandler = Thread.getDefaultUncaughtExceptionHandler()
         Thread.setDefaultUncaughtExceptionHandler { thread, throwable ->
             try {
-                val sw = StringWriter()
-                PrintWriter(sw).use { pw ->
-                    pw.append("=== Impulse crash ===\n")
-                    pw.append("Thread: ${thread.name} (${thread.id})\n")
-                    pw.append("App version: ${BuildConfig.VERSION_NAME} (${BuildConfig.VERSION_CODE})\n")
-                    pw.append("SDK: ${Build.VERSION.SDK_INT} (${Build.VERSION.RELEASE})\n")
-                    pw.append("Device: ${Build.MANUFACTURER} ${Build.MODEL}\n")
-                    pw.append("Time: ${System.currentTimeMillis()}\n")
-                    throwable.printStackTrace(pw)
-                }
-                CrashLog.writeCrash(sw.toString())
+                val extra = buildCrashExtra()
+                val report = CrashLog.buildCrashReport(
+                    thread = thread,
+                    throwable = throwable,
+                    versionName = BuildConfig.VERSION_NAME,
+                    versionCode = BuildConfig.VERSION_CODE,
+                    sdkInt = Build.VERSION.SDK_INT,
+                    release = Build.VERSION.RELEASE,
+                    manufacturer = Build.MANUFACTURER,
+                    model = Build.MODEL,
+                    timeMillis = System.currentTimeMillis(),
+                    extra = extra,
+                )
+                CrashLog.writeCrash(report)
                 Log.e(TAG, "Uncaught exception captured to crash log", throwable)
             } catch (logError: Exception) {
                 // Never let the logging itself crash the handler.
@@ -58,6 +59,21 @@ class ImpulseApplication : Application() {
                 defaultHandler?.uncaughtException(thread, throwable)
             }
         }
+    }
+
+    private fun buildCrashExtra(): String {
+        val sb = StringBuilder()
+        runCatching {
+            val states = ConnectionManager.getInstance(this).serverStates.value
+            sb.append("Connections:\n")
+            for ((id, status) in states) {
+                sb.append("  $id: ${status.state} lastError=${status.lastError ?: "null"}\n")
+            }
+        }.onFailure { sb.append("Connections: unavailable\n") }
+        runCatching {
+            sb.append("logBytes=").append(com.example.impulse.util.FileLogger.getLogSize()).append('\n')
+        }
+        return sb.toString()
     }
 
     companion object {

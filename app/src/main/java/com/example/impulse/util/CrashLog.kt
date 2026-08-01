@@ -2,6 +2,8 @@ package com.example.impulse.util
 
 import android.content.Context
 import java.io.File
+import java.io.PrintWriter
+import java.io.StringWriter
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
@@ -46,6 +48,38 @@ object CrashLog {
         } catch (_: Exception) {
             // Best-effort only.
         }
+    }
+
+    /**
+     * Builds a single crash report string. [extra] carries diagnostic context
+     * (e.g. connection states and log sizes) collected by the caller.
+     */
+    internal fun buildCrashReport(
+        thread: Thread,
+        throwable: Throwable,
+        versionName: String,
+        versionCode: Int,
+        sdkInt: Int,
+        release: String,
+        manufacturer: String,
+        model: String,
+        timeMillis: Long,
+        extra: String,
+    ): String {
+        val sw = StringWriter()
+        PrintWriter(sw).use { pw ->
+            pw.append("=== Impulse crash ===\n")
+            pw.append("Thread: ${thread.name} (${thread.id})\n")
+            pw.append("App version: $versionName ($versionCode)\n")
+            pw.append("SDK: $sdkInt ($release)\n")
+            pw.append("Device: $manufacturer $model\n")
+            pw.append("Time: $timeMillis\n")
+            if (extra.isNotBlank()) {
+                pw.append(extra).append('\n')
+            }
+            throwable.printStackTrace(pw)
+        }
+        return sw.toString()
     }
 
     /** Call once at startup (Application.onCreate) so we know where to write. */
