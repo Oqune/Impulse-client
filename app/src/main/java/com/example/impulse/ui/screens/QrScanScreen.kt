@@ -22,6 +22,7 @@ import android.os.HandlerThread
 import android.util.Size as CameraSize
 import android.view.Surface
 import android.view.TextureView
+import android.view.WindowManager
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.animation.core.*
@@ -815,10 +816,12 @@ private class Camera2Controller(
         textureView.post { textureView.surfaceTextureListener = null }
     }
 
+    @Suppress("DEPRECATION")
     private fun getRotationCompensation(cameraId: String): Int {
         val characteristics = cameraManager.getCameraCharacteristics(cameraId)
         val sensorOrientation = characteristics.get(CameraCharacteristics.SENSOR_ORIENTATION) ?: 0
-        val displayRotation = context.display.rotation
+        val windowManager = context.getSystemService(Context.WINDOW_SERVICE) as? WindowManager
+        val displayRotation = windowManager?.defaultDisplay?.rotation ?: Surface.ROTATION_0
         val surfaceRotationDegrees = when (displayRotation) {
             android.view.Surface.ROTATION_0 -> 0
             android.view.Surface.ROTATION_90 -> 90
