@@ -21,9 +21,10 @@ package com.example.impulse.transport
  *  0x04 OP_SYNC_RESPONSE<- count(u32) { id(u64), timestamp(u64), len(u32), payload(bytes) }
  *  0x05 OP_DATA         -> len(u32), payload(bytes)            (both directions)
  *  0x06 OP_HEARTBEAT    -> client_timestamp(u64)                (both directions)
- *  0x07 OP_NEW_CERT_HASH<- 32 raw SHA-256 bytes, expiry(u64)
- *  0x0B OP_AUTH_CHALLENGE  <- 16-byte random nonce             (server -> client)
- *  0x0C OP_KEY_EXCHANGE_KEM_DSA -> kem_key(bytes), dsa_key(bytes) (both directions)
+* 0x07 OP_NEW_CERT_HASH<- 32 raw SHA-256 bytes, expiry(u64)
+ * 0x08 OP_DISCONNECT     — either direction: no payload
+ * 0x0B OP_AUTH_CHALLENGE  <- 16-byte random nonce             (server -> client)
+ * 0x0C OP_KEY_EXCHANGE_KEM_DSA -> kem_key(bytes), dsa_key(bytes) (both directions)
  */
 object Protocol {
 
@@ -51,6 +52,7 @@ object Protocol {
     const val OP_DATA: Byte = 0x05
     const val OP_HEARTBEAT: Byte = 0x06
     const val OP_NEW_CERT_HASH: Byte = 0x07
+    const val OP_DISCONNECT: Byte = 0x08
     const val OP_AUTH_CHALLENGE: Byte = 0x0B
     const val OP_KEY_EXCHANGE_KEM_DSA: Byte = 0x0C
 
@@ -232,6 +234,13 @@ object Protocol {
         val w = Writer()
         w.u8(OP_HEARTBEAT.toInt())
         w.u64(System.currentTimeMillis())
+        return w.toByteArray()
+    }
+
+    /** Disconnect: opcode only, no payload. */
+    fun buildDisconnect(): ByteArray {
+        val w = Writer()
+        w.u8(OP_DISCONNECT.toInt())
         return w.toByteArray()
     }
 
@@ -438,6 +447,7 @@ object Protocol {
             OP_SYNC -> 1 + 8
             OP_HEARTBEAT -> 1 + 8
             OP_NEW_CERT_HASH -> 1 + 32 + 8
+            OP_DISCONNECT -> 1
             OP_AUTH_CHALLENGE -> {
                 // [0x0B] [16 nonce] [u32 salt_len] [salt_bytes]
                 if (data.size - offset < 21) throw ProtocolException("frameLength: incomplete OP_AUTH_CHALLENGE (need 21, have ${data.size - offset})")

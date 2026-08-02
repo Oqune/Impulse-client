@@ -328,7 +328,7 @@ class WebTransportClient(
             } catch (e: Exception) {
                 val b = bytes[pos].toInt() and 0xFF
                 val knownOpcode = b in setOf(
-                    0x02, 0x04, 0x05, 0x06, 0x07, 0x0B, 0x0C
+                    0x02, 0x04, 0x05, 0x06, 0x07, 0x08, 0x0B, 0x0C
                 )
                 if (knownOpcode) {
                     // Valid opcode but frame is incomplete (large frame in chunks).
@@ -367,22 +367,28 @@ class WebTransportClient(
             Protocol.OP_DATA -> "Data"
             Protocol.OP_HEARTBEAT -> "Heartbeat"
             Protocol.OP_NEW_CERT_HASH -> "NewCertHash"
+            Protocol.OP_DISCONNECT -> "Disconnect"
             Protocol.OP_KEY_EXCHANGE_KEM_DSA -> "KeyExchangeKemDsa"
             else -> "0x%02x".format(opcode)
         }
         LogManager.d(TAG, "RX frame: opcode=$opcodeName (${raw.size} bytes)")
         when (opcode) {
-            Protocol.OP_NEW_CERT_HASH -> {
-                try {
-                    val r = Protocol.Reader(raw, 1)
-                    val frame = Protocol.parseNewCertHash(r)
-                    LogManager.i(TAG, "cert hash push received (new=${LogManager.shortHash(frame.hash)})")
-                    onCertHashPush(frame.hash)
-                } catch (e: Exception) {
-                    LogManager.w(TAG, "cert hash parse failed", e)
-                }
-            }
-            else -> onFrame(raw)
+Protocol.OP_NEW_CERT_HASH -> {
+                 try {
+                     val r = Protocol.Reader(raw, 1)
+                     val frame = Protocol.parseNewCertHash(r)
+                     LogManager.i(TAG, "cert hash push received (new=${LogManager.shortHash(frame.hash)})")
+                     onCertHashPush(frame.hash)
+                 } catch (e: Exception) {
+                     LogManager.w(TAG, "cert hash parse failed", e)
+                 }
+             }
+             Protocol.OP_DISCONNECT -> {
+                 LogManager.i(TAG, "server sent disconnect, closing connection")
+                 closeSessionAndStream()
+                 setState(ConnectionState.DISCONNECTED)
+             }
+             else -> onFrame(raw)
         }
     }
 
