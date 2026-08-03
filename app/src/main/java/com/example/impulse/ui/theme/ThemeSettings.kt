@@ -14,6 +14,18 @@ enum class ThemeMode {
     LIGHT, DARK, SYSTEM
 }
 
+/** Which visual variant is active. Exactly one at a time. */
+enum class ThemeVariant {
+    /** Hue-based, normal light/dark. */
+    CLASSIC,
+    /** Wallpaper accent (Android 12+); falls back to [CLASSIC] below API 31. */
+    MATERIAL_YOU,
+    /** Pure-black dark only. */
+    OLED,
+    /** High contrast (light + dark). */
+    ULTRA_CONTRAST,
+}
+
 @Serializable
 data class DynamicColor(
     val hue: Float = 210f,
@@ -67,11 +79,8 @@ object ThemeSettings {
     private var _hue by mutableStateOf(140f)
     val hue: Float get() = _hue
 
-    private var _oledEnabled by mutableStateOf(false)
-    val oledEnabled: Boolean get() = _oledEnabled
-
-    private var _ultraContrastEnabled by mutableStateOf(false)
-    val ultraContrastEnabled: Boolean get() = _ultraContrastEnabled
+    private var _themeVariant by mutableStateOf(ThemeVariant.CLASSIC)
+    val themeVariant: ThemeVariant get() = _themeVariant
 
     val isDarkActive: Boolean
         get() = when (_themeMode) {
@@ -90,25 +99,16 @@ object ThemeSettings {
         scope.launch { themePreferences.fontScaleFlow.collect { _fontScale = it } }
         scope.launch { themePreferences.themePresetFlow.collect { _preset = it } }
         scope.launch { themePreferences.hueFlow.collect { _hue = it } }
-        scope.launch { themePreferences.oledFlow.collect { _oledEnabled = it } }
-        scope.launch { themePreferences.ultraContrastFlow.collect { _ultraContrastEnabled = it } }
+        scope.launch { themePreferences.themeVariantFlow.collect { _themeVariant = it } }
     }
 
     fun setThemeMode(mode: ThemeMode) { _themeMode = mode; preferences?.saveThemeMode(mode) }
     fun setFontScale(scale: Float) { _fontScale = scale.coerceIn(0.8f, 1.4f); preferences?.saveFontScale(_fontScale) }
     fun setHue(hue: Float) { _hue = hue.coerceIn(0f, 360f); preferences?.saveHue(_hue) }
 
-    fun setOledEnabled(enabled: Boolean) {
-        _oledEnabled = enabled
-        if (enabled) _ultraContrastEnabled = false
-        preferences?.saveOled(enabled)
-        if (enabled) preferences?.saveUltraContrast(false)
-    }
-
-    fun setUltraContrastEnabled(enabled: Boolean) {
-        _ultraContrastEnabled = enabled
-        if (enabled) _oledEnabled = false
-        preferences?.saveUltraContrast(enabled)
-        if (enabled) preferences?.saveOled(false)
+    /** Set the active theme variant; exactly one is ever active. */
+    fun setThemeVariant(variant: ThemeVariant) {
+        _themeVariant = variant
+        preferences?.saveThemeVariant(variant)
     }
 }

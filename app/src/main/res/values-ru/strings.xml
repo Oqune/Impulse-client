@@ -126,6 +126,13 @@
     <string name="app_settings_ultra_contrast">Ультра контраст</string>
     <string name="app_settings_ultra_contrast_desc_dark">Максимальный контраст, белый на чёрном</string>
     <string name="app_settings_ultra_contrast_desc_light">Максимальный контраст, чёрный на белом</string>
+    <string name="app_settings_variant_classic">Классика</string>
+    <string name="app_settings_variant_classic_desc">Фирменный цвет оттенка, светлая и тёмная</string>
+    <string name="app_settings_variant_material_you">Material You</string>
+    <string name="app_settings_variant_material_you_desc">Акцент из обоев (Android 12+)</string>
+    <string name="app_settings_variant_ultra_contrast">Ультра контраст</string>
+    <string name="app_settings_variant_ultra_contrast_desc">Максимальный контраст для читаемости</string>
+    <string name="app_settings_variant_oled_desc">Чистый чёрный для AMOLED-экранов</string>
     <string name="app_settings_hue">Оттенок</string>
     <string name="app_settings_font_scale">Масштаб шрифта</string>
     <string name="app_settings_scale">Масштаб</string>

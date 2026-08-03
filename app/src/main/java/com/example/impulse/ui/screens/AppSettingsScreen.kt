@@ -31,6 +31,7 @@ import com.example.impulse.R
 import com.example.impulse.locale.LocaleSettings
 import android.app.Activity
 import android.content.Intent
+import android.os.Build
 import android.widget.Toast
 import androidx.core.content.FileProvider
 import com.example.impulse.data.ServerPreferences
@@ -48,8 +49,7 @@ fun AppSettingsContent(
     var selectedTheme by remember { mutableStateOf(ThemeSettings.themeMode) }
     var hue by remember { mutableFloatStateOf(ThemeSettings.hue) }
     var fontScale by remember { mutableStateOf(ThemeSettings.fontScale) }
-    var oledEnabled by remember { mutableStateOf(ThemeSettings.oledEnabled) }
-    var ultraContrastEnabled by remember { mutableStateOf(ThemeSettings.ultraContrastEnabled) }
+    var themeVariant by remember { mutableStateOf(ThemeSettings.themeVariant) }
 
     val isDarkActive = when (selectedTheme) {
         ThemeMode.DARK -> true
@@ -136,28 +136,44 @@ fun AppSettingsContent(
                 HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
                 Spacer(Modifier.height(10.dp))
 
+                // Theme variant selector — exactly one active:
+                // Classic (hue), Material You (Android 12+), OLED (dark only),
+                // Ultra Contrast. OLED is disabled in light mode.
+                val variants = buildList {
+                    add(ThemeVariant.CLASSIC to R.string.app_settings_variant_classic)
+                    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+                        add(ThemeVariant.MATERIAL_YOU to R.string.app_settings_variant_material_you)
+                    }
+                    add(ThemeVariant.ULTRA_CONTRAST to R.string.app_settings_variant_ultra_contrast)
+                }
+                variants.forEach { (variant, labelRes) ->
+                    ImpulseToggle(
+                        title = stringResource(labelRes),
+                        description = when (variant) {
+                            ThemeVariant.CLASSIC -> stringResource(R.string.app_settings_variant_classic_desc)
+                            ThemeVariant.MATERIAL_YOU -> stringResource(R.string.app_settings_variant_material_you_desc)
+                            ThemeVariant.ULTRA_CONTRAST -> if (isDarkActive) stringResource(R.string.app_settings_variant_ultra_contrast_desc) else stringResource(R.string.app_settings_variant_ultra_contrast_desc)
+                            ThemeVariant.OLED -> if (isDarkActive) stringResource(R.string.app_settings_variant_oled_desc) else stringResource(R.string.app_settings_variant_oled_desc)
+                        },
+                        checked = themeVariant == variant,
+                        onCheckedChange = { enabled ->
+                            if (enabled) {
+                                themeVariant = variant
+                                ThemeSettings.setThemeVariant(variant)
+                            }
+                        }
+                    )
+                }
+                // OLED lives below the divider: dark-only, pure black.
                 ImpulseToggle(
                     title = stringResource(R.string.app_settings_oled),
                     description = if (isDarkActive) stringResource(R.string.app_settings_oled_desc_dark) else stringResource(R.string.app_settings_oled_desc_light),
-                    checked = oledEnabled && isDarkActive,
+                    checked = themeVariant == ThemeVariant.OLED && isDarkActive,
                     enabled = isDarkActive,
-                    onCheckedChange = {
-                        oledEnabled = it
-                        ThemeSettings.setOledEnabled(it)
-                        if (it) {
-                            ultraContrastEnabled = false
-                        }
-                    }
-                )
-                ImpulseToggle(
-                    title = stringResource(R.string.app_settings_ultra_contrast),
-                    description = if (isDarkActive) stringResource(R.string.app_settings_ultra_contrast_desc_dark) else stringResource(R.string.app_settings_ultra_contrast_desc_light),
-                    checked = ultraContrastEnabled,
-                    onCheckedChange = {
-                        ultraContrastEnabled = it
-                        ThemeSettings.setUltraContrastEnabled(it)
-                        if (it) {
-                            oledEnabled = false
+                    onCheckedChange = { enabled ->
+                        if (enabled) {
+                            themeVariant = ThemeVariant.OLED
+                            ThemeSettings.setThemeVariant(ThemeVariant.OLED)
                         }
                     }
                 )

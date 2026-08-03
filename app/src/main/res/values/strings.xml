@@ -126,6 +126,13 @@
     <string name="app_settings_ultra_contrast">Ultra contrast</string>
     <string name="app_settings_ultra_contrast_desc_dark">Maximum contrast, white on black</string>
     <string name="app_settings_ultra_contrast_desc_light">Maximum contrast, black on white</string>
+    <string name="app_settings_variant_classic">Classic</string>
+    <string name="app_settings_variant_classic_desc">Brand hue color, light and dark</string>
+    <string name="app_settings_variant_material_you">Material You</string>
+    <string name="app_settings_variant_material_you_desc">Wallpaper accent (Android 12+)</string>
+    <string name="app_settings_variant_ultra_contrast">Ultra contrast</string>
+    <string name="app_settings_variant_ultra_contrast_desc">Maximum contrast for readability</string>
+    <string name="app_settings_variant_oled_desc">Pure black for AMOLED screens</string>
     <string name="app_settings_hue">Hue</string>
     <string name="app_settings_font_scale">Font scale</string>
     <string name="app_settings_scale">Scale</string>
