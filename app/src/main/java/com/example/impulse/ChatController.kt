@@ -391,7 +391,11 @@ class ChatController(private val context: Context) {
         val ownPub = keyManager.getKemPublicKey()
         val peerKeys = allKemKeys.filter { !it.contentEquals(ownPub) }
         if (peerKeys.isEmpty()) {
+            // With no peer keys cached there is no one to encrypt to. This is a
+            // design limitation of per-recipient KEM wrapping (a 1:1 chat needs
+            // at least one known peer), NOT a transport regression.
             LogManager.w(TAG, "No peer keys cached; cannot send.")
+            _lastError.value = "Нет известных собеседников. Подключитесь вторым устройством, чтобы обмениваться сообщениями."
             return false
         }
 
