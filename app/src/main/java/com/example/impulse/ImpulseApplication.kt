@@ -5,6 +5,7 @@ import android.os.Build
 import android.util.Log
 import com.example.impulse.util.CrashLog
 import com.example.impulse.util.LogManager
+import com.example.impulse.service.NetworkMonitor
 import com.example.impulse.service.TtlPurgeWorker
 
 /**
@@ -29,6 +30,9 @@ class ImpulseApplication : Application() {
         LogManager.init(this, BuildConfig.DEBUG)
         CrashLog.init(this)
         TtlPurgeWorker.schedule(this)
+        // Reconnect servers whose transport died during a network outage (Bug:
+        // "no instant reconnect on WiFi <-> cellular handover").
+        NetworkMonitor.getInstance(this)
         installGlobalCrashHandler()
     }
 

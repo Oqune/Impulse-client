@@ -110,8 +110,16 @@ object SecureKeyManager {
         PqcCrypto.encapsulateKem(recipientPubKey)
 
     /** ML-KEM-768 decapsulation. Returns the 32-byte shared secret. */
-    fun decapsulateKem(encapsulatedKey: ByteArray): ByteArray =
-        PqcCrypto.decapsulateKem(encapsulatedKey, getKemPrivateKey())
+    fun decapsulateKem(encapsulatedKey: ByteArray): ByteArray {
+        val priv = getKemPrivateKey()
+        return try {
+            PqcCrypto.decapsulateKem(encapsulatedKey, priv)
+        } finally {
+            // Zero the in-memory private-key clone after use (mirror signDsa)
+            // so it does not linger in the heap between calls.
+            priv.fill(0)
+        }
+    }
 
     /** Signs [data] with the ML-DSA-65 private key. */
     fun signDsa(data: ByteArray): ByteArray {

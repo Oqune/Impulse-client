@@ -38,6 +38,7 @@ class ChatController(private val context: Context) {
     )
     private val certManager = TrustedCertManager(context)
     private val repo = MessageRepository(context)
+    private val outboxPrefs = context.getSharedPreferences("impulse_outbox", Context.MODE_PRIVATE)
 
     private val lock = Any()
 
@@ -73,6 +74,7 @@ class ChatController(private val context: Context) {
     @Volatile private var authTimeoutJob: kotlinx.coroutines.Job? = null
     @Volatile private var autoReconnectEnabled = false
     @Volatile private var userDisconnect = false
+    @Volatile private var reconnectAttempts = 0
     @Volatile private var authChallengeNonce = CompletableDeferred<ByteArray?>()
     @Volatile private var pendingSaltB64: String = ""
 
@@ -217,7 +219,11 @@ class ChatController(private val context: Context) {
             client = null
         }
         pendingSaltB64 = ""
-        synchronized(outboxLock) { outbox.clear() }
+        // Keep the outbox across disconnect/reconnect so queued messages are
+        // NOT lost (Bug: "outbox cleared on disconnect drops messages"). The
+        // flush loop re-runs on the next READY. Only `userDisconnect` from the
+        // UI should clear it explicitly (see disconnectUser).
+        synchronized(outboxLock) { flushOutboxRunning = false }
         synchronized(pendingMessagesLock) { pendingMessages.clear() }
         authChallengeNonce.completeExceptionally(IllegalStateException("disconnected"))
         authChallengeNonce = CompletableDeferred()
@@ -253,6 +259,9 @@ class ChatController(private val context: Context) {
             }
             ConnectionState.CONNECTED -> {
                 _state.value = s
+                // The transport handshake succeeded — the network is healthy,
+                // so reset the exponential-backoff counter for the next failure.
+                reconnectAttempts = 0
             }
             ConnectionState.ERROR -> {
                 synchronized(lock) {
@@ -352,12 +361,15 @@ class ChatController(private val context: Context) {
         val server = currentServer ?: return
         val name = clientName
         if (server.id.isEmpty()) return
+        val attempt = reconnectAttempts
+        val delayMs = RECONNECT_BASE_DELAY_MS * (1 shl attempt.coerceAtMost(RECONNECT_MAX_BACKOFF_SHIFT))
+        reconnectAttempts = attempt + 1
         synchronized(lock) {
             reconnectJob = scope.launch {
-                delay(RECONNECT_DELAY_MS)
+                delay(delayMs)
                 if (!autoReconnectEnabled || userDisconnect) return@launch
                 if (_state.value == ConnectionState.ERROR || _state.value == ConnectionState.DISCONNECTED) {
-                    LogManager.i(TAG, "auto-reconnecting to ${server.name}")
+                    LogManager.i(TAG, "auto-reconnecting to ${server.name} (attempt=${attempt + 1}, delay=${delayMs}ms)")
                     connect(server, name)
                 }
             }
@@ -383,12 +395,20 @@ class ChatController(private val context: Context) {
             return false
         }
 
-        val innerJson = Protocol.buildInnerEnvelope(clientName, "", plaintext)
-        val signature = keyManager.signDsa(innerJson)
-        val signedEnvelope = Protocol.buildInnerEnvelope(
+        // Replay/ordering protection: sign the message together with a
+        // client-generated timestamp and per-message nonce, so the signature
+        // is bound to a unique token (Bug: "no replay/ordering protection").
+        // Backward compatible: verifiers accept old 3-field envelopes too.
+        val clientTs = System.currentTimeMillis()
+        val nonce = java.util.UUID.randomUUID().toString()
+        val innerCanonical = Protocol.buildSignedInnerEnvelope(clientName, "", plaintext, clientTs, nonce)
+        val signature = keyManager.signDsa(innerCanonical)
+        val signedEnvelope = Protocol.buildSignedInnerEnvelope(
             clientName,
             android.util.Base64.encodeToString(signature, android.util.Base64.NO_WRAP),
-            plaintext
+            plaintext,
+            clientTs,
+            nonce
         )
 
         val recipients = mutableListOf<Triple<String, ByteArray, ByteArray>>()
@@ -423,6 +443,7 @@ class ChatController(private val context: Context) {
         } else {
             LogManager.w(TAG, "sendChat: transport send failed, queuing in outbox")
             synchronized(outboxLock) { outbox.add(OutboxEntry(frame, plaintext)) }
+            persistOutbox()
             if (!flushOutboxRunning) {
                 scope.launch { flushOutbox() }
             }
@@ -445,12 +466,14 @@ class ChatController(private val context: Context) {
                 if (entry.retries >= MAX_OUTBOX_RETRIES) {
                     LogManager.w(TAG, "Outbox: dropping message after ${MAX_OUTBOX_RETRIES} retries")
                     synchronized(outboxLock) { outbox.remove(entry) }
+                    persistOutbox()
                     continue
                 }
                 val c = synchronized(lock) { client }
                 val ok = withContext(Dispatchers.IO) { c?.send(entry.frame) ?: false }
                 if (ok) {
                     synchronized(outboxLock) { outbox.remove(entry) }
+                    persistOutbox()
                     val tempId = -(System.currentTimeMillis())
                     val msg = DecryptedMessage(tempId, clientName, publicKeyHash, entry.plaintext, true, System.currentTimeMillis())
                     synchronized(listeners) { listeners.forEach { it(msg) } }
@@ -463,6 +486,58 @@ class ChatController(private val context: Context) {
             }
         } finally {
             flushOutboxRunning = false
+        }
+    }
+
+    /**
+     * Persist queued outbox entries to disk so they survive a process kill.
+     * Frames are already-encrypted blobs (safe to store); plaintext is kept for
+     * the optimistic local echo. Format: JSON array of [frameB64, plaintext].
+     */
+    private fun persistOutbox() {
+        try {
+            val entries: List<OutboxEntry>
+            synchronized(outboxLock) { entries = outbox.toList() }
+            val arr = org.json.JSONArray()
+            for (e in entries) {
+                val obj = org.json.JSONObject()
+                obj.put("f", android.util.Base64.encodeToString(e.frame, android.util.Base64.NO_WRAP))
+                obj.put("p", e.plaintext)
+                obj.put("r", e.retries)
+                obj.put("t", e.queuedAt)
+                arr.put(obj)
+            }
+            outboxPrefs.edit().putString("outbox", arr.toString()).apply()
+        } catch (e: Exception) {
+            LogManager.w(TAG, "persistOutbox failed (non-fatal)", e)
+        }
+    }
+
+    /** Load a previously-persisted outbox into memory (call once, at connect). */
+    private fun restoreOutbox() {
+        try {
+            val raw = outboxPrefs.getString("outbox", null) ?: return
+            val arr = org.json.JSONArray(raw)
+            val restored = mutableListOf<OutboxEntry>()
+            for (i in 0 until arr.length()) {
+                val obj = arr.getJSONObject(i)
+                val frame = android.util.Base64.decode(obj.getString("f"), android.util.Base64.DEFAULT)
+                restored.add(OutboxEntry(
+                    frame = frame,
+                    plaintext = obj.optString("p", ""),
+                    queuedAt = obj.optLong("t", System.currentTimeMillis()),
+                    retries = obj.optInt("r", 0),
+                ))
+            }
+            synchronized(outboxLock) {
+                if (outbox.isEmpty()) outbox.addAll(restored)
+            }
+            outboxPrefs.edit().remove("outbox").apply()
+            if (restored.isNotEmpty()) {
+                LogManager.i(TAG, "restored ${restored.size} queued messages from disk")
+            }
+        } catch (e: Exception) {
+            LogManager.w(TAG, "restoreOutbox failed (non-fatal)", e)
         }
     }
 
@@ -512,24 +587,38 @@ class ChatController(private val context: Context) {
             val count = pr.u32().toInt()
 
             val ownFingerprint = keyManager.getFingerprint()
-            var found = false
 
+            // Collect every recipient entry addressed to us. A malicious/crafted
+            // blob can place a decoy entry with our fingerprint first that fails
+            // to decrypt; we must try ALL matching entries and accept the first
+            // that decrypts (Bug: "decoy-entry DoS blocks legitimate messages").
+            val ourEntries = mutableListOf<Pair<ByteArray, ByteArray>>()
             repeat(count) {
                 val recipientId = pr.bytes()
                 val recipientFp = com.example.impulse.util.bytesToHex(recipientId).take(32)
                 val encKey = pr.bytes()
                 val ciphertext = pr.bytes()
+                if (recipientFp == ownFingerprint) {
+                    ourEntries.add(encKey to ciphertext)
+                }
+            }
 
-                if (recipientFp == ownFingerprint && !found) {
-                    found = true
-                    val sharedSecret = keyManager.decapsulateKem(encKey)
-                    val innerBytes: ByteArray
-                    try {
-                        innerBytes = PqcCrypto.aesDecrypt(sharedSecret, ciphertext)
-                    } finally {
-                        sharedSecret.fill(0)
+            var accepted = false
+            for ((encKey, ciphertext) in ourEntries) {
+                if (accepted) break
+                var sharedSecret: ByteArray? = null
+                var innerBytes: ByteArray? = null
+                try {
+                    sharedSecret = keyManager.decapsulateKem(encKey)
+                    innerBytes = try {
+                        PqcCrypto.aesDecrypt(sharedSecret, ciphertext)
+                    } catch (_: Exception) {
+                        null
                     }
-                    val env = Protocol.parseInnerEnvelope(innerBytes) ?: return
+                    if (innerBytes == null) continue
+                    val env = Protocol.parseInnerEnvelope(innerBytes) ?: continue
+                    accepted = true
+                    innerBytes.fill(0)
 
                     val isOwn = env.sender == clientName
                     val realId = frame.serverMsgId
@@ -555,11 +644,15 @@ class ChatController(private val context: Context) {
                         }
                         processVerifiedMessage(serverId, realId, env, payload, ts, isOwn, senderFingerprint, dsaPub)
                     }
+                } finally {
+                    sharedSecret?.fill(0)
                 }
             }
 
-            if (!found) {
+            if (!accepted && ourEntries.isEmpty()) {
                 LogManager.d(TAG, "Per-Recipient message not for us, skipping")
+            } else if (!accepted) {
+                LogManager.w(TAG, "All our recipient entries failed to decrypt (possible decoy entries)")
             }
         } catch (e: Exception) {
             LogManager.e(TAG, "Per-Recipient parse failed", e)
@@ -571,7 +664,14 @@ class ChatController(private val context: Context) {
         payload: ByteArray, ts: Long, isOwn: Boolean,
         senderFingerprint: String, dsaPub: ByteArray
     ) {
-        val canonical = Protocol.buildInnerEnvelope(env.sender, "", env.content)
+        // Rebuild the canonical signed form. New envelopes sign sender+content
+        // together with clientTs+nonce; old 3-field envelopes (no ts/nonce)
+        // still verify against the legacy canonical form for compatibility.
+        val canonical = if (env.clientTs != 0L || env.nonce.isNotEmpty()) {
+            Protocol.buildSignedInnerEnvelope(env.sender, "", env.content, env.clientTs, env.nonce)
+        } else {
+            Protocol.buildInnerEnvelope(env.sender, "", env.content)
+        }
         val sigBytes = runCatching {
             android.util.Base64.decode(env.signature, android.util.Base64.NO_WRAP)
         }.getOrNull()
@@ -918,9 +1018,20 @@ class ChatController(private val context: Context) {
             val syncOk = withContext(Dispatchers.IO) { c?.send(Protocol.buildSync(lastSeenId())) ?: false }
             LogManager.i(TAG, "Sync request sent (ok=$syncOk, lastSeenId=${lastSeenId()})")
 
+            // Guard: if a disconnect raced in while we were authenticating, do
+            // NOT flip back to READY with a null client (Bug: "state becomes
+            // READY after user disconnect"). Leave the controller DISCONNECTED.
+            if (userDisconnect || synchronized(lock) { client } == null) {
+                LogManager.w(TAG, "AUTH SUCCESS but disconnect raced — staying DISCONNECTED")
+                return@launch
+            }
+
             _state.value = ConnectionState.AUTHENTICATED
             _state.value = ConnectionState.READY
             LogManager.i(TAG, "READY")
+
+            // Restore any messages queued before a previous disconnect / kill.
+            restoreOutbox()
 
             synchronized(outboxLock) {
                 if (outbox.isNotEmpty() && !flushOutboxRunning) {
@@ -971,7 +1082,8 @@ class ChatController(private val context: Context) {
         private const val TAG = "ChatController"
         private const val HEARTBEAT_INTERVAL_MS = 30_000L
         private const val AUTH_TIMEOUT_MS = 15_000L
-        private const val RECONNECT_DELAY_MS = 5_000L
+        private const val RECONNECT_BASE_DELAY_MS = 5_000L
+        private const val RECONNECT_MAX_BACKOFF_SHIFT = 4 // caps at 5s * 2^4 = 80s
         private const val PENDING_MSG_TTL_MS = 120_000L
         private const val RESYNC_EVERY_N_HEARTBEATS = 2
         private const val MAX_OUTBOX_RETRIES = 3

@@ -29,6 +29,7 @@ import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.withTimeout
+import kotlinx.coroutines.withTimeoutOrNull
 import kotlin.coroutines.coroutineContext
 import java.io.ByteArrayOutputStream
 import java.net.URI
@@ -273,7 +274,10 @@ class WebTransportClient(
         var framesRead = 0L
         try {
             while (coroutineContext.isActive && !intentionalClose.get()) {
-                when (val result = stream.read()) {
+                val result = withTimeoutOrNull(READ_IDLE_TIMEOUT_MS) {
+                    stream.read()
+                }
+                when (result) {
                     is ReadResult.Data -> {
                         val buf = result.buffer
                         val n = buf.remaining()
@@ -292,6 +296,13 @@ class WebTransportClient(
                     }
                     ReadResult.Reset -> {
                         LogManager.w(TAG, "READ RESET — peer aborted the stream (bytes=$bytesRead frames=$framesRead)")
+                        break
+                    }
+                    null -> {
+                        // No data for READ_IDLE_TIMEOUT_MS — the peer is dead or
+                        // the network is gone (Doze, radio off). Treat as a lost
+                        // connection so reconnect logic can kick in.
+                        LogManager.e(TAG, "READ IDLE TIMEOUT after ${READ_IDLE_TIMEOUT_MS}ms — no data from server, treating as lost connection")
                         break
                     }
                 }
@@ -413,6 +424,17 @@ Protocol.OP_NEW_CERT_HASH -> {
     companion object {
         private const val TAG = "WebTransportClient"
         private const val CONNECT_TIMEOUT_MS = 15_000L
+
+        /**
+         * Max time with no data at all from the server before we declare the
+         * peer dead. The client sends a QUIC keepalive every 15s and a protocol
+         * heartbeat every 30s (both echoed by the server), so a live connection
+         * delivers data at least every ~15s. 90s of silence means the transport
+         * is gone (e.g. Doze, radio off, NAT eviction) — previously
+         * `stream.read()` blocked forever and the client stayed "READY" on a
+         * dead connection (Bug: "background connection zombie").
+         */
+        private const val READ_IDLE_TIMEOUT_MS = 90_000L
 
         /** Convert a 64-char lowercase/uppercase hex SHA-256 fingerprint into a
          *  [CertificateHash] pinning the server leaf cert (DER encoding). */

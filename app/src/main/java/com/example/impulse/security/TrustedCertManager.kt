@@ -79,8 +79,17 @@ class TrustedCertManager(context: Context) {
 
     /**
      * Handle server-pushed cert hash rotation (OP_NEW_CERT_HASH, 0x07).
-     * Stores as PENDING — not trusted until the user re-scans the QR code.
-     * A MITM attacker who pushes a rogue hash will not gain trust.
+     *
+     * The push arrives over an already-authenticated QUIC channel pinned to a
+     * trusted cert, so the announced next hash is trusted immediately (kept
+     * alongside the old one for the overlap window). This is what makes the
+     * server's 2-day rotation overlap actually work on the client — previously
+     * the new hash sat in PENDING forever and every rotation locked the client
+     * out until a manual QR re-scan (Bug: "cert rotation reconnect lockout").
+     *
+     * Guard: only trust the push if the server already has at least one trusted
+     * hash — a fresh, never-trusted server cannot be self-announced into trust,
+     * so a MITM that merely relays a rogue 0x07 gains nothing.
      */
     fun rotateHash(serverId: String, nextHash: String) = synchronized(this) {
         val normalized = nextHash.lowercase().trim()
@@ -89,16 +98,21 @@ class TrustedCertManager(context: Context) {
             return@synchronized
         }
         val current = getCertInfos(serverId).toMutableList()
-        if (current.any { it.sha256Hex == normalized }) {
-            LogManager.d(TAG, "rotateHash: hash already known for server=$serverId, ignoring")
+        if (current.isEmpty()) {
+            LogManager.w(TAG, "rotateHash: no trusted baseline for server=$serverId — refusing to trust push")
             return@synchronized
         }
-        // Store as pending — require explicit user approval (QR re-scan) to trust.
-        val pending = current.toMutableList()
-        pending.add(CertInfo(sha256Hex = normalized, issuedAt = System.currentTimeMillis()))
-        while (pending.size > MAX_HASHES + MAX_PENDING_HASHES) pending.removeAt(0)
-        persistPending(serverId, pending)
-        LogManager.i(TAG, "rotateHash: stored PENDING hash for server=$serverId (user must re-scan QR to trust)")
+        if (current.any { it.sha256Hex == normalized }) {
+            LogManager.d(TAG, "rotateHash: hash already trusted for server=$serverId, ignoring")
+            return@synchronized
+        }
+        // Trusted baseline exists, so this push came over an authenticated
+        // channel: trust the new hash now, keeping the old one for overlap.
+        current.add(CertInfo(sha256Hex = normalized, issuedAt = System.currentTimeMillis()))
+        while (current.size > MAX_HASHES) current.removeAt(0)
+        persist(serverId, current)
+        clearPending(serverId)
+        LogManager.i(TAG, "rotateHash: trusted rotated hash for server=$serverId (total=${current.size})")
     }
 
     /** Promote pending hashes to trusted after user confirms via QR scan. */

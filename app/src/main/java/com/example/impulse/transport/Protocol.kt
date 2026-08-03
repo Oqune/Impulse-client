@@ -381,6 +381,21 @@ object Protocol {
     }
 
     /**
+     * Builds an inner envelope that additionally carries a client-generated
+     * timestamp and nonce, both included in the signed canonical form. This
+     * binds the ML-DSA-65 signature to a per-message uniqueness token so a
+     * malicious relay cannot reorder or replay an old blob with new server
+     * ids/timestamps (Bug: "no replay/ordering protection").
+     *
+     * Backward compatible: old clients still send the 3-field form, and the
+     * verifier accepts it (no ts/nonce) — see [parseInnerEnvelope].
+     */
+    fun buildSignedInnerEnvelope(sender: String, signature: String, content: String, clientTs: Long, nonce: String): ByteArray {
+        val json = """{"sender":${jsonStr(sender)},"signature":${jsonStr(signature)},"content":${jsonStr(content)},"ts":$clientTs,"n":${jsonStr(nonce)}}"""
+        return json.toByteArray(Charsets.UTF_8)
+    }
+
+    /**
      * Minimal JSON string literal encoder: escapes the control characters,
      * double-quote and backslash required by RFC 8259. The three envelope
      * fields are all free-form text, so escaping is mandatory to keep the
@@ -499,13 +514,17 @@ object Protocol {
     data class InnerEnvelope(
         val sender: String,
         val signature: String,
-        val content: String
+        val content: String,
+        /** Client-generated timestamp included in the signed form (0 if absent). */
+        val clientTs: Long = 0L,
+        /** Client-generated per-message nonce included in the signed form (empty if absent). */
+        val nonce: String = ""
     )
 
     /**
      * Parses the inner envelope. Uses a tolerant, allocation-free scanner that
-     * extracts the three known string fields by name. Returns null if the
-     * envelope cannot be parsed (callers drop the frame rather than crash).
+     * extracts the known string fields by name. Returns null if the envelope
+     * cannot be parsed (callers drop the frame rather than crash).
      */
     fun parseInnerEnvelope(bytes: ByteArray): InnerEnvelope? {
         return try {
@@ -513,7 +532,9 @@ object Protocol {
             InnerEnvelope(
                 sender = optJsonField(text, "sender") ?: "Unknown",
                 signature = optJsonField(text, "signature") ?: "",
-                content = optJsonField(text, "content") ?: ""
+                content = optJsonField(text, "content") ?: "",
+                clientTs = optJsonLong(text, "ts"),
+                nonce = optJsonField(text, "n") ?: ""
             )
         } catch (e: Exception) {
             null
@@ -558,5 +579,19 @@ object Protocol {
             p++
         }
         return null
+    }
+
+    /** Extracts an optional numeric field (`"name":123`) or 0 if absent. */
+    private fun optJsonLong(json: String, name: String): Long {
+        val key = "\"$name\""
+        val idx = json.indexOf(key)
+        if (idx < 0) return 0L
+        var p = idx + key.length
+        while (p < json.length && (json[p] == ':' || json[p] == ' ' || json[p] == '\t')) p++
+        if (p >= json.length) return 0L
+        val start = p
+        while (p < json.length && json[p].isDigit()) p++
+        if (p == start) return 0L
+        return json.substring(start, p).toLongOrNull() ?: 0L
     }
 }

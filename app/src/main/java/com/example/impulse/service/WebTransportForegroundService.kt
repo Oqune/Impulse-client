@@ -50,8 +50,18 @@ class WebTransportForegroundService : Service() {
 
     private fun acquireWakeLock() {
         val powerManager = getSystemService(Context.POWER_SERVICE) as PowerManager
-        wakeLock = powerManager.newWakeLock(PowerManager.PARTIAL_WAKE_LOCK, "Impulse::WTLock")
-        wakeLock?.acquire(45 * 60 * 1000L) // 45-minute timeout, re-acquired on each startConnection
+        if (wakeLock == null) {
+            wakeLock = powerManager.newWakeLock(PowerManager.PARTIAL_WAKE_LOCK, "Impulse::WTLock")
+        }
+        val lock = wakeLock ?: return
+        if (!lock.isHeld) {
+            // Held for the whole foreground-service lifetime; re-acquired on each
+            // startConnection so a previously-expired lock is renewed. A partial
+            // wakelock keeps the CPU awake for QUIC traffic but does NOT exempt
+            // the app from Doze — the battery-optimization exemption in
+            // MainActivity covers that.
+            lock.acquire()
+        }
     }
 
     private fun releaseWakeLock() {
@@ -125,6 +135,10 @@ class WebTransportForegroundService : Service() {
     }
 
     private fun startConnection() {
+        // Renew the wakelock on every (re)connect, not just onCreate — the old
+        // 45-minute timeout expired and was never re-acquired, silently killing
+        // the background connection (Bug: "app minimized -> connection dies").
+        acquireWakeLock()
         job?.cancel()
         job = SupervisorJob()
         scope = CoroutineScope(Dispatchers.IO + job!!)

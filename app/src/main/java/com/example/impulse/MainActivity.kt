@@ -2,7 +2,11 @@ package com.example.impulse
 
 import android.content.Intent
 import android.content.res.Configuration
+import android.net.Uri
+import android.os.Build
 import android.os.Bundle
+import android.os.PowerManager
+import android.provider.Settings
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
 import androidx.compose.runtime.mutableStateOf
@@ -44,6 +48,8 @@ class MainActivity : FragmentActivity() {
         val themePreferences = ThemePreferences(applicationContext)
         ThemeSettings.initialize(themePreferences)
 
+        requestIgnoreBatteryOptimizations()
+
         setContent {
             ImpulseTheme {
                 var isUnlocked = remember { mutableStateOf(false) }
@@ -78,5 +84,26 @@ class MainActivity : FragmentActivity() {
             action = "START"
         }
         ContextCompat.startForegroundService(this, serviceIntent)
+    }
+
+    /**
+     * Ask the user to exempt this app from battery optimizations so the QUIC
+     * connection survives Doze. Without this, Doze suspends UDP/QUIC traffic
+     * ~15 min after screen-off and the background connection silently dies
+     * (Bug: "app minimized -> connection dies"). The system shows a one-time
+     * dialog; if already exempted or denied, this is a no-op.
+     */
+    private fun requestIgnoreBatteryOptimizations() {
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.M) return
+        val pm = getSystemService(PowerManager::class.java)
+        if (pm.isIgnoringBatteryOptimizations(packageName)) return
+        try {
+            val intent = Intent(Settings.ACTION_REQUEST_IGNORE_BATTERY_OPTIMIZATIONS).apply {
+                data = Uri.parse("package:$packageName")
+            }
+            startActivity(intent)
+        } catch (_: Exception) {
+            // No activity to handle it (rare); fall back to app details.
+        }
     }
 }
