@@ -50,19 +50,25 @@ fun GlassSurface(
 
     Box(modifier = modifier) {
         if (modern) {
-            // Backdrop blur + translucent surface = glass.
+            // Backdrop blur + translucent surface = glass. `matchParentSize`
+            // (not `fillMaxSize`) so this layer only fills the size determined
+            // by the foreground `content()`, and never inflates the parent.
+            // Using fillMaxSize here made the nav-bar GlassSurface expand to
+            // the whole screen when used as a Scaffold bottomBar (Bug: "white
+            // screen at the bottom").
             Box(
                 modifier = Modifier
-                    .fillMaxSize()
+                    .matchParentSize()
                     .clip(shape)
                     .background(background.copy(alpha = 0.6f))
                     .blur(blurRadius)
             )
         }
-        // Foreground surface (always drawn, blur or not).
+        // Foreground surface (always drawn, blur or not). Wraps `content()` so
+        // the content size defines the GlassSurface size (no matchParentSize
+        // here — otherwise the parent would measure to zero).
         Box(
             modifier = Modifier
-                .fillMaxSize()
                 .clip(shape)
                 .background(surface.copy(alpha = alpha))
                 .then(
