@@ -313,12 +313,12 @@ class WebTransportClient(
         }
     }
 
-    private fun handleInboundChunk(chunk: ByteArray, acc: ByteArrayOutputStream) {
+    private suspend fun handleInboundChunk(chunk: ByteArray, acc: ByteArrayOutputStream) {
         acc.write(chunk)
         drainFrames(acc)
     }
 
-    private fun drainFrames(acc: ByteArrayOutputStream) {
+    private suspend fun drainFrames(acc: ByteArrayOutputStream) {
         val bytes = acc.toByteArray()
         if (bytes.isEmpty()) return
         var pos = 0
@@ -356,7 +356,7 @@ class WebTransportClient(
         }
     }
 
-    private fun dispatch(raw: ByteArray) {
+    private suspend fun dispatch(raw: ByteArray) {
         if (raw.isEmpty()) return
         val opcode = raw[0]
         val opcodeName = when (opcode) {

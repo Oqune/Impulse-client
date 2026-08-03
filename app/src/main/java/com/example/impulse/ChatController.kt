@@ -205,6 +205,14 @@ class ChatController(private val context: Context) {
             heartbeatJob = null
             authTimeoutJob?.cancel()
             authTimeoutJob = null
+            // Best-effort notify the server before tearing down the connection.
+            runBlocking {
+                try {
+                    withTimeout(1000) {
+                        client?.send(Protocol.buildDisconnect())
+                    }
+                } catch (_: Exception) { }
+            }
             client?.destroy()
             client = null
         }

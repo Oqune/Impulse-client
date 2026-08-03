@@ -11,8 +11,8 @@ class CrashReportTest {
         val report = CrashLog.buildCrashReport(
             thread = Thread.currentThread(),
             throwable = ex,
-            versionName = "2.5",
-            versionCode = 5,
+            versionName = "2.5.1",
+            versionCode = 6,
             sdkInt = 29,
             release = "10",
             manufacturer = "Xiaomi",
@@ -20,7 +20,7 @@ class CrashReportTest {
             timeMillis = 0L,
             extra = "  prod_001: READY lastError=null\n  logBytes=123456",
         )
-        assertTrue(report.contains("App version: 2.5 (5)"))
+        assertTrue(report.contains("App version: 2.5.1 (6)"))
         assertTrue(report.contains("SDK: 29 (10)"))
         assertTrue(report.contains("Xiaomi Redmi Note 8"))
         assertTrue(report.contains("boom"))
