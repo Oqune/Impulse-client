@@ -10,6 +10,23 @@ plugins {
 android {
     namespace = "com.example.impulse"
     compileSdk = 36
+
+    signingConfigs {
+        create("release") {
+            val ksDir = project.rootProject.file("keystore")
+            val ksFile = ksDir.resolve("impulse-release.jks")
+            val passFile = ksDir.resolve("keystore-password.txt")
+            if (ksFile.exists() && passFile.exists()) {
+                storeFile = ksFile
+                storePassword = passFile.readText().trim()
+                keyAlias = "impulse"
+                keyPassword = passFile.readText().trim()
+            }
+            // If the keystore is absent (e.g. fresh clone), the release build
+            // falls back to unsigned; CI/developers must supply the keystore.
+        }
+    }
+
     defaultConfig {
         applicationId = "com.example.impulse"
         minSdk = 28 // WebTransport via socket-http3 (third-party), no native API 33+ needed
@@ -23,6 +40,7 @@ android {
         release {
             isMinifyEnabled = true
             isShrinkResources = true
+            signingConfig = signingConfigs.getByName("release")
             proguardFiles(
                 getDefaultProguardFile("proguard-android-optimize.txt"),
                 "proguard-rules.pro"

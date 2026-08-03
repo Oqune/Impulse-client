@@ -27,6 +27,12 @@ app/sampledata/
 *.keystore
 !gradle/wrapper/gradle-wrapper.jar
 
+# Release signing material (NEVER commit)
+keystore/
+*.jks
+*.p12
+keystore-password.txt
+
 # Logs / temp
 *.log
 diag*.log
