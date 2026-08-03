@@ -232,16 +232,14 @@ fun MessageInputArea(
     val canSend = canSendMessages && connectionState == ConnectionState.READY && messageInput.isNotBlank()
     val isConnected = connectionState == ConnectionState.READY
 
-    Surface(
+    GlassSurface(
         modifier = Modifier
             .fillMaxWidth()
             .padding(horizontal = 12.dp, vertical = 8.dp)
             .navigationBarsPadding()
             .padding(bottom = 8.dp),
-        tonalElevation = 3.dp,
-        shadowElevation = 6.dp,
         shape = RoundedCornerShape(28.dp),
-        color = MaterialTheme.colorScheme.surfaceContainerHigh
+        alpha = 0.85f,
     ) {
         Row(
             modifier = Modifier

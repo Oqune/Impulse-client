@@ -95,20 +95,14 @@ fun MainScreen() {
             containerColor = Color.Transparent,
             contentColor = MaterialTheme.colorScheme.onSurface,
             bottomBar = {
-                Box(
+                GlassSurface(
                     modifier = Modifier
                         .fillMaxWidth()
                         .navigationBarsPadding()
                         .padding(horizontal = 20.dp, vertical = 12.dp)
-                        .shadow(
-                            elevation = 8.dp,
-                            shape = RoundedCornerShape(20.dp),
-                            ambientColor = MaterialTheme.colorScheme.primary.copy(alpha = 0.06f),
-                            spotColor = MaterialTheme.colorScheme.primary.copy(alpha = 0.06f),
-                        )
-                        .clip(RoundedCornerShape(20.dp))
-                        .background(MaterialTheme.colorScheme.background)
                         .zIndex(1f),
+                    shape = RoundedCornerShape(20.dp),
+                    alpha = 0.82f,
                 ) {
                     Row(
                         modifier = Modifier
