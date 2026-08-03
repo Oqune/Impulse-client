@@ -31,8 +31,8 @@ android {
         applicationId = "com.example.impulse"
         minSdk = 28 // WebTransport via socket-http3 (third-party), no native API 33+ needed
         targetSdk = 36
-        versionCode = 7
-        versionName = "2.6.0"
+        versionCode = 8
+        versionName = "2.7.0"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
     }
