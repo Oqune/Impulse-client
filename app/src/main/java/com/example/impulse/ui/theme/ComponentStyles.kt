@@ -1,5 +1,6 @@
 package com.example.impulse.ui.theme
 
+import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.layout.*
@@ -24,6 +25,17 @@ import androidx.compose.ui.unit.sp
 
 // ── Card ────────────────────────────────────────────────────────────────
 
+/**
+ * Consistent surface elevation. Explicit `tonalElevation` + a 1px border makes
+ * cards render cleanly on old OS versions (API 28-30) where M3 soft-shadow
+ * rasterization is unreliable, instead of depending on shadow blur.
+ */
+object ImpulseElevation {
+    val card = androidx.compose.ui.unit.Dp(1f)
+    val menu = androidx.compose.ui.unit.Dp(2f)
+    val overlay = androidx.compose.ui.unit.Dp(6f)
+}
+
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun ImpulseCard(
@@ -34,18 +46,27 @@ fun ImpulseCard(
     val colors = CardDefaults.cardColors(
         containerColor = MaterialTheme.colorScheme.surfaceContainerHigh
     )
+    val elevation = CardDefaults.cardElevation(defaultElevation = ImpulseElevation.card)
+    val border = BorderStroke(
+        width = 1.dp,
+        color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f)
+    )
     if (onClick != null) {
         Card(
             onClick = onClick,
             modifier = modifier.fillMaxWidth(),
             shape = CardShape,
             colors = colors,
+            elevation = elevation,
+            border = border,
         ) { Column(Modifier.padding(16.dp), content = content) }
     } else {
         Card(
             modifier = modifier.fillMaxWidth(),
             shape = CardShape,
             colors = colors,
+            elevation = elevation,
+            border = border,
         ) { Column(Modifier.padding(16.dp), content = content) }
     }
 }
@@ -168,6 +189,11 @@ fun ImpulseMenuCard(
         shape = ButtonShape,
         colors = CardDefaults.cardColors(
             containerColor = MaterialTheme.colorScheme.surfaceContainerHigh,
+        ),
+        elevation = CardDefaults.cardElevation(defaultElevation = ImpulseElevation.menu),
+        border = BorderStroke(
+            width = 1.dp,
+            color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f)
         ),
     ) {
         Row(
