@@ -348,7 +348,7 @@ fun AppSettingsContent(
                         Text(
                             text = deg,
                             style = MaterialTheme.typography.labelSmall,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.5f),
+                            color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.75f),
                         )
                     }
                 }

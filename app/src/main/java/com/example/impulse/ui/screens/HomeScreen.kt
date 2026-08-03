@@ -105,14 +105,15 @@ fun HomeScreen(
     }
 
     // Fast bright shimmer sweep
-    val shimmerBrush = remember(shimmerSweep, primaryColor) {
+    val shimmerColor = MaterialTheme.colorScheme.onSurface
+    val shimmerBrush = remember(shimmerSweep, primaryColor, shimmerColor) {
         val x = shimmerSweep * 1400f
         Brush.linearGradient(
             colors = listOf(
                 Color.Transparent,
-                Color.White.copy(alpha = 0.08f),
-                Color.White.copy(alpha = 0.55f),
-                Color.White.copy(alpha = 0.08f),
+                shimmerColor.copy(alpha = 0.08f),
+                shimmerColor.copy(alpha = 0.40f),
+                shimmerColor.copy(alpha = 0.08f),
                 Color.Transparent,
             ),
             start = androidx.compose.ui.geometry.Offset(x - 400f, 0f),
@@ -226,53 +227,10 @@ fun HomeScreen(
                 Spacer(Modifier.height(12.dp))
 
                 visibleServers.forEach { server ->
-                    val state = serverStates[server.id]
-                    val isConnected = state?.state == ConnectionState.READY
-                    val isConnecting = state?.state in listOf(
-                        ConnectionState.CONNECTING, ConnectionState.CONNECTED,
-                        ConnectionState.AUTHENTICATING, ConnectionState.AUTHENTICATED,
+                    ServerStatusRow(
+                        name = server.name,
+                        state = serverStates[server.id]?.state
                     )
-                    val hasError = state?.state == ConnectionState.ERROR
-
-                    Row(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .padding(vertical = 3.dp),
-                        verticalAlignment = Alignment.CenterVertically,
-                    ) {
-                        StatusDot(
-                            color = when {
-                                isConnected -> MaterialTheme.colorScheme.primary
-                                isConnecting -> MaterialTheme.colorScheme.tertiary
-                                hasError -> MaterialTheme.colorScheme.error
-                                else -> MaterialTheme.colorScheme.outline
-                            },
-                            size = 7.dp,
-                        )
-                        Spacer(Modifier.width(8.dp))
-                        Text(
-                            text = server.name,
-                            style = MaterialTheme.typography.bodySmall,
-                            modifier = Modifier.weight(1f),
-                        )
-                        Text(
-                            text = when {
-                                isConnected -> "ONLINE"
-                                isConnecting -> "SYNC"
-                                hasError -> "ERR"
-                                else -> "OFF"
-                            },
-                            style = MaterialTheme.typography.labelSmall,
-                            fontFamily = FontFamily.Monospace,
-                            fontSize = 10.sp,
-                            color = when {
-                                isConnected -> MaterialTheme.colorScheme.primary
-                                isConnecting -> MaterialTheme.colorScheme.tertiary
-                                hasError -> MaterialTheme.colorScheme.error
-                                else -> MaterialTheme.colorScheme.outline
-                            },
-                        )
-                    }
                 }
             }
 
@@ -324,7 +282,7 @@ fun HomeScreen(
                 Text(
                     text = stringResource(R.string.home_powered_by),
                     style = MaterialTheme.typography.labelSmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.5f),
+                    color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.75f),
                 )
                 val techs = listOf(
                     "ML-KEM-768" to "Post-Quantum KEM",
@@ -361,8 +319,8 @@ fun HomeScreen(
                                 Text(
                                     text = desc,
                                     style = MaterialTheme.typography.labelSmall,
-                                    fontSize = 9.sp,
-                                    color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.6f),
+                                    fontSize = 10.sp,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.85f),
                                 )
                             }
                         }

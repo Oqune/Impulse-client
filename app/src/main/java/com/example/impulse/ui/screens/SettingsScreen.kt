@@ -411,8 +411,8 @@ private fun ServerExpandableSettings(
                                         Text(
                                             stringResource(R.string.settings_cert_added, java.text.SimpleDateFormat("dd.MM.yy HH:mm", java.util.Locale.getDefault()).format(java.util.Date(info.issuedAt))),
                                             style = MaterialTheme.typography.labelSmall,
-                                            fontSize = 9.sp,
-                                            color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.6f),
+                                            fontSize = 10.sp,
+                                            color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.85f),
                                         )
                                     }
                                     ShieldBadge(

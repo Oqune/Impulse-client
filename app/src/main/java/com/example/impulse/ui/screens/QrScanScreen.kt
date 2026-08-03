@@ -342,7 +342,7 @@ fun QrScanScreen(
                 Text(
                     "impulse-cert:<64 hex>",
                     style = MaterialTheme.typography.labelSmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.5f),
+                    color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.75f),
                     fontFamily = androidx.compose.ui.text.font.FontFamily.Monospace,
                 )
             }
@@ -458,6 +458,8 @@ private fun ScanOverlay(modifier: Modifier = Modifier, scanned: Boolean) {
         )
     )
 
+    val accentColor = if (scanned) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.primary.copy(alpha = 0.85f)
+
     Box(modifier = modifier, contentAlignment = Alignment.Center) {
         Canvas(modifier = Modifier.fillMaxSize()) {
             val w = size.width
@@ -475,7 +477,7 @@ private fun ScanOverlay(modifier: Modifier = Modifier, scanned: Boolean) {
             drawRect(scrimColor, topLeft = Offset(0f, top), size = Size(left, windowPx))
             drawRect(scrimColor, topLeft = Offset(right, top), size = Size(w - right, windowPx))
 
-            val accent = if (scanned) Color(0xFF3DDC84) else Color(0xFF4F8CFF)
+            val accent = accentColor
             val stroke = 2.dp.toPx()
             val cornerLen = 24.dp.toPx()
 

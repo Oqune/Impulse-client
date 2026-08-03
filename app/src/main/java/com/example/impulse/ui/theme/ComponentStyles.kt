@@ -286,3 +286,58 @@ fun ShieldBadge(
         }
     }
 }
+
+// ── Server status row (shared across Home / ChatList / Settings) ────────
+
+/**
+ * One-line server status: colored dot + name + ONLINE/SYNC/ERR/OFF label.
+ * Extracted so the three duplicated implementations stay in sync.
+ */
+@Composable
+fun ServerStatusRow(
+    name: String,
+    state: com.example.impulse.transport.ConnectionState?,
+    modifier: Modifier = Modifier,
+) {
+    val isConnected = state == com.example.impulse.transport.ConnectionState.READY
+    val isConnecting = state in listOf(
+        com.example.impulse.transport.ConnectionState.CONNECTING,
+        com.example.impulse.transport.ConnectionState.CONNECTED,
+        com.example.impulse.transport.ConnectionState.AUTHENTICATING,
+        com.example.impulse.transport.ConnectionState.AUTHENTICATED,
+    )
+    val hasError = state == com.example.impulse.transport.ConnectionState.ERROR
+    val color = when {
+        isConnected -> MaterialTheme.colorScheme.primary
+        isConnecting -> MaterialTheme.colorScheme.tertiary
+        hasError -> MaterialTheme.colorScheme.error
+        else -> MaterialTheme.colorScheme.outline
+    }
+    val label = when {
+        isConnected -> "ONLINE"
+        isConnecting -> "SYNC"
+        hasError -> "ERR"
+        else -> "OFF"
+    }
+    Row(
+        modifier = modifier
+            .fillMaxWidth()
+            .padding(vertical = 3.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        StatusDot(color = color, size = 7.dp)
+        Spacer(Modifier.width(8.dp))
+        Text(
+            text = name,
+            style = MaterialTheme.typography.bodySmall,
+            modifier = Modifier.weight(1f),
+        )
+        Text(
+            text = label,
+            style = MaterialTheme.typography.labelSmall,
+            fontFamily = FontFamily.Monospace,
+            fontSize = 10.sp,
+            color = color,
+        )
+    }
+}

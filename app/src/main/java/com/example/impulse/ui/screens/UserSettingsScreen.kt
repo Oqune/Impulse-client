@@ -150,7 +150,7 @@ fun UserSettingsContent(
                             text = pubKeyHash,
                             style = MaterialTheme.typography.labelSmall,
                             fontFamily = FontFamily.Monospace,
-                            color = MaterialTheme.colorScheme.onPrimaryContainer.copy(alpha = 0.5f)
+                            color = MaterialTheme.colorScheme.onPrimaryContainer.copy(alpha = 0.85f)
                         )
                     }
                 }

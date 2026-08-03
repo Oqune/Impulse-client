@@ -109,7 +109,7 @@ fun ChatMessageItem(message: ChatMessage) {
                                 text = " #${message.senderFingerprint}",
                                 style = MaterialTheme.typography.labelSmall,
                                 fontWeight = FontWeight.Normal,
-                                color = getSenderColor(messageType, isOwn, message.sender).copy(alpha = 0.5f),
+                                color = getSenderColor(messageType, isOwn, message.sender).copy(alpha = 0.75f),
                             )
                         }
                     }
