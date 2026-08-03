@@ -85,6 +85,7 @@ fun ImpulseToggle(
     Row(
         modifier = modifier
             .fillMaxWidth()
+            .defaultMinSize(minHeight = 48.dp)
             .padding(vertical = 6.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
@@ -125,6 +126,7 @@ fun ImpulseClickableRow(
         modifier = modifier
             .fillMaxWidth()
             .clickable(onClick = onClick)
+            .defaultMinSize(minHeight = 48.dp)
             .padding(vertical = 6.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {

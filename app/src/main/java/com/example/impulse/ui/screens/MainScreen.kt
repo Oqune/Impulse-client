@@ -1,5 +1,6 @@
 package com.example.impulse.ui.screens
 
+import androidx.activity.compose.BackHandler
 import androidx.compose.animation.*
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.background
@@ -43,6 +44,15 @@ fun MainScreen() {
     var certRefreshTrigger by remember { mutableIntStateOf(0) }
 
     val connectionManager = remember { ConnectionManager.getInstance(context) }
+
+    // System back closes overlays first, then behaves normally (Bug: "back
+    // button exits the app from the chat/QR overlay").
+    BackHandler(enabled = qrScanServer != null || activeChatServer != null) {
+        when {
+            qrScanServer != null -> qrScanServer = null
+            activeChatServer != null -> activeChatServer = null
+        }
+    }
 
     LaunchedEffect(Unit) {
         val serverPreferences = ServerPreferences(context)

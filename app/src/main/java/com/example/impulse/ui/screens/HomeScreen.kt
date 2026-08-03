@@ -52,27 +52,38 @@ fun HomeScreen(
     val totalCount = visibleServers.size
 
     // Title gradient animation
-    val infiniteTransition = rememberInfiniteTransition(label = "title_grad")
+    // Respect reduced-motion: keep a static gradient (no shimmer sweep) when
+    // the system animator scale is 0 (Bug: "infinite animations ignore
+    // reduced-motion setting").
+    val reduceMotion = com.example.impulse.util.isReduceMotionEnabled(context)
 
-    // Background gradient: super slow, ~14s
-    val bgDuration = remember { 14000 + (-500..500).random() }
-    val bgShift by infiniteTransition.animateFloat(
-        initialValue = 0f, targetValue = 1f,
-        animationSpec = infiniteRepeatable(
-            animation = tween(bgDuration, easing = LinearEasing),
-            repeatMode = RepeatMode.Restart
-        ), label = "bg_shift"
-    )
+    val (bgShift, shimmerSweep) = if (!reduceMotion) {
+        val infiniteTransition = rememberInfiniteTransition(label = "title_grad")
 
-    // Shimmer sweep: rare, ~8s, with long pauses via RepeatMode.Restart
-    val shimmerDuration = remember { 8000 + (-300..300).random() }
-    val shimmerSweep by infiniteTransition.animateFloat(
-        initialValue = 0f, targetValue = 1f,
-        animationSpec = infiniteRepeatable(
-            animation = tween(shimmerDuration, easing = LinearEasing, delayMillis = 4000),
-            repeatMode = RepeatMode.Restart
-        ), label = "shimmer_sweep"
-    )
+        // Background gradient: super slow, ~14s
+        val bgDuration = remember { 14000 + (-500..500).random() }
+        val bg by infiniteTransition.animateFloat(
+            initialValue = 0f, targetValue = 1f,
+            animationSpec = infiniteRepeatable(
+                animation = tween(bgDuration, easing = LinearEasing),
+                repeatMode = RepeatMode.Restart
+            ), label = "bg_shift"
+        )
+
+        // Shimmer sweep: rare, ~8s, with long pauses via RepeatMode.Restart
+        val shimmerDuration = remember { 8000 + (-300..300).random() }
+        val shimmer by infiniteTransition.animateFloat(
+            initialValue = 0f, targetValue = 1f,
+            animationSpec = infiniteRepeatable(
+                animation = tween(shimmerDuration, easing = LinearEasing, delayMillis = 4000),
+                repeatMode = RepeatMode.Restart
+            ), label = "shimmer_sweep"
+        )
+        bg to shimmer
+    } else {
+        // Reduced motion: static gradient, no shimmer.
+        0.5f to -1f
+    }
 
     val primaryColor = MaterialTheme.colorScheme.primary
     val onSurfaceVariant = MaterialTheme.colorScheme.onSurfaceVariant

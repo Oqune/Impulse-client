@@ -166,7 +166,10 @@ object FileLogger {
      */
     class FileTree : Timber.Tree() {
         override fun log(priority: Int, tag: String?, message: String, t: Throwable?) {
-            FileLogger.log(priority, tag ?: "Impulse", message, t)
+            // The file channel is exposed via a FileProvider URI and may be
+            // read by other apps given the URI, so redact secrets here too
+            // (Bug: "unredacted secrets in file logs").
+            FileLogger.log(priority, tag ?: "Impulse", LogManager.redactSecrets(message), t)
         }
     }
 }

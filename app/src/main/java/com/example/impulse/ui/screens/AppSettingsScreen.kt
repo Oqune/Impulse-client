@@ -300,8 +300,14 @@ fun AppSettingsContent(
                     Slider(
                         value = hue,
                         onValueChange = {
+                            // Local state only while dragging — do NOT write
+                            // SharedPreferences + trigger a whole-tree recompose
+                            // on every frame (Bug: "slider recomposes the app
+                            // per frame").
                             hue = it
-                            ThemeSettings.setHue(it)
+                        },
+                        onValueChangeFinished = {
+                            ThemeSettings.setHue(hue)
                         },
                         valueRange = 0f..360f,
                         modifier = Modifier.fillMaxSize(),
@@ -372,8 +378,12 @@ fun AppSettingsContent(
                 Slider(
                     value = fontScale,
                     onValueChange = {
+                        // Local state while dragging; commit once on release
+                        // (Bug: "slider recomposes the app per frame").
                         fontScale = it
-                        ThemeSettings.setFontScale(it)
+                    },
+                    onValueChangeFinished = {
+                        ThemeSettings.setFontScale(fontScale)
                     },
                     valueRange = 0.8f..1.4f
                 )

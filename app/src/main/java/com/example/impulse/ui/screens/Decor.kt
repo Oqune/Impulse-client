@@ -17,6 +17,8 @@ import androidx.compose.runtime.getValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.platform.LocalContext
+import com.example.impulse.util.isReduceMotionEnabled
 
 /**
  * Decorative dot-pattern background. The infinite animation is created HERE,
@@ -35,7 +37,12 @@ fun DecorativeBackground(
     val gridColor = MaterialTheme.colorScheme.outlineVariant
     val accentColor = MaterialTheme.colorScheme.primary
 
-    val (drift, pulse) = if (animated) {
+    // Respect the system "remove animations" setting: skip the infinite dot
+    // pattern entirely when the user asked for reduced motion (Bug: "infinite
+    // animations ignore reduced-motion setting").
+    val reduceMotion = isReduceMotionEnabled(LocalContext.current)
+
+    val (drift, pulse) = if (animated && !reduceMotion) {
         val transition = rememberInfiniteTransition(label = "dot_pattern")
         val d by transition.animateFloat(
             initialValue = 0f,

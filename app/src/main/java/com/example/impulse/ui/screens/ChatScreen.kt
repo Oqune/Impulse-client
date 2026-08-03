@@ -84,7 +84,7 @@ fun ChatMessageItem(message: ChatMessage) {
     ) {
         Box(
             modifier = Modifier
-                .widthIn(max = 300.dp)
+                .fillMaxWidth(0.85f)
                 .background(
                     color = getMessageBackgroundColor(messageType, isOwn, message.sender),
                     shape = RoundedCornerShape(
@@ -405,7 +405,11 @@ fun ChatScreen(
         connectionManager.getController(selectedServer)
     }
     val repo = remember { MessageRepository(context) }
+    // Key the ViewModel by server so switching chats does NOT reuse the
+    // previous server's controller/messages (Bug: "second server shows first
+    // server's chat").
     val viewModel: com.example.impulse.ui.ChatViewModel = viewModel(
+        key = selectedServer.id,
         factory = com.example.impulse.ui.ChatViewModelFactory(chatController, repo, selectedServer)
     )
     val connectionState by viewModel.connectionState.collectAsState()
@@ -429,7 +433,11 @@ fun ChatScreen(
 
     var initialScrollDone by remember { mutableStateOf(false) }
 
-    val isAtBottom by remember {
+    // Rebuild the derived state whenever `messages` changes; a plain
+    // `remember {}` without keys captured the FIRST (empty) list and kept
+    // isAtBottom permanently true — force-scrolling the user down and hiding
+    // the scroll-to-bottom button (Bug: "stale derivedStateOf/snapshotFlow").
+    val isAtBottom by remember(messages) {
         derivedStateOf {
             val lastIndex = messages.lastIndex
             lastIndex < 0 || listState.firstVisibleItemIndex >= lastIndex - 1
@@ -443,7 +451,7 @@ fun ChatScreen(
         }
     }
 
-    LaunchedEffect(listState) {
+    LaunchedEffect(listState, messages.size) {
         snapshotFlow {
             val lastIndex = messages.lastIndex
             val atBottom = lastIndex < 0 || listState.firstVisibleItemIndex >= lastIndex - 1
