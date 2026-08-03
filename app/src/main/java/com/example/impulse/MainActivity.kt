@@ -1,28 +1,30 @@
 package com.example.impulse
 
-import android.content.Intent
 import android.content.res.Configuration
-import android.net.Uri
-import android.os.Build
 import android.os.Bundle
-import android.os.PowerManager
-import android.provider.Settings
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
-import androidx.core.content.ContextCompat
 import androidx.fragment.app.FragmentActivity
+import com.example.impulse.data.ServerConfig
+import com.example.impulse.data.ServerPreferences
 import com.example.impulse.locale.LocalePreferences
 import com.example.impulse.locale.LocaleSettings
 import com.example.impulse.ui.theme.ThemePreferences
-import com.example.impulse.service.WebTransportForegroundService
 import com.example.impulse.ui.screens.BiometricLockScreen
 import com.example.impulse.ui.screens.MainScreen
 import com.example.impulse.ui.theme.ImpulseTheme
 import com.example.impulse.ui.theme.ThemeSettings
+import com.example.impulse.util.LogManager
+import com.example.impulse.util.NameGenerator
 import java.util.Locale
 
+/**
+ * Privacy-first: no background connection. The connection lives only while the
+ * app is in the foreground. [onStart] reconnects to the selected server;
+ * [onStop] disconnects cleanly so no session lingers in the background.
+ */
 class MainActivity : FragmentActivity() {
     override fun attachBaseContext(newBase: android.content.Context) {
         val localePreferences = LocalePreferences(newBase)
@@ -48,8 +50,6 @@ class MainActivity : FragmentActivity() {
         val themePreferences = ThemePreferences(applicationContext)
         ThemeSettings.initialize(themePreferences)
 
-        requestIgnoreBatteryOptimizations()
-
         setContent {
             ImpulseTheme {
                 var isUnlocked = remember { mutableStateOf(false) }
@@ -68,42 +68,28 @@ class MainActivity : FragmentActivity() {
 
     override fun onStart() {
         super.onStart()
-        // Keep the WebTransport connection alive in the foreground service,
-        // even while the app is in the background.
-        val serviceIntent = Intent(this, WebTransportForegroundService::class.java).apply {
-            action = "START"
+        // Reconnect to the selected server when the app comes to the foreground.
+        val prefs = ServerPreferences(applicationContext)
+        val server = prefs.getSelectedServer()
+        if (server != null) {
+            val clientName = prefs.getClientName().takeIf { it.isNotBlank() }
+                ?: NameGenerator.generate()
+            LogManager.i(TAG, "onStart: connecting to ${server.id}")
+            ConnectionManager.getInstance(this).connect(server, clientName)
         }
-        ContextCompat.startForegroundService(this, serviceIntent)
     }
 
     override fun onStop() {
         super.onStop()
-        // The connection must stay alive after minimizing the app. Always (re)start
-        // the foreground service so the transport is never dropped.
-        val serviceIntent = Intent(this, WebTransportForegroundService::class.java).apply {
-            action = "START"
-        }
-        ContextCompat.startForegroundService(this, serviceIntent)
+        // Privacy: drop the connection when leaving the foreground. No session
+        // persists in the background; no messages are delivered while hidden.
+        LogManager.i(TAG, "onStop: disconnecting all (privacy no-background)")
+        try {
+            ConnectionManager.getInstance(this).disconnectAll()
+        } catch (_: Exception) { }
     }
 
-    /**
-     * Ask the user to exempt this app from battery optimizations so the QUIC
-     * connection survives Doze. Without this, Doze suspends UDP/QUIC traffic
-     * ~15 min after screen-off and the background connection silently dies
-     * (Bug: "app minimized -> connection dies"). The system shows a one-time
-     * dialog; if already exempted or denied, this is a no-op.
-     */
-    private fun requestIgnoreBatteryOptimizations() {
-        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.M) return
-        val pm = getSystemService(PowerManager::class.java)
-        if (pm.isIgnoringBatteryOptimizations(packageName)) return
-        try {
-            val intent = Intent(Settings.ACTION_REQUEST_IGNORE_BATTERY_OPTIMIZATIONS).apply {
-                data = Uri.parse("package:$packageName")
-            }
-            startActivity(intent)
-        } catch (_: Exception) {
-            // No activity to handle it (rare); fall back to app details.
-        }
+    companion object {
+        private const val TAG = "MainActivity"
     }
 }
