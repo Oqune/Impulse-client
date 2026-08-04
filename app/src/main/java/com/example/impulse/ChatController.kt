@@ -553,8 +553,13 @@ class ChatController(private val context: Context) {
     }
 
     /** Known peers for this server (fingerprint -> short label). */
-    suspend fun knownPeers(serverId: String): List<Pair<String, String>> =
-        keyRepo.getKnownPeers(serverId)
+    suspend fun knownPeers(serverId: String): List<Pair<String, String>> {
+        // Build the repository on demand — `keyRepo` is only initialized after
+        // connect(), and opening the chat list must not crash for a server that
+        // has never connected (Bug: "UninitializedPropertyAccessException").
+        val repo = com.example.impulse.data.PublicKeyRepository(context)
+        return repo.getKnownPeers(serverId)
+    }
 
     private suspend fun flushOutbox() {
         if (flushOutboxRunning) return

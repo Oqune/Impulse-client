@@ -264,15 +264,17 @@ fun MainScreen() {
             modifier = Modifier.fillMaxSize().zIndex(2.5f)
         ) {
             chatsServer?.let { server ->
+                val ctrl = remember(server.id) { connectionManager.getController(server) }
                 val repo = remember(server.id) { com.example.impulse.data.MessageRepository(context) }
                 var conversations by remember(server.id) {
                     mutableStateOf<List<String>>(listOf("group"))
                 }
-                val ctrl = remember(server.id) { connectionManager.getController(server) }
                 LaunchedEffect(server.id) {
-                    val known = ctrl.knownPeers(server.id).map { "dm:${it.first}" }
-                    val stored = runCatching { repo.conversations(server.id) }.getOrDefault(emptyList())
-                    conversations = (listOf("group") + known + stored).distinct()
+                    runCatching {
+                        val known = ctrl.knownPeers(server.id).map { "dm:${it.first}" }
+                        val stored = repo.conversations(server.id)
+                        conversations = (listOf("group") + known + stored).distinct()
+                    }
                 }
                 val status = connectionManager.serverStates.value[server.id]
                 ChatConversationListScreen(
