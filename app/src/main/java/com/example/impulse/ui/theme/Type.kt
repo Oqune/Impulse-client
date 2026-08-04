@@ -19,6 +19,13 @@ enum class FontSize(val scale: Float, val displayName: String) {
 
 fun getTypography(scale: Float = 1.0f): Typography {
     val s = scale.coerceIn(0.8f, 1.4f)
+    // Keep the branded monospace/Orbitron fonts on modern devices (API 31+);
+    // on older hardware fall back to the system font, which renders cleanly
+    // without the ragged mono-glyph artifacts (Bug: "fonts render badly on old
+    // phones").
+    val modern = android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.S
+    val bodyFont = if (modern) JetBrainsMono else FontFamily.Default
+    val titleFont = if (modern) JetBrainsMono else FontFamily.Default
 
     return Typography(
         displayLarge = TextStyle(
@@ -58,7 +65,7 @@ fun getTypography(scale: Float = 1.0f): Typography {
             letterSpacing = 0.sp,
         ),
         headlineSmall = TextStyle(
-            fontFamily = JetBrainsMono,
+            fontFamily = titleFont,
             fontWeight = FontWeight.SemiBold,
             fontSize = scaledFontSize(24.sp, s),
             lineHeight = scaledFontSize(32.sp, s),
@@ -66,21 +73,21 @@ fun getTypography(scale: Float = 1.0f): Typography {
         ),
 
         titleLarge = TextStyle(
-            fontFamily = JetBrainsMono,
+            fontFamily = titleFont,
             fontWeight = FontWeight.SemiBold,
             fontSize = scaledFontSize(22.sp, s),
             lineHeight = scaledFontSize(28.sp, s),
             letterSpacing = 0.sp,
         ),
         titleMedium = TextStyle(
-            fontFamily = JetBrainsMono,
+            fontFamily = titleFont,
             fontWeight = FontWeight.SemiBold,
             fontSize = scaledFontSize(16.sp, s),
             lineHeight = scaledFontSize(24.sp, s),
             letterSpacing = 0.5.sp,
         ),
         titleSmall = TextStyle(
-            fontFamily = JetBrainsMono,
+            fontFamily = titleFont,
             fontWeight = FontWeight.Medium,
             fontSize = scaledFontSize(14.sp, s),
             lineHeight = scaledFontSize(20.sp, s),
@@ -88,21 +95,21 @@ fun getTypography(scale: Float = 1.0f): Typography {
         ),
 
         bodyLarge = TextStyle(
-            fontFamily = JetBrainsMono,
+            fontFamily = bodyFont,
             fontWeight = FontWeight.Normal,
             fontSize = scaledFontSize(16.sp, s),
             lineHeight = scaledFontSize(25.sp, s),
             letterSpacing = 0.sp,
         ),
         bodyMedium = TextStyle(
-            fontFamily = JetBrainsMono,
+            fontFamily = bodyFont,
             fontWeight = FontWeight.Normal,
             fontSize = scaledFontSize(14.sp, s),
             lineHeight = scaledFontSize(21.sp, s),
             letterSpacing = 0.sp,
         ),
         bodySmall = TextStyle(
-            fontFamily = JetBrainsMono,
+            fontFamily = bodyFont,
             fontWeight = FontWeight.Normal,
             fontSize = scaledFontSize(12.sp, s),
             lineHeight = scaledFontSize(16.sp, s),
@@ -110,25 +117,25 @@ fun getTypography(scale: Float = 1.0f): Typography {
         ),
 
         labelLarge = TextStyle(
-            fontFamily = JetBrainsMono,
+            fontFamily = bodyFont,
             fontWeight = FontWeight.Medium,
             fontSize = scaledFontSize(14.sp, s),
             lineHeight = scaledFontSize(20.sp, s),
-            letterSpacing = 0.5.sp,
+            letterSpacing = 0.sp,
         ),
         labelMedium = TextStyle(
-            fontFamily = JetBrainsMono,
+            fontFamily = bodyFont,
             fontWeight = FontWeight.Medium,
             fontSize = scaledFontSize(12.sp, s),
             lineHeight = scaledFontSize(16.sp, s),
-            letterSpacing = 0.8.sp,
+            letterSpacing = 0.sp,
         ),
         labelSmall = TextStyle(
-            fontFamily = JetBrainsMono,
+            fontFamily = bodyFont,
             fontWeight = FontWeight.Medium,
             fontSize = scaledFontSize(11.sp, s),
             lineHeight = scaledFontSize(16.sp, s),
-            letterSpacing = 0.5.sp,
+            letterSpacing = 0.sp,
         ),
     )
 }

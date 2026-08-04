@@ -1,5 +1,6 @@
 package com.example.impulse.ui.theme
 
+import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.layout.*
@@ -221,6 +222,53 @@ fun ImpulseMenuCard(
                 modifier = Modifier.size(18.dp)
             )
         }
+    }
+}
+
+// ── Button (flat, minimal) ──────────────────────────────────────────────
+
+/**
+ * Flat, shadow-free button: no elevation, a subtle container tint and a thin
+ * outline by default. Clean and readable on old devices (no soft-shadow
+ * artifacts).
+ */
+@Composable
+fun ImpulseButton(
+    text: String,
+    onClick: () -> Unit,
+    modifier: Modifier = Modifier,
+    icon: ImageVector? = null,
+    contentColor: Color = MaterialTheme.colorScheme.primary,
+    outlined: Boolean = true,
+) {
+    val container = contentColor.copy(alpha = 0.08f)
+    val border = if (outlined) {
+        BorderStroke(1.dp, contentColor.copy(alpha = 0.4f))
+    } else {
+        null
+    }
+    Button(
+        onClick = onClick,
+        modifier = modifier,
+        shape = ButtonShape,
+        colors = ButtonDefaults.buttonColors(
+            containerColor = container,
+            contentColor = contentColor,
+        ),
+        elevation = ButtonDefaults.buttonElevation(
+            defaultElevation = 0.dp,
+            pressedElevation = 0.dp,
+            focusedElevation = 0.dp,
+            hoveredElevation = 0.dp,
+            disabledElevation = 0.dp,
+        ),
+        border = border,
+    ) {
+        if (icon != null) {
+            Icon(icon, contentDescription = null, modifier = Modifier.size(16.dp))
+            Spacer(Modifier.width(6.dp))
+        }
+        Text(text, style = MaterialTheme.typography.labelMedium)
     }
 }
 

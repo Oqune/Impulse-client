@@ -7,6 +7,8 @@ import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.pager.HorizontalPager
+import androidx.compose.foundation.pager.rememberPagerState
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -137,7 +139,7 @@ fun AppSettingsContent(
                 HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
                 Spacer(Modifier.height(10.dp))
 
-                // Theme variant carousel — one selection: Classic / Material
+                // Theme variant carousel — swipe to change: Classic / Material
                 // You / OLED / Ultra Contrast. OLED is disabled in light mode.
                 val variants = buildList {
                     add(ThemeVariant.CLASSIC to R.string.app_settings_variant_classic)
@@ -147,31 +149,51 @@ fun AppSettingsContent(
                     add(ThemeVariant.ULTRA_CONTRAST to R.string.app_settings_variant_ultra_contrast)
                     add(ThemeVariant.OLED to R.string.app_settings_oled)
                 }
-                Row(
+                val variantIndex = variants.indexOfFirst { it.first == themeVariant }
+                val pagerState = rememberPagerState(
+                    initialPage = variantIndex.coerceAtLeast(0),
+                    pageCount = { variants.size }
+                )
+                // Keep the selected variant in sync when the pager settles.
+                LaunchedEffect(pagerState.currentPage) {
+                    val (v, _) = variants[pagerState.currentPage]
+                    themeVariant = v
+                    ThemeSettings.setThemeVariant(v)
+                }
+                HorizontalPager(
+                    state = pagerState,
                     modifier = Modifier
                         .fillMaxWidth()
-                        .horizontalScroll(rememberScrollState()),
-                    horizontalArrangement = Arrangement.spacedBy(10.dp),
-                ) {
-                    variants.forEach { (variant, labelRes) ->
-                        val isOled = variant == ThemeVariant.OLED
-                        val enabled = !isOled || isDarkActive
-                        val isSelected = themeVariant == variant
-                        val preview = when (variant) {
-                            ThemeVariant.CLASSIC -> if (isDarkActive) Color(0xFF121212) else Color(0xFFFFFFFF)
-                            ThemeVariant.MATERIAL_YOU -> MaterialTheme.colorScheme.primary
-                            ThemeVariant.OLED -> Color(0xFF000000)
-                            ThemeVariant.ULTRA_CONTRAST -> if (isDarkActive) Color(0xFF000000) else Color(0xFFFFFFFF)
-                        }
+                        .height(96.dp),
+                ) { page ->
+                    val (variant, labelRes) = variants[page]
+                    val isOled = variant == ThemeVariant.OLED
+                    val enabled = !isOled || isDarkActive
+                    val isSelected = variant == themeVariant
+                    val preview = when (variant) {
+                        ThemeVariant.CLASSIC -> if (isDarkActive) Color(0xFF121212) else Color(0xFFFFFFFF)
+                        ThemeVariant.MATERIAL_YOU -> MaterialTheme.colorScheme.primary
+                        ThemeVariant.OLED -> Color(0xFF000000)
+                        ThemeVariant.ULTRA_CONTRAST -> if (isDarkActive) Color(0xFF000000) else Color(0xFFFFFFFF)
+                    }
+                    Card(
+                        modifier = Modifier
+                            .fillMaxSize()
+                            .padding(horizontal = 4.dp),
+                        shape = RoundedCornerShape(14.dp),
+                        colors = CardDefaults.cardColors(
+                            containerColor = if (isSelected)
+                                MaterialTheme.colorScheme.primary.copy(alpha = 0.12f)
+                            else if (enabled)
+                                MaterialTheme.colorScheme.surfaceContainer
+                            else
+                                MaterialTheme.colorScheme.surfaceContainer.copy(alpha = 0.4f)
+                        ),
+                        elevation = CardDefaults.cardElevation(defaultElevation = 0.dp),
+                    ) {
                         Column(
                             modifier = Modifier
-                                .width(96.dp)
-                                .clip(RoundedCornerShape(14.dp))
-                                .background(
-                                    if (isSelected) MaterialTheme.colorScheme.primary.copy(alpha = 0.12f)
-                                    else if (enabled) MaterialTheme.colorScheme.surfaceContainerHigh
-                                    else MaterialTheme.colorScheme.surfaceContainerHigh.copy(alpha = 0.4f)
-                                )
+                                .fillMaxSize()
                                 .clickable(enabled = enabled) {
                                     themeVariant = variant
                                     ThemeSettings.setThemeVariant(variant)
@@ -214,6 +236,25 @@ fun AppSettingsContent(
                                 maxLines = 1,
                             )
                         }
+                    }
+                }
+                // Dots indicator
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.Center,
+                ) {
+                    variants.indices.forEach { i ->
+                        val selected = i == pagerState.currentPage
+                        Box(
+                            modifier = Modifier
+                                .padding(4.dp)
+                                .size(if (selected) 8.dp else 6.dp)
+                                .clip(CircleShape)
+                                .background(
+                                    if (selected) MaterialTheme.colorScheme.primary
+                                    else MaterialTheme.colorScheme.outlineVariant
+                                )
+                        )
                     }
                 }
             }

@@ -1,6 +1,7 @@
 package com.example.impulse.ui.screens
 
 import androidx.compose.animation.core.*
+import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.layout.*
@@ -16,6 +17,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
@@ -70,12 +72,13 @@ fun HomeScreen(
             ), label = "bg_shift"
         )
 
-        // Shimmer sweep: rare, ~8s, with long pauses via RepeatMode.Restart
-        val shimmerDuration = remember { 8000 + (-300..300).random() }
+        // Shimmer sweep: fast (~2.5s pass) but rare (~14s pause), so it flashes
+        // quickly yet doesn't draw the eye constantly.
+        val shimmerDuration = remember { 2500 + (-300..300).random() }
         val shimmer by infiniteTransition.animateFloat(
             initialValue = 0f, targetValue = 1f,
             animationSpec = infiniteRepeatable(
-                animation = tween(shimmerDuration, easing = LinearEasing, delayMillis = 4000),
+                animation = tween(shimmerDuration, easing = LinearEasing, delayMillis = 14000),
                 repeatMode = RepeatMode.Restart
             ), label = "shimmer_sweep"
         )
@@ -86,37 +89,38 @@ fun HomeScreen(
     }
 
     val primaryColor = MaterialTheme.colorScheme.primary
-    val onSurfaceVariant = MaterialTheme.colorScheme.onSurfaceVariant
 
-    // Slow background gradient: two shades of primary, full opacity
+    // Logo gradient: primary → slightly shifted primary. On light theme this
+    // stays vivid (no dark/black tint — the old sin-based shift could darken).
     val bgBrush = remember(bgShift, primaryColor) {
         val phase = bgShift * 360f
         val sin = kotlin.math.sin(Math.toRadians(phase.toDouble())).toFloat()
-        val shifted = primaryColor.copy(
-            red = (primaryColor.red * (1f + sin * 0.15f)).coerceIn(0f, 1f),
+        val shifted = androidx.compose.ui.graphics.Color(
+            red = (primaryColor.red * (1f + sin * 0.10f)).coerceIn(0f, 1f),
             green = (primaryColor.green * (1f + sin * 0.10f)).coerceIn(0f, 1f),
-            blue = (primaryColor.blue * (1f - sin * 0.10f)).coerceIn(0f, 1f),
+            blue = (primaryColor.blue * (1f + sin * 0.10f)).coerceIn(0f, 1f),
+            alpha = 1f
         )
         Brush.linearGradient(
             colors = listOf(primaryColor, shifted),
             start = androidx.compose.ui.geometry.Offset(0f, 0f),
-            end = androidx.compose.ui.geometry.Offset(Float.POSITIVE_INFINITY, 0f)
+            end = androidx.compose.ui.geometry.Offset(700f, 0f)
         )
     }
 
-    // Fast bright shimmer sweep
-    val shimmerColor = MaterialTheme.colorScheme.onSurface
-    val shimmerBrush = remember(shimmerSweep, primaryColor, shimmerColor) {
-        val x = shimmerSweep * 1400f
+    // Fast, bright sweep that passes quickly but appears rarely. Uses a light
+    // highlight derived from primary (never black in light theme).
+    val shimmerBrush = remember(shimmerSweep, primaryColor) {
+        val x = shimmerSweep * 1200f
         Brush.linearGradient(
             colors = listOf(
                 Color.Transparent,
-                shimmerColor.copy(alpha = 0.08f),
-                shimmerColor.copy(alpha = 0.40f),
-                shimmerColor.copy(alpha = 0.08f),
+                primaryColor.copy(alpha = 0.15f),
+                androidx.compose.ui.graphics.Color.White.copy(alpha = 0.5f),
+                primaryColor.copy(alpha = 0.15f),
                 Color.Transparent,
             ),
-            start = androidx.compose.ui.geometry.Offset(x - 400f, 0f),
+            start = androidx.compose.ui.geometry.Offset(x - 300f, 0f),
             end = androidx.compose.ui.geometry.Offset(x, 0f)
         )
     }
@@ -136,7 +140,12 @@ fun HomeScreen(
             ) {
             // ── Header ──
             Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                Box(contentAlignment = Alignment.Center) {
+                Box(
+                    contentAlignment = Alignment.Center,
+                    modifier = Modifier.graphicsLayer {
+                        rotationZ = -4f
+                    }
+                ) {
                     // Background gradient layer
                     Text(
                         text = stringResource(R.string.app_name),
@@ -168,7 +177,7 @@ fun HomeScreen(
                 Text(
                     text = stringResource(R.string.home_subtitle),
                     style = MaterialTheme.typography.bodySmall,
-                    color = onSurfaceVariant,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
                     textAlign = TextAlign.Center,
                 )
             }
@@ -250,6 +259,11 @@ fun HomeScreen(
                     },
                     modifier = Modifier.weight(1f),
                     shape = ButtonShape,
+                    colors = ButtonDefaults.outlinedButtonColors(
+                        containerColor = MaterialTheme.colorScheme.primary.copy(alpha = 0.08f),
+                        contentColor = MaterialTheme.colorScheme.primary,
+                    ),
+                    border = BorderStroke(1.dp, MaterialTheme.colorScheme.primary.copy(alpha = 0.4f)),
                 ) {
                     Icon(Icons.Default.Link, contentDescription = null, modifier = Modifier.size(16.dp))
                     Spacer(Modifier.width(6.dp))
@@ -264,8 +278,10 @@ fun HomeScreen(
                     modifier = Modifier.weight(1f),
                     shape = ButtonShape,
                     colors = ButtonDefaults.outlinedButtonColors(
+                        containerColor = MaterialTheme.colorScheme.error.copy(alpha = 0.08f),
                         contentColor = MaterialTheme.colorScheme.error,
                     ),
+                    border = BorderStroke(1.dp, MaterialTheme.colorScheme.error.copy(alpha = 0.4f)),
                 ) {
                     Icon(Icons.Default.LinkOff, contentDescription = null, modifier = Modifier.size(16.dp))
                     Spacer(Modifier.width(6.dp))
