@@ -87,6 +87,45 @@ object CrashLog {
         lastContext = context.applicationContext
     }
 
+    /** Sum of crash report sizes for the diagnostic bundle description. */
+    fun crashReportsSizeBytes(): Long {
+        val ctx = lastContext ?: return 0L
+        var total = 0L
+        try {
+            total += sizeOf(File(ctx.filesDir, CRASH_FILE))
+            val dir = File(ctx.filesDir, HISTORY_DIR)
+            dir.listFiles()?.forEach { total += sizeOf(it) }
+        } catch (_: Exception) { }
+        return total
+    }
+
+    /** Latest crash report plus rolling history, as text for the "Send logs" bundle. */
+    fun collectCrashReports(): String {
+        val ctx = lastContext ?: return ""
+        val sb = StringBuilder(4096)
+        try {
+            appendReport(sb, "Latest crash", File(ctx.filesDir, CRASH_FILE))
+            val dir = File(ctx.filesDir, HISTORY_DIR)
+            dir.listFiles()
+                ?.sortedByDescending { it.lastModified() }
+                ?.forEach { appendReport(sb, "Crash history (${it.name})", it) }
+        } catch (_: Exception) { }
+        return sb.toString()
+    }
+
+    private fun appendReport(sb: StringBuilder, title: String, f: File) {
+        sb.append("\n\n--- $title ---\n")
+        sb.append(
+            try {
+                if (f.exists()) f.readText() else "(no report)"
+            } catch (_: Exception) {
+                "(unreadable)"
+            }
+        )
+    }
+
+    private fun sizeOf(f: File): Long = try { if (f.exists()) f.length() else 0L } catch (_: Exception) { 0L }
+
     @Volatile
     private var lastContext: Context? = null
 }

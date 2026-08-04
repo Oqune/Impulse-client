@@ -145,7 +145,7 @@
     <string name="app_settings_biometric_desc">Отпечаток/лицо при запуске</string>
     <string name="app_settings_debug">Отладка</string>
     <string name="app_settings_send_logs">Отправить логи</string>
-    <string name="app_settings_session_log">Лог сессии: %1$s КБ</string>
+    <string name="app_settings_diagnostics">Диагностика: %1$s КБ</string>
     <string name="app_settings_log_empty">Лог пуст</string>
     <string name="app_settings_share_logs">Поделиться логами</string>
 

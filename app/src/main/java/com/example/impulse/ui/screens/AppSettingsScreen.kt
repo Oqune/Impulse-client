@@ -636,28 +636,31 @@ fun AppSettingsContent(
         // ── Debug ──────────────────────────────────────────────
         ImpulseCard {
             ImpulseSection(title = stringResource(R.string.app_settings_debug)) {
-                val logPath = FileLogger.getLogPath()
-                val logSize = FileLogger.getLogSize()
-                val sizeKB = "%.1f".format(logSize / 1024.0)
+                val diagBytes = FileLogger.getDiagnosticSizeBytes()
+                val sizeKB = "%.1f".format(diagBytes / 1024.0)
                 ImpulseClickableRow(
                     title = stringResource(R.string.app_settings_send_logs),
-                    description = stringResource(R.string.app_settings_session_log, sizeKB),
+                    description = stringResource(R.string.app_settings_diagnostics, sizeKB),
                     onClick = {
-                        val logFile = logPath?.let { File(it) }
-                        if (logFile == null || !logFile.exists()) {
+                        val text = FileLogger.buildDiagnosticText()
+                        if (text.isBlank()) {
                             Toast.makeText(context, context.getString(R.string.app_settings_log_empty), Toast.LENGTH_SHORT).show()
                             return@ImpulseClickableRow
                         }
                         try {
+                            val dir = File(context.filesDir, "impulse")
+                            if (!dir.exists()) dir.mkdirs()
+                            val bundle = File(dir, "diagnostics.txt")
+                            bundle.writeText(text)
                             val uri = FileProvider.getUriForFile(
                                 context,
                                 "${context.packageName}.fileprovider",
-                                logFile
+                                bundle
                             )
                             val share = Intent(Intent.ACTION_SEND).apply {
                                 type = "text/plain"
                                 putExtra(Intent.EXTRA_STREAM, uri)
-                                putExtra(Intent.EXTRA_SUBJECT, "Impulse session log")
+                                putExtra(Intent.EXTRA_SUBJECT, "Impulse diagnostics")
                                 addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
                             }
                             context.startActivity(Intent.createChooser(share, context.getString(R.string.app_settings_share_logs)))

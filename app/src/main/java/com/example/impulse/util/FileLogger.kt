@@ -30,6 +30,7 @@ object FileLogger {
 
     private const val DIR_NAME = "impulse"
     private const val FILE_NAME = "session.txt"
+    private const val PREV_FILE = "session-prev.txt"
     private const val MAX_FILE_BYTES = 5 * 1024 * 1024 // 5 MB
     private const val QUEUE_CAPACITY = 4096
 
@@ -38,6 +39,8 @@ object FileLogger {
     private val queue = LinkedBlockingQueue<String>(QUEUE_CAPACITY)
     private var writer: BufferedWriter? = null
     private var file: File? = null
+    private var dir: File? = null
+    private var appContext: Context? = null
 
     private val priorities = charArrayOf('D', 'I', 'W', 'E')
 
@@ -48,17 +51,25 @@ object FileLogger {
     fun init(context: Context) {
         if (initialized.getAndSet(true)) return
         try {
-            val dir = File(context.filesDir, DIR_NAME)
+            val ctx = context.applicationContext
+            appContext = ctx
+            val dir = File(ctx.filesDir, DIR_NAME)
             if (!dir.exists()) dir.mkdirs()
-            // Clean old session logs — only keep current session.
-            dir.listFiles()?.forEach { if (it.name != FILE_NAME) it.delete() }
+            this.dir = dir
             val f = File(dir, FILE_NAME)
+            // Preserve the previous session before truncating so pre-crash logs
+            // survive a restart and can be included in the "Send logs" bundle.
+            if (f.exists() && f.length() > 0) {
+                try { f.copyTo(File(dir, PREV_FILE), overwrite = true) } catch (_: Exception) { }
+            }
+            // Clean old session logs — only keep current + previous sessions.
+            dir.listFiles()?.forEach { if (it.name != FILE_NAME && it.name != PREV_FILE) it.delete() }
             // Truncate on each launch so only current session is kept.
             FileWriter(f, false).use { /* truncate */ }
             file = f
             writer = FileWriter(f, true).buffered()
             // Remove legacy logs/ directory from earlier versions.
-            val oldDir = File(context.filesDir, "logs")
+            val oldDir = File(ctx.filesDir, "logs")
             if (oldDir.exists() && oldDir.isDirectory) oldDir.deleteRecursively()
         } catch (e: Exception) {
             Log.e("FileLogger", "init failed", e)
@@ -109,6 +120,45 @@ object FileLogger {
 
     /** Return log file size in bytes. */
     fun getLogSize(): Long = file?.length() ?: 0
+
+    /** Total size in bytes of everything the diagnostic bundle will include. */
+    fun getDiagnosticSizeBytes(): Long {
+        var total = 0L
+        dir?.let { d ->
+            total += sizeOf(File(d, FILE_NAME)) + sizeOf(File(d, PREV_FILE))
+        }
+        return total + CrashLog.crashReportsSizeBytes()
+    }
+
+    /**
+     * Build a single combined diagnostic bundle: the current and previous
+     * session logs plus all crash reports. Shared by the in-app "Send logs"
+     * action so a remote user can send everything needed for diagnosis in one
+     * file (the friend's phone crashes before they can otherwise collect logs).
+     */
+    fun buildDiagnosticText(): String {
+        val sb = StringBuilder(8192)
+        sb.append("=== Impulse diagnostics ===\n")
+        dir?.let { d ->
+            appendSection(sb, "Current session (session.txt)", File(d, FILE_NAME))
+            appendSection(sb, "Previous session (session-prev.txt)", File(d, PREV_FILE))
+        }
+        sb.append(CrashLog.collectCrashReports())
+        return sb.toString()
+    }
+
+    private fun appendSection(sb: StringBuilder, title: String, f: File) {
+        sb.append("\n\n--- $title ---\n")
+        sb.append(
+            try {
+                if (f.exists()) f.readText() else "(missing)"
+            } catch (_: Exception) {
+                "(unreadable)"
+            }
+        )
+    }
+
+    private fun sizeOf(f: File): Long = try { if (f.exists()) f.length() else 0L } catch (_: Exception) { 0L }
 
     // ---- Internal ----
 

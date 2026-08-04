@@ -145,7 +145,7 @@
     <string name="app_settings_biometric_desc">Fingerprint/face on launch</string>
     <string name="app_settings_debug">Debug</string>
     <string name="app_settings_send_logs">Send logs</string>
-    <string name="app_settings_session_log">Session log: %1$s KB</string>
+    <string name="app_settings_diagnostics">Diagnostics: %1$s KB</string>
     <string name="app_settings_log_empty">Log is empty</string>
     <string name="app_settings_share_logs">Share logs</string>
 
