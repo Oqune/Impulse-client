@@ -1111,24 +1111,70 @@ class ChatController(private val context: Context) {
         _state.value = ConnectionState.AUTHENTICATING
         scope.launch {
             if (userDisconnect) return@launch
-            val ownFp = keyManager.getFingerprint()
-            keyRepo.cacheKey(
-                currentServer?.id ?: "",
-                ownFp,
-                keyManager.getKemPublicKey(),
-                keyManager.getDsaPublicKey()
-            )
+            // Cache our own key pair. Guarded: a storage failure here must NOT
+            // block the KeyExchange/Sync that follows (Bug: "client stuck on
+            // SYNC — KeyExchange never sent because cacheKey threw").
+            try {
+                val ownFp = keyManager.getFingerprint()
+                keyRepo.cacheKey(
+                    currentServer?.id ?: "",
+                    ownFp,
+                    keyManager.getKemPublicKey(),
+                    keyManager.getDsaPublicKey()
+                )
+            } catch (t: Throwable) {
+                LogManager.e(TAG, "cacheKey failed (non-fatal)", t)
+                com.example.impulse.util.CrashLog.writeCrash(
+                    com.example.impulse.util.CrashLog.buildCrashReport(
+                        thread = Thread.currentThread(),
+                        throwable = t,
+                        versionName = BuildConfig.VERSION_NAME,
+                        versionCode = BuildConfig.VERSION_CODE,
+                        sdkInt = android.os.Build.VERSION.SDK_INT,
+                        release = android.os.Build.VERSION.RELEASE,
+                        manufacturer = android.os.Build.MANUFACTURER,
+                        model = android.os.Build.MODEL,
+                        timeMillis = System.currentTimeMillis(),
+                        extra = "ChatController.onAuthResult cacheKey",
+                    )
+                )
+            }
 
             val kemPub = keyManager.getKemPublicKey()
             val dsaPub = keyManager.getDsaPublicKey()
-            val c = synchronized(lock) { client }
-            val keyOk = withContext(Dispatchers.IO) { c?.send(Protocol.buildCombinedKeyExchange(kemPub, dsaPub)) ?: false }
-            LogManager.i(TAG, "KeyExchange combined KEM+DSA sent (ok=$keyOk)")
+            try {
+                val c = synchronized(lock) { client }
+                val keyOk = withContext(Dispatchers.IO) { c?.send(Protocol.buildCombinedKeyExchange(kemPub, dsaPub)) ?: false }
+                LogManager.i(TAG, "KeyExchange combined KEM+DSA sent (ok=$keyOk)")
 
-            if (userDisconnect) return@launch
+                if (userDisconnect) return@launch
 
-            val syncOk = withContext(Dispatchers.IO) { c?.send(Protocol.buildSync(lastSeenId())) ?: false }
-            LogManager.i(TAG, "Sync request sent (ok=$syncOk, lastSeenId=${lastSeenId()})")
+                val syncOk = withContext(Dispatchers.IO) { c?.send(Protocol.buildSync(lastSeenId())) ?: false }
+                LogManager.i(TAG, "Sync request sent (ok=$syncOk, lastSeenId=${lastSeenId()})")
+            } catch (t: Throwable) {
+                // Never get stuck in AUTHENTICATING: log, record the stack and
+                // drop to ERROR so the reconnect loop can retry.
+                LogManager.e(TAG, "auth post-processing failed", t)
+                com.example.impulse.util.CrashLog.writeCrash(
+                    com.example.impulse.util.CrashLog.buildCrashReport(
+                        thread = Thread.currentThread(),
+                        throwable = t,
+                        versionName = BuildConfig.VERSION_NAME,
+                        versionCode = BuildConfig.VERSION_CODE,
+                        sdkInt = android.os.Build.VERSION.SDK_INT,
+                        release = android.os.Build.VERSION.RELEASE,
+                        manufacturer = android.os.Build.MANUFACTURER,
+                        model = android.os.Build.MODEL,
+                        timeMillis = System.currentTimeMillis(),
+                        extra = "ChatController.onAuthResult keyexchange/sync",
+                    )
+                )
+                if (!userDisconnect) {
+                    _state.value = ConnectionState.ERROR
+                    scheduleReconnect()
+                }
+                return@launch
+            }
 
             // Guard: if a disconnect raced in while we were authenticating, do
             // NOT flip back to READY with a null client (Bug: "state becomes
