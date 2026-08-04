@@ -5,6 +5,7 @@ import android.net.ConnectivityManager
 import android.net.Network
 import android.net.NetworkCapabilities
 import android.net.NetworkRequest
+import com.example.impulse.BuildConfig
 import com.example.impulse.ConnectionManager
 import com.example.impulse.transport.ConnectionState
 import com.example.impulse.util.LogManager
@@ -28,16 +29,35 @@ class NetworkMonitor private constructor(context: Context) {
     private val callback = object : ConnectivityManager.NetworkCallback() {
         override fun onAvailable(network: Network) {
             LogManager.i(TAG, "network available — reconnecting errored servers")
-            val cm = ConnectionManager.getInstance(appContext)
-            for ((_, server) in cm.serverStates.value) {
-                if (server.state == ConnectionState.ERROR) {
-                    val controller = cm.getControllerOrNull(server.server.id) ?: continue
-                    // Re-connect only if it is still alive and not mid-reconnect.
-                    if (controller.state.value == ConnectionState.ERROR) {
-                        LogManager.i(TAG, "reconnecting server=${server.server.id} after network change")
-                        cm.connect(server.server, controller.clientName)
+            try {
+                val cm = ConnectionManager.getInstance(appContext)
+                for ((_, server) in cm.serverStates.value) {
+                    if (server.state == ConnectionState.ERROR) {
+                        val controller = cm.getControllerOrNull(server.server.id) ?: continue
+                        // Re-connect only if it is still alive and not mid-reconnect.
+                        if (controller.state.value == ConnectionState.ERROR) {
+                            LogManager.i(TAG, "reconnecting server=${server.server.id} after network change")
+                            cm.connect(server.server, controller.clientName)
+                        }
                     }
                 }
+            } catch (t: Throwable) {
+                // Never let a background network callback tear down the process.
+                LogManager.e(TAG, "onAvailable failed", t)
+                com.example.impulse.util.CrashLog.writeCrash(
+                    com.example.impulse.util.CrashLog.buildCrashReport(
+                        thread = Thread.currentThread(),
+                        throwable = t,
+                        versionName = BuildConfig.VERSION_NAME,
+                        versionCode = BuildConfig.VERSION_CODE,
+                        sdkInt = android.os.Build.VERSION.SDK_INT,
+                        release = android.os.Build.VERSION.RELEASE,
+                        manufacturer = android.os.Build.MANUFACTURER,
+                        model = android.os.Build.MODEL,
+                        timeMillis = System.currentTimeMillis(),
+                        extra = "NetworkMonitor.onAvailable",
+                    )
+                )
             }
         }
     }

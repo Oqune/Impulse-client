@@ -29,11 +29,18 @@ class ImpulseApplication : Application() {
         super.onCreate()
         LogManager.init(this, BuildConfig.DEBUG)
         CrashLog.init(this)
+        // Install the crash handler FIRST so any later startup failure (e.g.
+        // NetworkMonitor) is captured to the crash log instead of truncating.
+        installGlobalCrashHandler()
         TtlPurgeWorker.schedule(this)
         // Reconnect servers whose transport died during a network outage (Bug:
-        // "no instant reconnect on WiFi <-> cellular handover").
-        NetworkMonitor.getInstance(this)
-        installGlobalCrashHandler()
+        // "no instant reconnect on WiFi <-> cellular handover"). Guarded so a
+        // failure here can never take down the process.
+        try {
+            NetworkMonitor.getInstance(this)
+        } catch (t: Throwable) {
+            Log.e(TAG, "NetworkMonitor init failed", t)
+        }
     }
 
     private fun installGlobalCrashHandler() {
