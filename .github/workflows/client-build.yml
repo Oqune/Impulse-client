@@ -32,24 +32,35 @@ jobs:
       - name: Grant execute permission for gradlew
         run: chmod +x gradlew
 
-      - name: Build debug APKs (all ABIs + universal)
-        run: ./gradlew assembleDebug
+      - name: Restore signing keystore from secrets
+        if: startsWith(github.ref, 'refs/tags/v')
+        env:
+          KS_B64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
+          KS_PASS: ${{ secrets.KEYSTORE_PASSWORD }}
+        run: |
+          mkdir -p keystore
+          echo "$KS_B64" | base64 -d > keystore/impulse-release.jks
+          echo -n "$KS_PASS" > keystore/keystore-password.txt
+          ls -la keystore/
+
+      - name: Build release APKs (all ABIs + universal)
+        run: ./gradlew assembleRelease
 
       - name: Rename APKs with version/ABI
         run: |
-          cd app/build/outputs/apk/debug
-          for f in app-*-debug.apk; do
+          cd app/build/outputs/apk/release
+          for f in app-*-release.apk; do
             abi=${f#app-}
-            abi=${abi%-debug.apk}
-            mv "$f" "ImpulseClient-${GITHUB_REF_NAME}-${abi}-debug.apk"
+            abi=${abi%-release.apk}
+            mv "$f" "ImpulseClient-${GITHUB_REF_NAME}-${abi}-release.apk"
           done
           ls -la
 
-      - name: Upload debug APKs
+      - name: Upload release APKs
         uses: actions/upload-artifact@v4
         with:
-          name: impulse-client-debug
-          path: app/build/outputs/apk/debug/*.apk
+          name: impulse-client-release
+          path: app/build/outputs/apk/release/*.apk
           retention-days: 14
 
   release:
@@ -63,7 +74,7 @@ jobs:
       - name: Download APK artifact
         uses: actions/download-artifact@v4
         with:
-          name: impulse-client-debug
+          name: impulse-client-release
           path: artifacts
 
       - name: Create release

@@ -5,6 +5,7 @@ import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
@@ -78,7 +79,7 @@ fun AppSettingsContent(
                             targetValue = if (isSelected)
                                 MaterialTheme.colorScheme.primary.copy(alpha = 0.15f)
                             else
-                                MaterialTheme.colorScheme.surfaceContainerHigh,
+                                MaterialTheme.colorScheme.surfaceContainer,
                             label = "mode_bg"
                         )
                         val borderColor by animateColorAsState(
@@ -136,47 +137,85 @@ fun AppSettingsContent(
                 HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
                 Spacer(Modifier.height(10.dp))
 
-                // Theme variant selector — exactly one active:
-                // Classic (hue), Material You (Android 12+), OLED (dark only),
-                // Ultra Contrast. OLED is disabled in light mode.
+                // Theme variant carousel — one selection: Classic / Material
+                // You / OLED / Ultra Contrast. OLED is disabled in light mode.
                 val variants = buildList {
                     add(ThemeVariant.CLASSIC to R.string.app_settings_variant_classic)
                     if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
                         add(ThemeVariant.MATERIAL_YOU to R.string.app_settings_variant_material_you)
                     }
                     add(ThemeVariant.ULTRA_CONTRAST to R.string.app_settings_variant_ultra_contrast)
+                    add(ThemeVariant.OLED to R.string.app_settings_oled)
                 }
-                variants.forEach { (variant, labelRes) ->
-                    ImpulseToggle(
-                        title = stringResource(labelRes),
-                        description = when (variant) {
-                            ThemeVariant.CLASSIC -> stringResource(R.string.app_settings_variant_classic_desc)
-                            ThemeVariant.MATERIAL_YOU -> stringResource(R.string.app_settings_variant_material_you_desc)
-                            ThemeVariant.ULTRA_CONTRAST -> if (isDarkActive) stringResource(R.string.app_settings_variant_ultra_contrast_desc) else stringResource(R.string.app_settings_variant_ultra_contrast_desc)
-                            ThemeVariant.OLED -> if (isDarkActive) stringResource(R.string.app_settings_variant_oled_desc) else stringResource(R.string.app_settings_variant_oled_desc)
-                        },
-                        checked = themeVariant == variant,
-                        onCheckedChange = { enabled ->
-                            if (enabled) {
-                                themeVariant = variant
-                                ThemeSettings.setThemeVariant(variant)
-                            }
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .horizontalScroll(rememberScrollState()),
+                    horizontalArrangement = Arrangement.spacedBy(10.dp),
+                ) {
+                    variants.forEach { (variant, labelRes) ->
+                        val isOled = variant == ThemeVariant.OLED
+                        val enabled = !isOled || isDarkActive
+                        val isSelected = themeVariant == variant
+                        val preview = when (variant) {
+                            ThemeVariant.CLASSIC -> if (isDarkActive) Color(0xFF121212) else Color(0xFFFFFFFF)
+                            ThemeVariant.MATERIAL_YOU -> MaterialTheme.colorScheme.primary
+                            ThemeVariant.OLED -> Color(0xFF000000)
+                            ThemeVariant.ULTRA_CONTRAST -> if (isDarkActive) Color(0xFF000000) else Color(0xFFFFFFFF)
                         }
-                    )
-                }
-                // OLED lives below the divider: dark-only, pure black.
-                ImpulseToggle(
-                    title = stringResource(R.string.app_settings_oled),
-                    description = if (isDarkActive) stringResource(R.string.app_settings_oled_desc_dark) else stringResource(R.string.app_settings_oled_desc_light),
-                    checked = themeVariant == ThemeVariant.OLED && isDarkActive,
-                    enabled = isDarkActive,
-                    onCheckedChange = { enabled ->
-                        if (enabled) {
-                            themeVariant = ThemeVariant.OLED
-                            ThemeSettings.setThemeVariant(ThemeVariant.OLED)
+                        Column(
+                            modifier = Modifier
+                                .width(96.dp)
+                                .clip(RoundedCornerShape(14.dp))
+                                .background(
+                                    if (isSelected) MaterialTheme.colorScheme.primary.copy(alpha = 0.12f)
+                                    else if (enabled) MaterialTheme.colorScheme.surfaceContainerHigh
+                                    else MaterialTheme.colorScheme.surfaceContainerHigh.copy(alpha = 0.4f)
+                                )
+                                .clickable(enabled = enabled) {
+                                    themeVariant = variant
+                                    ThemeSettings.setThemeVariant(variant)
+                                }
+                                .padding(vertical = 10.dp, horizontal = 8.dp),
+                            horizontalAlignment = Alignment.CenterHorizontally,
+                        ) {
+                            Box(
+                                modifier = Modifier
+                                    .size(34.dp)
+                                    .clip(RoundedCornerShape(8.dp))
+                                    .background(preview)
+                                    .then(
+                                        if (variant == ThemeVariant.CLASSIC)
+                                            Modifier.border(1.dp, MaterialTheme.colorScheme.outlineVariant, RoundedCornerShape(8.dp))
+                                        else Modifier
+                                    ),
+                                contentAlignment = Alignment.Center,
+                            ) {
+                                Text(
+                                    text = stringResource(labelRes).take(2).uppercase(),
+                                    style = MaterialTheme.typography.labelSmall,
+                                    fontWeight = FontWeight.Bold,
+                                    color = when (variant) {
+                                        ThemeVariant.CLASSIC -> if (isDarkActive) Color.White else Color.Black
+                                        ThemeVariant.MATERIAL_YOU -> MaterialTheme.colorScheme.onPrimary
+                                        ThemeVariant.OLED -> Color.White
+                                        ThemeVariant.ULTRA_CONTRAST -> if (isDarkActive) Color.White else Color.Black
+                                    },
+                                )
+                            }
+                            Spacer(Modifier.height(6.dp))
+                            Text(
+                                text = stringResource(labelRes),
+                                style = MaterialTheme.typography.labelSmall,
+                                fontWeight = if (isSelected) FontWeight.SemiBold else FontWeight.Normal,
+                                color = if (isSelected) MaterialTheme.colorScheme.primary
+                                else if (enabled) MaterialTheme.colorScheme.onSurfaceVariant
+                                else MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.4f),
+                                maxLines = 1,
+                            )
                         }
                     }
-                )
+                }
             }
         }
 
@@ -200,7 +239,7 @@ fun AppSettingsContent(
                             .fillMaxWidth()
                             .clickable { expanded = true },
                         shape = RoundedCornerShape(14.dp),
-                        color = MaterialTheme.colorScheme.surfaceContainerHigh,
+                        color = MaterialTheme.colorScheme.surfaceContainer,
                         border = BorderStroke(
                             1.dp,
                             MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.4f)

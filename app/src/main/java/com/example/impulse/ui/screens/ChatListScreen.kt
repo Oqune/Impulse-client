@@ -105,7 +105,7 @@ fun ChatListScreen(
                                 containerColor = if (isConnected)
                                     MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.3f)
                                 else
-                                    MaterialTheme.colorScheme.surfaceContainerHigh
+                                    MaterialTheme.colorScheme.surfaceContainer
                             )
                         ) {
                             Row(

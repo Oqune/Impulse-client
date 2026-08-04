@@ -208,7 +208,7 @@ private fun ServerListContent(
                 modifier = Modifier.fillMaxWidth(),
                 shape = CardShape,
                 colors = CardDefaults.cardColors(
-                    containerColor = MaterialTheme.colorScheme.surfaceContainerHigh
+                    containerColor = MaterialTheme.colorScheme.surfaceContainer
                 )
             ) {
                 Column {

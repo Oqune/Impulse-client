@@ -266,10 +266,13 @@ private fun light(primary: Color, bg: Color) = ColorSchemeColors(
     errorContainer = Color(0xFFFFCDD2), onErrorContainer = Color(0xFF3D0000),
     background = bg, onBackground = Color(0xFF1A1C1E),
     surface = bg, onSurface = Color(0xFF1A1C1E),
-    surfaceVariant = primary.copy(alpha = 0.08f), onSurfaceVariant = Color(0xFF49454F),
-    surfaceContainer = primary.copy(alpha = 0.07f),
-    surfaceContainerHigh = primary.copy(alpha = 0.10f),
-    surfaceContainerHighest = primary.copy(alpha = 0.14f),
+    // Opaque neutral surfaces for light mode — alpha-tinted primary over white
+    // rendered as dark blurred bands at card edges (Bug: "thick translucent
+    // dark stripes on card edges in light theme").
+    surfaceVariant = Color(0xFFF1F2F4), onSurfaceVariant = Color(0xFF49454F),
+    surfaceContainer = Color(0xFFF5F6F8),
+    surfaceContainerHigh = Color(0xFFEFF0F3),
+    surfaceContainerHighest = Color(0xFFE7E9ED),
     outline = Color(0xFF79747E), outlineVariant = Color(0xFFCAC4D0),
     scrim = Color.Black,
     inverseSurface = Color(0xFF2F3033), inverseOnSurface = Color(0xFFF0F0F3),

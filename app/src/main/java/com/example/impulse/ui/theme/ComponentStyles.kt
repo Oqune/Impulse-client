@@ -42,8 +42,11 @@ fun ImpulseCard(
     onClick: (() -> Unit)? = null,
     content: @Composable ColumnScope.() -> Unit,
 ) {
+    // Use `surfaceContainer` (lighter than `surfaceContainerHigh`): on Material
+    // You the high container reads too dark (Bug: "cards too dark in Material
+    // You"). Same card shape/elevation everywhere.
     val colors = CardDefaults.cardColors(
-        containerColor = MaterialTheme.colorScheme.surfaceContainerHigh
+        containerColor = MaterialTheme.colorScheme.surfaceContainer
     )
     val elevation = CardDefaults.cardElevation(defaultElevation = ImpulseElevation.card)
     if (onClick != null) {
@@ -181,7 +184,7 @@ fun ImpulseMenuCard(
         modifier = modifier.fillMaxWidth(),
         shape = ButtonShape,
         colors = CardDefaults.cardColors(
-            containerColor = MaterialTheme.colorScheme.surfaceContainerHigh,
+            containerColor = MaterialTheme.colorScheme.surfaceContainer,
         ),
         elevation = CardDefaults.cardElevation(defaultElevation = ImpulseElevation.menu),
     ) {
