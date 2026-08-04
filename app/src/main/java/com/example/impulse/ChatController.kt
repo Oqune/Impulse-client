@@ -1142,37 +1142,41 @@ class ChatController(private val context: Context) {
 
             val kemPub = keyManager.getKemPublicKey()
             val dsaPub = keyManager.getDsaPublicKey()
-            try {
-                val c = synchronized(lock) { client }
-                val keyOk = withContext(Dispatchers.IO) { c?.send(Protocol.buildCombinedKeyExchange(kemPub, dsaPub)) ?: false }
-                LogManager.i(TAG, "KeyExchange combined KEM+DSA sent (ok=$keyOk)")
+            // Send KeyExchange + Sync. Never throw out of here: a transient
+            // failure must NOT strand the client on SYNC or spin reconnect.
+            // Each send is retried a few times before we give up and drop the
+            // connection to ERROR (which triggers reconnect).
+            val c = synchronized(lock) { client }
+            var keySent = false
+            for (attempt in 1..3) {
+                keySent = withContext(Dispatchers.IO) { c?.send(Protocol.buildCombinedKeyExchange(kemPub, dsaPub)) ?: false }
+                if (keySent || userDisconnect) break
+                LogManager.w(TAG, "KeyExchange send attempt $attempt failed, retrying")
+                delay(300L * attempt)
+            }
+            LogManager.i(TAG, "KeyExchange combined KEM+DSA sent (ok=$keySent)")
+            if (userDisconnect) return@launch
+            if (!keySent) {
+                LogManager.e(TAG, "KeyExchange could not be sent after 3 attempts — dropping to ERROR for reconnect")
+                _state.value = ConnectionState.ERROR
+                scheduleReconnect()
+                return@launch
+            }
 
-                if (userDisconnect) return@launch
-
-                val syncOk = withContext(Dispatchers.IO) { c?.send(Protocol.buildSync(lastSeenId())) ?: false }
-                LogManager.i(TAG, "Sync request sent (ok=$syncOk, lastSeenId=${lastSeenId()})")
-            } catch (t: Throwable) {
-                // Never get stuck in AUTHENTICATING: log, record the stack and
-                // drop to ERROR so the reconnect loop can retry.
-                LogManager.e(TAG, "auth post-processing failed", t)
-                com.example.impulse.util.CrashLog.writeCrash(
-                    com.example.impulse.util.CrashLog.buildCrashReport(
-                        thread = Thread.currentThread(),
-                        throwable = t,
-                        versionName = BuildConfig.VERSION_NAME,
-                        versionCode = BuildConfig.VERSION_CODE,
-                        sdkInt = android.os.Build.VERSION.SDK_INT,
-                        release = android.os.Build.VERSION.RELEASE,
-                        manufacturer = android.os.Build.MANUFACTURER,
-                        model = android.os.Build.MODEL,
-                        timeMillis = System.currentTimeMillis(),
-                        extra = "ChatController.onAuthResult keyexchange/sync",
-                    )
-                )
-                if (!userDisconnect) {
-                    _state.value = ConnectionState.ERROR
-                    scheduleReconnect()
-                }
+            val lastSeen = runCatching { lastSeenId() }.getOrDefault(0L)
+            var syncSent = false
+            for (attempt in 1..3) {
+                syncSent = withContext(Dispatchers.IO) { c?.send(Protocol.buildSync(lastSeen)) ?: false }
+                if (syncSent || userDisconnect) break
+                LogManager.w(TAG, "Sync send attempt $attempt failed, retrying")
+                delay(300L * attempt)
+            }
+            LogManager.i(TAG, "Sync request sent (ok=$syncSent, lastSeenId=$lastSeen)")
+            if (userDisconnect) return@launch
+            if (!syncSent) {
+                LogManager.e(TAG, "Sync could not be sent after 3 attempts — dropping to ERROR for reconnect")
+                _state.value = ConnectionState.ERROR
+                scheduleReconnect()
                 return@launch
             }
 
