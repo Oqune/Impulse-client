@@ -32,7 +32,13 @@ data class MessageEntity(
     @ColumnInfo(name = "ciphertext") val ciphertext: ByteArray,
     @ColumnInfo(name = "iv") val iv: ByteArray,
     @ColumnInfo(name = "timestamp") val timestamp: Long = System.currentTimeMillis(),
-    @ColumnInfo(name = "is_own", defaultValue = "0") val isOwn: Boolean = false
+    @ColumnInfo(name = "is_own", defaultValue = "0") val isOwn: Boolean = false,
+    /**
+     * Conversation discriminator: "group" for broadcasts, or the peer
+     * fingerprint for a private 1:1 chat ("dm:<fp>"). Used to keep DMs out of
+     * the group feed (Bug: "incoming DMs showed in the group chat").
+     */
+    @ColumnInfo(name = "conversation_id", defaultValue = "group") val conversationId: String = "group"
 ) {
     override fun equals(other: Any?): Boolean {
         if (this === other) return true

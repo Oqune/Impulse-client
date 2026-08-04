@@ -110,7 +110,8 @@ class ChatController(private val context: Context) {
         val senderFingerprint: String,
         val plaintext: String,
         val isOwn: Boolean,
-        val timestamp: Long = 0L
+        val timestamp: Long = 0L,
+        val conversationId: String = "group"
     )
 
     fun addMessageListener(l: (DecryptedMessage) -> Unit) = synchronized(listeners) { listeners.add(l) }
@@ -499,14 +500,15 @@ class ChatController(private val context: Context) {
 
         val clientTs = System.currentTimeMillis()
         val nonce = java.util.UUID.randomUUID().toString()
-        val innerCanonical = Protocol.buildSignedInnerEnvelope(clientName, "", plaintext, clientTs, nonce)
+        val innerCanonical = Protocol.buildSignedInnerEnvelope(clientName, "", plaintext, clientTs, nonce, recipientFingerprint)
         val signature = keyManager.signDsa(innerCanonical)
         val signedEnvelope = Protocol.buildSignedInnerEnvelope(
             clientName,
             android.util.Base64.encodeToString(signature, android.util.Base64.NO_WRAP),
             plaintext,
             clientTs,
-            nonce
+            nonce,
+            recipientFingerprint
         )
 
         val recipients = mutableListOf<Triple<String, ByteArray, ByteArray>>()
@@ -537,7 +539,7 @@ class ChatController(private val context: Context) {
 
         if (ok) {
             val tempId = -(System.currentTimeMillis())
-            val msg = DecryptedMessage(tempId, clientName, publicKeyHash, plaintext, true, System.currentTimeMillis())
+            val msg = DecryptedMessage(tempId, clientName, publicKeyHash, plaintext, true, System.currentTimeMillis(), "dm:$recipientFingerprint")
             synchronized(listeners) { listeners.forEach { it(msg) } }
         } else {
             LogManager.w(TAG, "sendDirect: transport send failed, queuing in outbox")
@@ -768,10 +770,10 @@ class ChatController(private val context: Context) {
         senderFingerprint: String, dsaPub: ByteArray
     ) {
         // Rebuild the canonical signed form. New envelopes sign sender+content
-        // together with clientTs+nonce; old 3-field envelopes (no ts/nonce)
-        // still verify against the legacy canonical form for compatibility.
+        // together with clientTs+nonce+dm; old envelopes (no ts/nonce) still
+        // verify against the legacy canonical form for compatibility.
         val canonical = if (env.clientTs != 0L || env.nonce.isNotEmpty()) {
-            Protocol.buildSignedInnerEnvelope(env.sender, "", env.content, env.clientTs, env.nonce)
+            Protocol.buildSignedInnerEnvelope(env.sender, "", env.content, env.clientTs, env.nonce, env.dm)
         } else {
             Protocol.buildInnerEnvelope(env.sender, "", env.content)
         }
@@ -787,6 +789,7 @@ class ChatController(private val context: Context) {
             return
         }
 
+        val conversationId = if (env.dm.isNotEmpty()) "dm:${env.dm}" else "group"
         repo.upsert(
             MessageEntity(
                 serverId = serverId,
@@ -795,11 +798,12 @@ class ChatController(private val context: Context) {
                 ciphertext = payload,
                 iv = byteArrayOf(),
                 timestamp = ts,
-                isOwn = isOwn
+                isOwn = isOwn,
+                conversationId = conversationId
             )
         )
 
-        val msg = DecryptedMessage(realId, env.sender, senderFingerprint.take(8), env.content, isOwn, ts)
+        val msg = DecryptedMessage(realId, env.sender, senderFingerprint.take(8), env.content, isOwn, ts, conversationId)
         synchronized(listeners) { listeners.forEach { it(msg) } }
     }
 

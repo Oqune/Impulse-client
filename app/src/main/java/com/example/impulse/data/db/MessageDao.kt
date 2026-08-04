@@ -21,9 +21,17 @@ interface MessageDao {
     @Query("SELECT * FROM messages WHERE server_id = :serverId ORDER BY server_msg_id ASC")
     fun observeForServer(serverId: String): Flow<List<MessageEntity>>
 
+    /** Messages for one conversation (group or a DM), oldest → newest. */
+    @Query("SELECT * FROM messages WHERE server_id = :serverId AND conversation_id = :conversationId ORDER BY server_msg_id ASC")
+    fun observeForConversation(serverId: String, conversationId: String): Flow<List<MessageEntity>>
+
     /** One-off load (used during history backfill). */
     @Query("SELECT * FROM messages WHERE server_id = :serverId ORDER BY server_msg_id ASC")
     suspend fun loadForServer(serverId: String): List<MessageEntity>
+
+    /** All distinct conversations for a server. */
+    @Query("SELECT DISTINCT conversation_id FROM messages WHERE server_id = :serverId")
+    suspend fun conversationsForServer(serverId: String): List<String>
 
     /** Highest server_msg_id we already have for a server (for last_seen_id sync). */
     @Query("SELECT COALESCE(MAX(server_msg_id), 0) FROM messages WHERE server_id = :serverId")

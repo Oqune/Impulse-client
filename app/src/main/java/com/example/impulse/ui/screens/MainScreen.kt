@@ -39,7 +39,10 @@ fun MainScreen() {
     var selectedServer by remember { mutableStateOf(ServerConfig.defaultServer) }
     var clientName by remember { mutableStateOf("") }
     var availableServers by remember { mutableStateOf(ServerConfig.builtInServers) }
+    // Chats tab: selecting a server opens its conversation list (Group + DMs).
+    var chatsServer by remember { mutableStateOf<ServerConfig?>(null) }
     var activeChatServer by remember { mutableStateOf<ServerConfig?>(null) }
+    var activeConversation by remember { mutableStateOf("group") }
     var qrScanServer by remember { mutableStateOf<ServerConfig?>(null) }
     var visibilityRefreshTrigger by remember { mutableIntStateOf(0) }
     var certRefreshTrigger by remember { mutableIntStateOf(0) }
@@ -48,10 +51,11 @@ fun MainScreen() {
 
     // System back closes overlays first, then behaves normally (Bug: "back
     // button exits the app from the chat/QR overlay").
-    BackHandler(enabled = qrScanServer != null || activeChatServer != null) {
+    BackHandler(enabled = qrScanServer != null || activeChatServer != null || chatsServer != null) {
         when {
             qrScanServer != null -> qrScanServer = null
             activeChatServer != null -> activeChatServer = null
+            chatsServer != null -> chatsServer = null
         }
     }
 
@@ -173,7 +177,7 @@ fun MainScreen() {
                         availableServers = availableServers,
                         clientName = clientName,
                         onServerSelected = { server ->
-                            activeChatServer = server
+                            chatsServer = server
                             selectedServer = server
                         },
                         visibilityRefreshTrigger = visibilityRefreshTrigger,
@@ -221,7 +225,7 @@ fun MainScreen() {
             }
         }
 
-        // Chat screen overlay (slides in from right)
+        // Chat overlay (slides in from right)
         AnimatedVisibility(
             visible = activeChatServer != null,
             enter = slideInHorizontally(
@@ -239,8 +243,48 @@ fun MainScreen() {
                     selectedServer = server,
                     clientName = clientName,
                     connectionManager = connectionManager,
+                    conversationId = activeConversation,
                     onBack = { activeChatServer = null },
                     modifier = Modifier
+                )
+            }
+        }
+
+        // Conversation list overlay (Group + DMs) for a chosen server.
+        AnimatedVisibility(
+            visible = chatsServer != null,
+            enter = slideInHorizontally(
+                animationSpec = tween(300),
+                initialOffsetX = { it }
+            ) + fadeIn(tween(250)),
+            exit = slideOutHorizontally(
+                animationSpec = tween(250),
+                targetOffsetX = { it }
+            ) + fadeOut(tween(200)),
+            modifier = Modifier.fillMaxSize().zIndex(2.5f)
+        ) {
+            chatsServer?.let { server ->
+                val repo = remember(server.id) { com.example.impulse.data.MessageRepository(context) }
+                var conversations by remember(server.id) {
+                    mutableStateOf<List<String>>(listOf("group"))
+                }
+                val ctrl = remember(server.id) { connectionManager.getController(server) }
+                LaunchedEffect(server.id) {
+                    val known = ctrl.knownPeers(server.id).map { "dm:${it.first}" }
+                    val stored = runCatching { repo.conversations(server.id) }.getOrDefault(emptyList())
+                    conversations = (listOf("group") + known + stored).distinct()
+                }
+                val status = connectionManager.serverStates.value[server.id]
+                ChatConversationListScreen(
+                    server = server,
+                    conversations = conversations,
+                    state = status?.state,
+                    onConversation = { conv ->
+                        activeConversation = conv
+                        activeChatServer = server
+                        chatsServer = null
+                    },
+                    onBack = { chatsServer = null },
                 )
             }
         }

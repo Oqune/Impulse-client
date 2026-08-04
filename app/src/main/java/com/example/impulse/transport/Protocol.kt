@@ -387,11 +387,15 @@ object Protocol {
      * malicious relay cannot reorder or replay an old blob with new server
      * ids/timestamps (Bug: "no replay/ordering protection").
      *
-     * Backward compatible: old clients still send the 3-field form, and the
-     * verifier accepts it (no ts/nonce) — see [parseInnerEnvelope].
+     * [dm] is the recipient fingerprint for a private (1:1) message, or an
+     * empty string for a group broadcast. It is part of the signed canonical
+     * form, so a relay cannot relabel a group message as a DM.
+     *
+     * Backward compatible: old clients still send the 5-field form, and the
+     * verifier accepts it (no ts/nonce/dm) — see [parseInnerEnvelope].
      */
-    fun buildSignedInnerEnvelope(sender: String, signature: String, content: String, clientTs: Long, nonce: String): ByteArray {
-        val json = """{"sender":${jsonStr(sender)},"signature":${jsonStr(signature)},"content":${jsonStr(content)},"ts":$clientTs,"n":${jsonStr(nonce)}}"""
+    fun buildSignedInnerEnvelope(sender: String, signature: String, content: String, clientTs: Long, nonce: String, dm: String = ""): ByteArray {
+        val json = """{"sender":${jsonStr(sender)},"signature":${jsonStr(signature)},"content":${jsonStr(content)},"ts":$clientTs,"n":${jsonStr(nonce)},"dm":${jsonStr(dm)}}"""
         return json.toByteArray(Charsets.UTF_8)
     }
 
@@ -518,7 +522,9 @@ object Protocol {
         /** Client-generated timestamp included in the signed form (0 if absent). */
         val clientTs: Long = 0L,
         /** Client-generated per-message nonce included in the signed form (empty if absent). */
-        val nonce: String = ""
+        val nonce: String = "",
+        /** Recipient fingerprint for a private message; empty = group broadcast. */
+        val dm: String = ""
     )
 
     /**
@@ -534,7 +540,8 @@ object Protocol {
                 signature = optJsonField(text, "signature") ?: "",
                 content = optJsonField(text, "content") ?: "",
                 clientTs = optJsonLong(text, "ts"),
-                nonce = optJsonField(text, "n") ?: ""
+                nonce = optJsonField(text, "n") ?: "",
+                dm = optJsonField(text, "dm") ?: ""
             )
         } catch (e: Exception) {
             null

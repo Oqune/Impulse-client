@@ -15,7 +15,8 @@ import kotlinx.coroutines.sync.withLock
 class ChatViewModel(
     private val chatController: ChatController,
     private val repository: MessageRepository,
-    private val server: ServerConfig
+    private val server: ServerConfig,
+    private val conversationId: String = "group"
 ) : ViewModel() {
 
     val connectionState: StateFlow<ConnectionState> = chatController.state
@@ -57,7 +58,7 @@ class ChatViewModel(
     }
 
     private val optimisticListener: (ChatController.DecryptedMessage) -> Unit = { dm ->
-        if (dm.serverMsgId < 0) {
+        if (dm.serverMsgId < 0 && dm.conversationId == conversationId) {
             viewModelScope.launch {
                 optimisticMutex.withLock { pendingOptimistic.add(dm) }
                 _messages.value = mergeAndSort(lastRawDb)
@@ -66,9 +67,9 @@ class ChatViewModel(
     }
 
     init {
-        // DB observer: the authoritative source for all persisted messages.
+        // DB observer: the authoritative source for this conversation's messages.
         viewModelScope.launch {
-            repository.observe(server.id)
+            repository.observeConversation(server.id, conversationId)
                 .map { entities ->
                     entities.mapNotNull { entity -> chatController.decryptEntity(entity) }
                 }
@@ -84,10 +85,15 @@ class ChatViewModel(
         chatController.addMessageListener(optimisticListener)
     }
 
-    /** Sends a chat message; returns true if it was accepted by the transport. */
+    /** Sends a group chat message. */
     suspend fun send(text: String): Boolean {
         if (text.isBlank()) return false
-        return chatController.sendChat(text)
+        return if (conversationId == "group") {
+            chatController.sendChat(text)
+        } else {
+            val fp = conversationId.removePrefix("dm:")
+            chatController.sendDirectMessage(text, fp)
+        }
     }
 
     /** Clears local message history for this server and re-syncs from the server. */

@@ -32,7 +32,12 @@ class MessageRepository(context: Context) {
 
     fun observe(serverId: String): Flow<List<MessageEntity>> = dao.observeForServer(serverId)
 
+    fun observeConversation(serverId: String, conversationId: String): Flow<List<MessageEntity>> =
+        dao.observeForConversation(serverId, conversationId)
+
     suspend fun load(serverId: String): List<MessageEntity> = dao.loadForServer(serverId)
+
+    suspend fun conversations(serverId: String): List<String> = dao.conversationsForServer(serverId)
 
     /** Highest server-assigned message id we already hold (for `last_seen_id`). */
     suspend fun lastSeenId(serverId: String): Long = dao.maxServerMsgId(serverId)

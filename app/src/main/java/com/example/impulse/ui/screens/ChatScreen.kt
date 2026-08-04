@@ -394,6 +394,7 @@ fun ChatScreen(
     selectedServer: ServerConfig,
     clientName: String,
     connectionManager: com.example.impulse.ConnectionManager,
+    conversationId: String = "group",
     onBack: (() -> Unit)? = null,
     modifier: Modifier = Modifier
 ) {
@@ -401,33 +402,21 @@ fun ChatScreen(
     val listState = rememberLazyListState()
     var showScrollButton by remember { mutableStateOf(false) }
     var showClearHistoryDialog by remember { mutableStateOf(false) }
-    // DM target: null = group broadcast; otherwise a peer fingerprint.
-    var dmRecipient by remember { mutableStateOf<String?>(null) }
-    var showDmPicker by remember { mutableStateOf(false) }
-    val knownPeers = remember(selectedServer.id) { mutableStateOf<List<Pair<String, String>>>(emptyList()) }
 
     val context = LocalContext.current
     val chatController = remember(selectedServer.id) {
         connectionManager.getController(selectedServer)
     }
     val repo = remember { MessageRepository(context) }
-    // Key the ViewModel by server so switching chats does NOT reuse the
-    // previous server's controller/messages (Bug: "second server shows first
-    // server's chat").
+    // Key the ViewModel by server + conversation so DMs are isolated from the
+    // group feed (Bug: "incoming DMs showed in the group chat").
     val viewModel: com.example.impulse.ui.ChatViewModel = viewModel(
-        key = selectedServer.id,
-        factory = com.example.impulse.ui.ChatViewModelFactory(chatController, repo, selectedServer)
+        key = "${selectedServer.id}:$conversationId",
+        factory = com.example.impulse.ui.ChatViewModelFactory(chatController, repo, selectedServer, conversationId)
     )
     val connectionState by viewModel.connectionState.collectAsState()
     val decrypted by viewModel.messages.collectAsState()
     val scope = rememberCoroutineScope()
-
-    // Refresh the DM participant list when the connection becomes READY.
-    LaunchedEffect(selectedServer.id, connectionState) {
-        if (connectionState == ConnectionState.READY) {
-            knownPeers.value = chatController.knownPeers(selectedServer.id)
-        }
-    }
 
     val messages = remember(decrypted) {
         decrypted.map { dm ->
@@ -476,13 +465,8 @@ fun ChatScreen(
         if (messageInput.isNotBlank()) {
             val textToSend = messageInput
             messageInput = ""
-            val target = dmRecipient
             scope.launch {
-                if (target == null) {
-                    viewModel.send(textToSend)
-                } else {
-                    chatController.sendDirectMessage(textToSend, target)
-                }
+                viewModel.send(textToSend)
             }
         }
     }
@@ -531,34 +515,30 @@ fun ChatScreen(
                                     style = MaterialTheme.typography.bodySmall,
                                     color = MaterialTheme.colorScheme.onSurfaceVariant
                                 )
-                                // Recipient selector: group broadcast or a peer.
-                                Row(
-                                    modifier = Modifier
-                                        .padding(top = 4.dp)
-                                        .clip(RoundedCornerShape(10.dp))
-                                        .background(MaterialTheme.colorScheme.surfaceContainer)
-                                        .clickable(enabled = connectionState == ConnectionState.READY) {
-                                            showDmPicker = true
-                                        }
-                                        .padding(horizontal = 8.dp, vertical = 3.dp),
-                                    verticalAlignment = Alignment.CenterVertically,
-                                ) {
-                                    Icon(
-                                        imageVector = if (dmRecipient == null) Icons.Default.Public else Icons.Default.Person,
-                                        contentDescription = null,
-                                        tint = MaterialTheme.colorScheme.primary,
-                                        modifier = Modifier.size(14.dp)
-                                    )
-                                    Spacer(Modifier.width(4.dp))
-                                    Text(
-                                        text = when {
-                                            dmRecipient != null -> "DM: ${dmRecipient!!.take(8)}"
-                                            else -> stringResource(R.string.chat_recipient_group)
-                                        },
-                                        style = MaterialTheme.typography.labelSmall,
-                                        color = MaterialTheme.colorScheme.primary,
-                                        maxLines = 1,
-                                    )
+                                // Conversation type badge: group or private.
+                                if (conversationId != "group") {
+                                    Row(
+                                        modifier = Modifier
+                                            .padding(top = 4.dp)
+                                            .clip(RoundedCornerShape(10.dp))
+                                            .background(MaterialTheme.colorScheme.primary.copy(alpha = 0.12f))
+                                            .padding(horizontal = 8.dp, vertical = 3.dp),
+                                        verticalAlignment = Alignment.CenterVertically,
+                                    ) {
+                                        Icon(
+                                            imageVector = Icons.Default.Person,
+                                            contentDescription = null,
+                                            tint = MaterialTheme.colorScheme.primary,
+                                            modifier = Modifier.size(14.dp)
+                                        )
+                                        Spacer(Modifier.width(4.dp))
+                                        Text(
+                                            text = "DM: ${conversationId.removePrefix("dm:").take(8)}",
+                                            style = MaterialTheme.typography.labelSmall,
+                                            color = MaterialTheme.colorScheme.primary,
+                                            maxLines = 1,
+                                        )
+                                    }
                                 }
                             }
                             val isDisconnected = connectionState == ConnectionState.DISCONNECTED
@@ -655,56 +635,5 @@ fun ChatScreen(
                 modifier = Modifier.align(Alignment.BottomEnd)
             )
         }
-    }
-
-    if (showDmPicker) {
-        AlertDialog(
-            onDismissRequest = { showDmPicker = false },
-            title = { Text(stringResource(R.string.chat_dm_title)) },
-            text = {
-                Column {
-                    // Group broadcast option.
-                    TextButton(
-                        onClick = {
-                            dmRecipient = null
-                            showDmPicker = false
-                        }
-                    ) {
-                        Icon(Icons.Default.Public, contentDescription = null, modifier = Modifier.size(18.dp))
-                        Spacer(Modifier.width(8.dp))
-                        Text(stringResource(R.string.chat_recipient_group))
-                    }
-                    // Known peers.
-                    val peers = knownPeers.value
-                    if (peers.isEmpty()) {
-                        Text(
-                            text = stringResource(R.string.chat_dm_no_peers),
-                            style = MaterialTheme.typography.bodySmall,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant,
-                            modifier = Modifier.padding(16.dp),
-                        )
-                    } else {
-                        peers.forEach { (fp, label) ->
-                            TextButton(
-                                onClick = {
-                                    dmRecipient = fp
-                                    showDmPicker = false
-                                }
-                            ) {
-                                Icon(Icons.Default.Person, contentDescription = null, modifier = Modifier.size(18.dp))
-                                Spacer(Modifier.width(8.dp))
-                                Text("$label  ($fp)")
-                            }
-                        }
-                    }
-                }
-            },
-            confirmButton = {},
-            dismissButton = {
-                TextButton(onClick = { showDmPicker = false }) {
-                    Text(stringResource(R.string.common_cancel))
-                }
-            }
-        )
     }
 }

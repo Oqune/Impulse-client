@@ -13,13 +13,14 @@ import com.example.impulse.data.ServerConfig
 class ChatViewModelFactory(
     private val chatController: ChatController,
     private val repository: MessageRepository,
-    private val server: ServerConfig
+    private val server: ServerConfig,
+    private val conversationId: String = "group"
 ) : ViewModelProvider.Factory {
     @Suppress("UNCHECKED_CAST")
     override fun <T : ViewModel> create(modelClass: Class<T>): T {
         require(modelClass == ChatViewModel::class.java) {
             "Unknown ViewModel class: $modelClass"
         }
-        return ChatViewModel(chatController, repository, server) as T
+        return ChatViewModel(chatController, repository, server, conversationId) as T
     }
 }
