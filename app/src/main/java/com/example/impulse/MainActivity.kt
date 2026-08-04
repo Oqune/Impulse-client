@@ -69,13 +69,33 @@ class MainActivity : FragmentActivity() {
     override fun onStart() {
         super.onStart()
         // Reconnect to the selected server when the app comes to the foreground.
-        val prefs = ServerPreferences(applicationContext)
-        val server = prefs.getSelectedServer()
-        if (server != null) {
-            val clientName = prefs.getClientName().takeIf { it.isNotBlank() }
-                ?: NameGenerator.generate()
-            LogManager.i(TAG, "onStart: connecting to ${server.id}")
-            ConnectionManager.getInstance(this).connect(server, clientName)
+        try {
+            val prefs = ServerPreferences(applicationContext)
+            val server = prefs.getSelectedServer()
+            if (server != null) {
+                val clientName = prefs.getClientName().takeIf { it.isNotBlank() }
+                    ?: NameGenerator.generate()
+                LogManager.i(TAG, "onStart: connecting to ${server.id}")
+                ConnectionManager.getInstance(this).connect(server, clientName)
+            }
+        } catch (t: Throwable) {
+            // Never let an exception in lifecycle connection tear down the app;
+            // log the full stack so it can be retrieved without logcat.
+            LogManager.e(TAG, "onStart connect failed", t)
+            com.example.impulse.util.CrashLog.writeCrash(
+                com.example.impulse.util.CrashLog.buildCrashReport(
+                    thread = Thread.currentThread(),
+                    throwable = t,
+                    versionName = BuildConfig.VERSION_NAME,
+                    versionCode = BuildConfig.VERSION_CODE,
+                    sdkInt = android.os.Build.VERSION.SDK_INT,
+                    release = android.os.Build.VERSION.RELEASE,
+                    manufacturer = android.os.Build.MANUFACTURER,
+                    model = android.os.Build.MODEL,
+                    timeMillis = System.currentTimeMillis(),
+                    extra = "MainActivity.onStart",
+                )
+            )
         }
     }
 

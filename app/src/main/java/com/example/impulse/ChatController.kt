@@ -142,7 +142,31 @@ class ChatController(private val context: Context) {
             clientName = name
         }
         LogManager.i(TAG, "connect: server=${server.id} name='$name'")
-        ensureKeyPair()
+        // Key generation (ML-KEM + ML-DSA) can throw on some devices (e.g.
+        // BouncyCastle PQC provider unavailable). Catch it so the app shows an
+        // error instead of crashing, and record the stack for diagnostics.
+        try {
+            ensureKeyPair()
+        } catch (t: Throwable) {
+            LogManager.e(TAG, "ensureKeyPair failed on connect", t)
+            _state.value = ConnectionState.ERROR
+            _lastError.value = "Ошибка генерации ключей: ${t.message}"
+            com.example.impulse.util.CrashLog.writeCrash(
+                com.example.impulse.util.CrashLog.buildCrashReport(
+                    thread = Thread.currentThread(),
+                    throwable = t,
+                    versionName = BuildConfig.VERSION_NAME,
+                    versionCode = BuildConfig.VERSION_CODE,
+                    sdkInt = android.os.Build.VERSION.SDK_INT,
+                    release = android.os.Build.VERSION.RELEASE,
+                    manufacturer = android.os.Build.MANUFACTURER,
+                    model = android.os.Build.MODEL,
+                    timeMillis = System.currentTimeMillis(),
+                    extra = "ChatController.connect ensureKeyPair",
+                )
+            )
+            return
+        }
         _lastError.value = null
 
         val hashes = certManager.getHashes(server.id)
