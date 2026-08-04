@@ -561,6 +561,25 @@ class ChatController(private val context: Context) {
         return repo.getKnownPeers(serverId)
     }
 
+    /** The local user's own fingerprint (used to label the Saved/Favorites chat). */
+    fun ownFingerprint(): String =
+        try {
+            keyManager.getFingerprint()
+        } catch (_: Exception) {
+            ""
+        }
+
+    /**
+     * Best-effort display name for a peer fingerprint: the most recent message's
+     * sender name in that DM conversation, else a short fingerprint label.
+     */
+    suspend fun peerDisplayName(serverId: String, fingerprint: String): String {
+        if (fingerprint.isEmpty()) return ""
+        val conversation = "dm:$fingerprint"
+        val latest = repo.loadForConversation(serverId, conversation).lastOrNull()
+        return latest?.sender?.takeIf { it.isNotBlank() } ?: "…${fingerprint.take(6)}"
+    }
+
     private suspend fun flushOutbox() {
         if (flushOutboxRunning) return
         flushOutboxRunning = true
@@ -794,7 +813,12 @@ class ChatController(private val context: Context) {
             return
         }
 
-        val conversationId = if (env.dm.isNotEmpty()) "dm:${env.dm}" else "group"
+        // Symmetric conversation key: both sides address the thread by the OTHER
+        // participant's fingerprint. Sender stores "dm:<recipient fp>" (peer);
+        // receiver must store "dm:<sender fp>" (peer), NOT "dm:<env.dm>" (which
+        // is the receiver's OWN fingerprint). Using env.dm split the same DM into
+        // two one-way threads (Bug: "DM is one-way / chat with myself").
+        val conversationId = if (env.dm.isNotEmpty()) "dm:$senderFingerprint" else "group"
         repo.upsert(
             MessageEntity(
                 serverId = serverId,

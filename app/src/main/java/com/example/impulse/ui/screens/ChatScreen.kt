@@ -18,6 +18,7 @@ import androidx.compose.material.icons.filled.KeyboardArrowDown
 import androidx.compose.material.icons.filled.Link
 import androidx.compose.material.icons.filled.LinkOff
 import androidx.compose.material.icons.filled.DeleteSweep
+import androidx.compose.material.icons.filled.Bookmark
 import androidx.compose.material.icons.filled.Person
 import androidx.compose.material.icons.filled.Public
 import androidx.compose.material3.*
@@ -408,6 +409,20 @@ fun ChatScreen(
         connectionManager.getController(selectedServer)
     }
     val repo = remember { MessageRepository(context) }
+    // Display title for a DM: the peer's name once known, else a short id.
+    var conversationTitle by remember { mutableStateOf<String?>(null) }
+    val savedTitle = stringResource(R.string.chat_saved_title)
+    LaunchedEffect(conversationId) {
+        if (conversationId != "group") {
+            val fp = conversationId.removePrefix("dm:")
+            val own = chatController.ownFingerprint()
+            if (own.isNotEmpty() && fp == own) {
+                conversationTitle = savedTitle
+            } else {
+                conversationTitle = chatController.peerDisplayName(selectedServer.id, fp)
+            }
+        }
+    }
     // Key the ViewModel by server + conversation so DMs are isolated from the
     // group feed (Bug: "incoming DMs showed in the group chat").
     val viewModel: com.example.impulse.ui.ChatViewModel = viewModel(
@@ -506,17 +521,27 @@ fun ChatScreen(
                             }
                             Column(modifier = Modifier.weight(1f)) {
                                 Text(
-                                    text = selectedServer.name,
+                                    text = if (conversationId != "group") {
+                                        conversationTitle ?: "…${conversationId.removePrefix("dm:").take(6)}"
+                                    } else {
+                                        selectedServer.name
+                                    },
                                     style = MaterialTheme.typography.titleMedium,
                                     fontWeight = FontWeight.Bold
                                 )
                                 Text(
-                                    text = selectedServer.ipAddress,
+                                    text = if (conversationId != "group") {
+                                        selectedServer.name
+                                    } else {
+                                        selectedServer.ipAddress
+                                    },
                                     style = MaterialTheme.typography.bodySmall,
                                     color = MaterialTheme.colorScheme.onSurfaceVariant
                                 )
                                 // Conversation type badge: group or private.
                                 if (conversationId != "group") {
+                                    val fp = conversationId.removePrefix("dm:")
+                                    val isSaved = conversationTitle == savedTitle
                                     Row(
                                         modifier = Modifier
                                             .padding(top = 4.dp)
@@ -526,14 +551,14 @@ fun ChatScreen(
                                         verticalAlignment = Alignment.CenterVertically,
                                     ) {
                                         Icon(
-                                            imageVector = Icons.Default.Person,
+                                            imageVector = if (isSaved) Icons.Default.Bookmark else Icons.Default.Person,
                                             contentDescription = null,
                                             tint = MaterialTheme.colorScheme.primary,
                                             modifier = Modifier.size(14.dp)
                                         )
                                         Spacer(Modifier.width(4.dp))
                                         Text(
-                                            text = "DM: ${conversationId.removePrefix("dm:").take(8)}",
+                                            text = if (isSaved) savedTitle else "DM: …${fp.take(6)}",
                                             style = MaterialTheme.typography.labelSmall,
                                             color = MaterialTheme.colorScheme.primary,
                                             maxLines = 1,

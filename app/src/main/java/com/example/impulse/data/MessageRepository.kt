@@ -37,6 +37,9 @@ class MessageRepository(context: Context) {
 
     suspend fun load(serverId: String): List<MessageEntity> = dao.loadForServer(serverId)
 
+    suspend fun loadForConversation(serverId: String, conversationId: String): List<MessageEntity> =
+        dao.loadForConversation(serverId, conversationId)
+
     suspend fun conversations(serverId: String): List<String> = dao.conversationsForServer(serverId)
 
     /** Highest server-assigned message id we already hold (for `last_seen_id`). */

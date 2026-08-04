@@ -49,12 +49,16 @@ fun MainScreen() {
 
     val connectionManager = remember { ConnectionManager.getInstance(context) }
 
-    // System back closes overlays first, then behaves normally (Bug: "back
-    // button exits the app from the chat/QR overlay").
+    // System back walks the overlay hierarchy: chat → conversation list →
+    // QR/server list → normal (Bug: "back exits the app from every overlay").
     BackHandler(enabled = qrScanServer != null || activeChatServer != null || chatsServer != null) {
         when {
             qrScanServer != null -> qrScanServer = null
-            activeChatServer != null -> activeChatServer = null
+            activeChatServer != null -> {
+                // Return to the conversation list if we came from there.
+                activeChatServer = null
+                activeConversation = "group"
+            }
             chatsServer != null -> chatsServer = null
         }
     }
@@ -269,22 +273,41 @@ fun MainScreen() {
                 var conversations by remember(server.id) {
                     mutableStateOf<List<String>>(listOf("group"))
                 }
+                var peerNames by remember(server.id) {
+                    mutableStateOf<Map<String, String>>(emptyMap())
+                }
+                val ownFp = remember(server.id) { ctrl.ownFingerprint() }
                 LaunchedEffect(server.id) {
                     runCatching {
-                        val known = ctrl.knownPeers(server.id).map { "dm:${it.first}" }
-                        val stored = repo.conversations(server.id)
-                        conversations = (listOf("group") + known + stored).distinct()
+                        val known = ctrl.knownPeers(server.id)
+                        val names = known.associate { (fp, _) -> fp to fp }
+                        peerNames = names
+                        conversations = (listOf("group") + known.map { "dm:${it.first}" } + repo.conversations(server.id)).distinct()
                     }
+                }
+                // Resolve display names once known (from a received message).
+                LaunchedEffect(conversations, ownFp) {
+                    val resolved = mutableMapOf<String, String>()
+                    for (conv in conversations) {
+                        val fp = conv.removePrefix("dm:")
+                        if (fp.isBlank() || fp == "group") continue
+                        if (fp == ownFp) continue
+                        resolved[fp] = ctrl.peerDisplayName(server.id, fp)
+                    }
+                    if (resolved.isNotEmpty()) peerNames = resolved
                 }
                 val status = connectionManager.serverStates.value[server.id]
                 ChatConversationListScreen(
                     server = server,
                     conversations = conversations,
+                    ownFingerprint = ownFp,
+                    peerNames = peerNames,
                     state = status?.state,
                     onConversation = { conv ->
                         activeConversation = conv
                         activeChatServer = server
-                        chatsServer = null
+                        // Keep chatsServer so system-back returns to the
+                        // conversation list, then to the server list.
                     },
                     onBack = { chatsServer = null },
                 )

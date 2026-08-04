@@ -29,6 +29,10 @@ interface MessageDao {
     @Query("SELECT * FROM messages WHERE server_id = :serverId ORDER BY server_msg_id ASC")
     suspend fun loadForServer(serverId: String): List<MessageEntity>
 
+    /** One-off load for one conversation. */
+    @Query("SELECT * FROM messages WHERE server_id = :serverId AND conversation_id = :conversationId ORDER BY server_msg_id ASC")
+    suspend fun loadForConversation(serverId: String, conversationId: String): List<MessageEntity>
+
     /** All distinct conversations for a server. */
     @Query("SELECT DISTINCT conversation_id FROM messages WHERE server_id = :serverId")
     suspend fun conversationsForServer(serverId: String): List<String>

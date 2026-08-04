@@ -7,6 +7,7 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.automirrored.filled.KeyboardArrowRight
+import androidx.compose.material.icons.filled.Bookmark
 import androidx.compose.material.icons.filled.Group
 import androidx.compose.material.icons.filled.Person
 import androidx.compose.material3.*
@@ -23,13 +24,15 @@ import com.example.impulse.ui.theme.CardShape
 import com.example.impulse.ui.theme.StatusDot
 
 /**
- * One server's conversation list: the group chat plus every known private (DM)
- * conversation. DMs are isolated here instead of mixing into the group feed.
+ * One server's conversation list: the group chat, the Saved/Favorites (self)
+ * chat, and every known private (DM) conversation.
  */
 @Composable
 fun ChatConversationListScreen(
     server: ServerConfig,
     conversations: List<String>,
+    ownFingerprint: String,
+    peerNames: Map<String, String>,
     state: ConnectionState?,
     onConversation: (String) -> Unit,
     onBack: () -> Unit,
@@ -78,11 +81,13 @@ fun ChatConversationListScreen(
                 verticalArrangement = Arrangement.spacedBy(8.dp),
             ) {
                 items(conversations, key = { it }) { conv ->
+                    val peerFp = conv.removePrefix("dm:")
+                    val isSaved = ownFingerprint.isNotEmpty() && peerFp == ownFingerprint
                     val isGroup = conv == "group"
-                    val title = if (isGroup) {
-                        stringResource(R.string.chat_recipient_group)
-                    } else {
-                        "DM: ${conv.removePrefix("dm:").take(12)}"
+                    val title = when {
+                        isSaved -> stringResource(R.string.chat_saved_title)
+                        isGroup -> stringResource(R.string.chat_recipient_group)
+                        else -> peerNames[peerFp] ?: "…${peerFp.take(6)}"
                     }
                     Card(
                         modifier = Modifier
@@ -101,7 +106,11 @@ fun ChatConversationListScreen(
                             verticalAlignment = Alignment.CenterVertically
                         ) {
                             Icon(
-                                imageVector = if (isGroup) Icons.Default.Group else Icons.Default.Person,
+                                imageVector = when {
+                                    isSaved -> Icons.Default.Bookmark
+                                    isGroup -> Icons.Default.Group
+                                    else -> Icons.Default.Person
+                                },
                                 contentDescription = null,
                                 tint = MaterialTheme.colorScheme.primary,
                                 modifier = Modifier.size(20.dp)
