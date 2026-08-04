@@ -21,7 +21,7 @@ import androidx.compose.material.icons.filled.ArrowDropDown
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.runtime.snapshotFlow
-import kotlinx.coroutines.flow.drop
+import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.launch
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -82,13 +82,11 @@ fun AppSettingsContent(
                     initialPage = modeIndex,
                     pageCount = { modeEntries.size }
                 )
-                // Apply the theme only once the swipe settles — avoids the
-                // jarring mid-drag theme switch.
+                // Apply the theme when the swipe settles (not mid-drag).
                 LaunchedEffect(modePager) {
                     snapshotFlow { modePager.currentPage }
-                        .drop(1)
+                        .distinctUntilChanged()
                         .collect { page ->
-                            modePager.animateScrollToPage(page)
                             val entry = modeEntries[page]
                             selectedTheme = entry.mode
                             ThemeSettings.setThemeMode(entry.mode)
@@ -98,7 +96,11 @@ fun AppSettingsContent(
                     state = modePager,
                     modifier = Modifier
                         .fillMaxWidth()
-                        .height(86.dp),
+                        .height(88.dp),
+                    // contentPadding + pageSpacing reveal the neighbours on
+                    // both edges (fillMaxWidth on the card alone did not).
+                    contentPadding = PaddingValues(horizontal = 40.dp),
+                    pageSpacing = 12.dp,
                     beyondViewportPageCount = 1,
                 ) { page ->
                     val entry = modeEntries[page]
@@ -120,12 +122,12 @@ fun AppSettingsContent(
                     Box(
                         modifier = Modifier
                             .fillMaxSize()
-                            .padding(horizontal = 8.dp, vertical = 4.dp),
+                            .padding(vertical = 4.dp),
                         contentAlignment = Alignment.Center,
                     ) {
                         Column(
                             modifier = Modifier
-                                .fillMaxWidth(0.82f)
+                                .fillMaxWidth()
                                 .fillMaxHeight()
                                 .clip(RoundedCornerShape(14.dp))
                                 .background(bgColor)
@@ -219,12 +221,11 @@ fun AppSettingsContent(
                     pageCount = { variants.size }
                 )
                 // Apply the variant once the swipe settles (no jarring switch
-                // mid-drag) and ease the pager to the final page.
+                // mid-drag).
                 LaunchedEffect(pagerState) {
                     snapshotFlow { pagerState.currentPage }
-                        .drop(1)
+                        .distinctUntilChanged()
                         .collect { page ->
-                            pagerState.animateScrollToPage(page)
                             val (v, _) = variants[page]
                             themeVariant = v
                             ThemeSettings.setThemeVariant(v)
@@ -235,8 +236,10 @@ fun AppSettingsContent(
                     modifier = Modifier
                         .fillMaxWidth()
                         .height(118.dp),
-                    // Peek: keep the neighbouring variants partially visible so
-                    // the carousel reads as swipeable, not as cramped options.
+                    // contentPadding + pageSpacing reveal neighbours on both
+                    // edges (fillMaxWidth on the card alone did not).
+                    contentPadding = PaddingValues(horizontal = 40.dp),
+                    pageSpacing = 12.dp,
                     beyondViewportPageCount = 1,
                 ) { page ->
                     val (variant, labelRes) = variants[page]
@@ -265,7 +268,7 @@ fun AppSettingsContent(
                     ) {
                     Card(
                         modifier = Modifier
-                            .fillMaxWidth(0.82f)
+                            .fillMaxWidth(0.88f)
                             .fillMaxHeight(),
                         shape = RoundedCornerShape(16.dp),
                         colors = CardDefaults.cardColors(
