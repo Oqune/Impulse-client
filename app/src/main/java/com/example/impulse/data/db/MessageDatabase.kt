@@ -61,9 +61,10 @@ abstract class MessageDatabase : RoomDatabase() {
         private val MIGRATION_3_4 = object : Migration(3, 4) {
             override fun migrate(db: SupportSQLiteDatabase) {
                 // Conversation discriminator for DM isolation. All existing rows
-                // become group messages.
+                // become group messages. NOTE: no extra index here — Room
+                // validates the table schema exactly; an index not declared in
+                // MessageEntity would make the migration check fail.
                 db.execSQL("ALTER TABLE messages ADD COLUMN conversation_id TEXT NOT NULL DEFAULT 'group'")
-                db.execSQL("CREATE INDEX IF NOT EXISTS `index_messages_server_id_conversation_id` ON `messages` (`server_id`, `conversation_id`)")
             }
         }
 
@@ -80,7 +81,11 @@ abstract class MessageDatabase : RoomDatabase() {
                 DB_NAME
             )
                 .addMigrations(MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4)
-                .fallbackToDestructiveMigrationOnDowngrade(dropAllTables = true)
+                // Messages are ephemeral (72h TTL) and re-fetched from the server
+                // via Sync, so an irreconcilable schema difference should NEVER
+                // crash the app — rebuild the tables and resync instead
+                // (Bug: "Migration didn't properly handle: messages").
+                .fallbackToDestructiveMigration(dropAllTables = true)
                 .build()
         }
     }
