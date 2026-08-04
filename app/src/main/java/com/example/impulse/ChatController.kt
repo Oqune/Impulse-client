@@ -479,6 +479,81 @@ class ChatController(private val context: Context) {
         return ok
     }
 
+    /**
+     * Send a private message to ONE known recipient. The blob is still relayed
+     * to everyone (the server broadcasts to all sessions), but only the target
+     * recipient (and the sender, for local echo) holds a decipherable entry.
+     */
+    suspend fun sendDirectMessage(plaintext: String, recipientFingerprint: String): Boolean {
+        if (_state.value != ConnectionState.READY) {
+            LogManager.w(TAG, "sendDirect ignored: not READY (state=${_state.value})")
+            return false
+        }
+        val serverId = currentServer?.id ?: return false
+        val recipientPub = keyRepo.getKemPublicKey(serverId, recipientFingerprint)
+        if (recipientPub == null) {
+            LogManager.w(TAG, "sendDirect: no KEM key for $recipientFingerprint")
+            _lastError.value = "Получатель не найден — обменяйтесь ключами."
+            return false
+        }
+
+        val clientTs = System.currentTimeMillis()
+        val nonce = java.util.UUID.randomUUID().toString()
+        val innerCanonical = Protocol.buildSignedInnerEnvelope(clientName, "", plaintext, clientTs, nonce)
+        val signature = keyManager.signDsa(innerCanonical)
+        val signedEnvelope = Protocol.buildSignedInnerEnvelope(
+            clientName,
+            android.util.Base64.encodeToString(signature, android.util.Base64.NO_WRAP),
+            plaintext,
+            clientTs,
+            nonce
+        )
+
+        val recipients = mutableListOf<Triple<String, ByteArray, ByteArray>>()
+
+        // Target recipient.
+        val (encKey, sharedSecret) = keyManager.encapsulateKem(recipientPub)
+        try {
+            val ciphertext = PqcCrypto.aesEncrypt(sharedSecret, signedEnvelope)
+            recipients.add(Triple(recipientFingerprint, encKey, ciphertext))
+        } finally {
+            sharedSecret.fill(0)
+        }
+
+        // Self entry so the sender sees their own DM locally.
+        val ownPub = keyManager.getKemPublicKey()
+        val (ownEncKey, ownSharedSecret) = keyManager.encapsulateKem(ownPub)
+        try {
+            val ownCiphertext = PqcCrypto.aesEncrypt(ownSharedSecret, signedEnvelope)
+            recipients.add(Triple(keyManager.getFingerprint(), ownEncKey, ownCiphertext))
+        } finally {
+            ownSharedSecret.fill(0)
+        }
+
+        val blob = buildPerRecipientBlob(recipients)
+        val frame = Protocol.buildData(blob)
+        val c = synchronized(lock) { client }
+        val ok = withContext(Dispatchers.IO) { c?.send(frame) ?: false }
+
+        if (ok) {
+            val tempId = -(System.currentTimeMillis())
+            val msg = DecryptedMessage(tempId, clientName, publicKeyHash, plaintext, true, System.currentTimeMillis())
+            synchronized(listeners) { listeners.forEach { it(msg) } }
+        } else {
+            LogManager.w(TAG, "sendDirect: transport send failed, queuing in outbox")
+            synchronized(outboxLock) { outbox.add(OutboxEntry(frame, plaintext)) }
+            persistOutbox()
+            if (!flushOutboxRunning) {
+                scope.launch { flushOutbox() }
+            }
+        }
+        return ok
+    }
+
+    /** Known peers for this server (fingerprint -> short label). */
+    suspend fun knownPeers(serverId: String): List<Pair<String, String>> =
+        keyRepo.getKnownPeers(serverId)
+
     private suspend fun flushOutbox() {
         if (flushOutboxRunning) return
         flushOutboxRunning = true

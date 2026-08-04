@@ -258,32 +258,45 @@ fun AppSettingsContent(
                         ThemeVariant.ULTRA_CONTRAST -> stringResource(R.string.app_settings_variant_ultra_contrast_desc)
                         ThemeVariant.OLED -> stringResource(R.string.app_settings_variant_oled_desc)
                     }
+                    val bgColor by animateColorAsState(
+                        targetValue = if (isSelected)
+                            MaterialTheme.colorScheme.primary.copy(alpha = 0.15f)
+                        else if (enabled)
+                            MaterialTheme.colorScheme.surfaceContainer
+                        else
+                            MaterialTheme.colorScheme.surfaceContainer.copy(alpha = 0.4f),
+                        label = "variant_bg"
+                    )
+                    val borderColor by animateColorAsState(
+                        targetValue = if (isSelected)
+                            MaterialTheme.colorScheme.primary
+                        else
+                            MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.4f),
+                        label = "variant_border"
+                    )
                     // Center the card inside the page so neighbours peek on
                     // both edges (fillMaxWidth alone pinned the card left).
                     Box(
                         modifier = Modifier
                             .fillMaxSize()
-                            .padding(horizontal = 8.dp, vertical = 4.dp),
+                            .padding(vertical = 4.dp),
                         contentAlignment = Alignment.Center,
                     ) {
-                    Card(
-                        modifier = Modifier
-                            .fillMaxWidth(0.88f)
-                            .fillMaxHeight(),
-                        shape = RoundedCornerShape(16.dp),
-                        colors = CardDefaults.cardColors(
-                            containerColor = if (isSelected)
-                                MaterialTheme.colorScheme.primary.copy(alpha = 0.12f)
-                            else if (enabled)
-                                MaterialTheme.colorScheme.surfaceContainer
-                            else
-                                MaterialTheme.colorScheme.surfaceContainer.copy(alpha = 0.4f)
-                        ),
-                        elevation = CardDefaults.cardElevation(defaultElevation = 0.dp),
-                    ) {
+                        // Same visual language as the theme-mode carousel above:
+                        // flat surface + subtle border, no Card.
                         Column(
                             modifier = Modifier
-                                .fillMaxSize()
+                                .fillMaxWidth()
+                                .fillMaxHeight()
+                                .clip(RoundedCornerShape(14.dp))
+                                .background(bgColor)
+                                .border(
+                                    BorderStroke(
+                                        width = if (isSelected) 1.5.dp else 1.dp,
+                                        color = borderColor
+                                    ),
+                                    RoundedCornerShape(14.dp)
+                                )
                                 .clickable(enabled = enabled) {
                                     // Tap a visible neighbour: glide the pager
                                     // to it; the settled-sync applies the theme.
@@ -336,7 +349,6 @@ fun AppSettingsContent(
                                 maxLines = 2,
                             )
                         }
-                    }
                     }
                 }
                 // Dots indicator

@@ -47,6 +47,18 @@ class PublicKeyRepository(context: Context) {
     suspend fun getAllKemPublicKeys(serverId: String): List<ByteArray> =
         dao.getAllKemKeys(serverId)
 
+    /** KEM public key for a specific peer fingerprint, if known. */
+    suspend fun getKemPublicKey(serverId: String, fingerprint: String): ByteArray? =
+        dao.getKemKey(serverId, fingerprint)
+
+    /** Known peers for the DM picker: (fingerprint, shortLabel). */
+    suspend fun getKnownPeers(serverId: String): List<Pair<String, String>> {
+        val own = SecureKeyManager.getFingerprint()
+        return dao.getAllKeys(serverId)
+            .filter { it.fingerprint != own }
+            .map { it.fingerprint to it.fingerprint.take(8) }
+    }
+
     suspend fun getDsaPublicKey(serverId: String, fingerprint: String): ByteArray? =
         dao.getDsaKey(serverId, fingerprint)
 

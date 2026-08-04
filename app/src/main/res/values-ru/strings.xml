@@ -38,6 +38,9 @@
     <string name="chat_connect">Подключить</string>
     <string name="chat_disconnect">Отключить</string>
     <string name="chat_clear_history">Сбросить историю</string>
+    <string name="chat_recipient_group">Группа</string>
+    <string name="chat_dm_title">Кому отправить</string>
+    <string name="chat_dm_no_peers">Участников пока нет. Подключите второе устройство, чтобы обменяться ключами.</string>
     <string name="chat_clear_history_title">Сбросить историю?</string>
     <string name="chat_clear_history_message">Локальная история сообщений будет удалена. Сервер отправит актуальную историю заново.</string>
     <string name="chat_clear_history_confirm">Сбросить</string>
