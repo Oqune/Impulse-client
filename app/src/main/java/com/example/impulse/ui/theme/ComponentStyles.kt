@@ -1,6 +1,5 @@
 package com.example.impulse.ui.theme
 
-import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.layout.*
@@ -26,9 +25,9 @@ import androidx.compose.ui.unit.sp
 // ── Card ────────────────────────────────────────────────────────────────
 
 /**
- * Consistent surface elevation. Explicit `tonalElevation` + a 1px border makes
- * cards render cleanly on old OS versions (API 28-30) where M3 soft-shadow
- * rasterization is unreliable, instead of depending on shadow blur.
+ * Consistent surface elevation. Cards are separated by colour (`tonalElevation`
+ * tints the surface) plus a soft shadow — no hard border, which rendered as a
+ * thick dark outline on old OS versions (API 28-30).
  */
 object ImpulseElevation {
     val card = androidx.compose.ui.unit.Dp(1f)
@@ -47,10 +46,6 @@ fun ImpulseCard(
         containerColor = MaterialTheme.colorScheme.surfaceContainerHigh
     )
     val elevation = CardDefaults.cardElevation(defaultElevation = ImpulseElevation.card)
-    val border = BorderStroke(
-        width = 1.dp,
-        color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f)
-    )
     if (onClick != null) {
         Card(
             onClick = onClick,
@@ -58,7 +53,6 @@ fun ImpulseCard(
             shape = CardShape,
             colors = colors,
             elevation = elevation,
-            border = border,
         ) { Column(Modifier.padding(16.dp), content = content) }
     } else {
         Card(
@@ -66,7 +60,6 @@ fun ImpulseCard(
             shape = CardShape,
             colors = colors,
             elevation = elevation,
-            border = border,
         ) { Column(Modifier.padding(16.dp), content = content) }
     }
 }
@@ -191,10 +184,6 @@ fun ImpulseMenuCard(
             containerColor = MaterialTheme.colorScheme.surfaceContainerHigh,
         ),
         elevation = CardDefaults.cardElevation(defaultElevation = ImpulseElevation.menu),
-        border = BorderStroke(
-            width = 1.dp,
-            color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f)
-        ),
     ) {
         Row(
             modifier = Modifier
