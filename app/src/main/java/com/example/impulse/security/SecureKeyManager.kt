@@ -36,7 +36,7 @@ object SecureKeyManager {
     private const val GCM_IV_LENGTH = 12
     private const val GCM_TAG_LENGTH = 128
     private const val SALT_LENGTH = 16
-    private const val BACKUP_VERSION: Byte = 0x02
+    private const val BACKUP_VERSION: Byte = 0x03
     private const val BACKUP_FILENAME = "key_backup.enc"
     private const val BACKUP_PASSWORD_LENGTH = 16
 
@@ -137,7 +137,7 @@ object SecureKeyManager {
         PqcCrypto.verifyMlDsa65(publicKey, data, signature)
 
     /**
-     * Exports the ML-KEM private key as an encrypted backup file.
+     * Exports the ML-KEM and ML-DSA private keys as an encrypted backup file.
      * The user-selected location is used via [ACTION_OPEN_DOCUMENT_TREE].
      * Returns the backup password (16 chars) that must be shown to the user.
      */
@@ -151,9 +151,15 @@ object SecureKeyManager {
             ?: throw IllegalStateException("No ML-KEM private key to export")
         val kemPub = secure.getBytes(SecureStorage.KEY_KEM_PUBLIC)
             ?: throw IllegalStateException("No ML-KEM public key to export")
+        val dsaPriv = secure.getBytes(SecureStorage.KEY_DSA_PRIVATE)
+            ?: throw IllegalStateException("No ML-DSA private key to export")
+        val dsaPub = secure.getBytes(SecureStorage.KEY_DSA_PUBLIC)
+            ?: throw IllegalStateException("No ML-DSA public key to export")
 
         val aesKey = pbkdf2(password.toCharArray(), salt, PBKDF2_ITERATIONS, AES_KEY_LENGTH)
-        val encrypted = aesGcmEncrypt(aesKey, iv, kemPriv)
+
+        val payload = buildBackupPayload(kemPriv, dsaPriv)
+        val encrypted = aesGcmEncrypt(aesKey, iv, payload)
 
         val bytes = ByteArrayOutputStream()
         bytes.write(BACKUP_VERSION.toInt())
@@ -163,17 +169,24 @@ object SecureKeyManager {
         bytes.write(encrypted)
         bytes.write(intToLittleEndian(kemPub.size))
         bytes.write(kemPub)
+        bytes.write(intToLittleEndian(dsaPub.size))
+        bytes.write(dsaPub)
+        val out = bytes.toByteArray()
 
         val resolver = context.contentResolver
         val mimeType = "application/octet-stream"
         val fileUri = android.provider.DocumentsContract.createDocument(
             resolver, treeUri, mimeType, BACKUP_FILENAME
         ) ?: throw IOException("Failed to create backup file")
-        resolver.openOutputStream(fileUri)?.use { it.write(bytes.toByteArray()) }
+        resolver.openOutputStream(fileUri)?.use { it.write(out) }
             ?: throw IOException("Failed to write backup file")
 
+        out.fill(0)
+        payload.fill(0)
         kemPriv.fill(0)
         kemPub.fill(0)
+        dsaPriv.fill(0)
+        dsaPub.fill(0)
         encrypted.fill(0)
         aesKey.fill(0)
 
@@ -194,9 +207,15 @@ object SecureKeyManager {
             ?: throw IllegalStateException("No ML-KEM private key to export")
         val kemPub = secure.getBytes(SecureStorage.KEY_KEM_PUBLIC)
             ?: throw IllegalStateException("No ML-KEM public key to export")
+        val dsaPriv = secure.getBytes(SecureStorage.KEY_DSA_PRIVATE)
+            ?: throw IllegalStateException("No ML-DSA private key to export")
+        val dsaPub = secure.getBytes(SecureStorage.KEY_DSA_PUBLIC)
+            ?: throw IllegalStateException("No ML-DSA public key to export")
 
         val aesKey = pbkdf2(password.toCharArray(), salt, PBKDF2_ITERATIONS, AES_KEY_LENGTH)
-        val encrypted = aesGcmEncrypt(aesKey, iv, kemPriv)
+
+        val payload = buildBackupPayload(kemPriv, dsaPriv)
+        val encrypted = aesGcmEncrypt(aesKey, iv, payload)
 
         val bytes = ByteArrayOutputStream()
         bytes.write(BACKUP_VERSION.toInt())
@@ -206,6 +225,9 @@ object SecureKeyManager {
         bytes.write(encrypted)
         bytes.write(intToLittleEndian(kemPub.size))
         bytes.write(kemPub)
+        bytes.write(intToLittleEndian(dsaPub.size))
+        bytes.write(dsaPub)
+        val out = bytes.toByteArray()
 
         val resolver = context.contentResolver
         val contentValues = android.content.ContentValues().apply {
@@ -214,11 +236,15 @@ object SecureKeyManager {
         }
         val uri = resolver.insert(MediaStore.Downloads.EXTERNAL_CONTENT_URI, contentValues)
             ?: throw IOException("Failed to create backup file")
-        resolver.openOutputStream(uri)?.use { it.write(bytes.toByteArray()) }
+        resolver.openOutputStream(uri)?.use { it.write(out) }
             ?: throw IOException("Failed to write backup file")
 
+        out.fill(0)
+        payload.fill(0)
         kemPriv.fill(0)
         kemPub.fill(0)
+        dsaPriv.fill(0)
+        dsaPub.fill(0)
         encrypted.fill(0)
         aesKey.fill(0)
 
@@ -232,44 +258,83 @@ object SecureKeyManager {
 
         require(bytes.size > 33) { "Backup file too small" }
         val version = bytes[0]
-        require(version == BACKUP_VERSION || version == 0x01.toByte()) {
+        require(version == BACKUP_VERSION || version == 0x01.toByte() || version == 0x02.toByte()) {
             "Unsupported backup version: $version"
         }
 
         val salt = bytes.copyOfRange(1, 1 + SALT_LENGTH)
         val iv = bytes.copyOfRange(1 + SALT_LENGTH, 1 + SALT_LENGTH + GCM_IV_LENGTH)
         val encKeyLenOffset = 1 + SALT_LENGTH + GCM_IV_LENGTH
+        require(encKeyLenOffset + 4 <= bytes.size) { "Backup file truncated" }
         val encKeyLen = intFromLittleEndian(bytes, encKeyLenOffset)
+        require(encKeyLen >= 0 && encKeyLenOffset + 4 + encKeyLen <= bytes.size) { "Backup file truncated" }
         val encKeyDataEnd = encKeyLenOffset + 4 + encKeyLen
         val encrypted = bytes.copyOfRange(encKeyLenOffset + 4, encKeyDataEnd)
 
         val aesKey = pbkdf2(password.toCharArray(), salt, PBKDF2_ITERATIONS, AES_KEY_LENGTH)
-        val kemPriv = aesGcmDecrypt(aesKey, iv, encrypted)
+        val decrypted = aesGcmDecrypt(aesKey, iv, encrypted)
 
         val secure = SecureStorage(context)
 
+        val kemPriv: ByteArray
         val kemPub: ByteArray
-        if (version >= 0x02.toByte() && encKeyDataEnd + 4 <= bytes.size) {
-            val pubLen = intFromLittleEndian(bytes, encKeyDataEnd)
-            kemPub = bytes.copyOfRange(encKeyDataEnd + 4, encKeyDataEnd + 4 + pubLen)
+        val dsaPriv: ByteArray
+        val dsaPub: ByteArray
+
+        if (version >= 0x03.toByte()) {
+            // v3 payload = kemPrivLen(4) || kemPriv || dsaPrivLen(4) || dsaPriv
+            val (k, d) = parseBackupPayload(decrypted)
+            kemPriv = k
+            dsaPriv = d
+
+            var pubOff = encKeyDataEnd
+            require(pubOff + 4 <= bytes.size) { "Backup file truncated" }
+            val kemPubLen = intFromLittleEndian(bytes, pubOff)
+            pubOff += 4
+            require(kemPubLen >= 0 && pubOff + kemPubLen <= bytes.size) { "Backup file truncated" }
+            kemPub = bytes.copyOfRange(pubOff, pubOff + kemPubLen)
+            pubOff += kemPubLen
+            require(pubOff + 4 <= bytes.size) { "Backup file truncated" }
+            val dsaPubLen = intFromLittleEndian(bytes, pubOff)
+            pubOff += 4
+            require(dsaPubLen >= 0 && pubOff + dsaPubLen <= bytes.size) { "Backup file truncated" }
+            dsaPub = bytes.copyOfRange(pubOff, pubOff + dsaPubLen)
+            pubOff += dsaPubLen
+            require(pubOff == bytes.size) { "Backup file has trailing bytes" }
         } else {
-            val fresh = PqcCrypto.generateKeyPair()
-            kemPub = fresh.publicEncoded
+            // v1/v2 carried only the ML-KEM key pair.
+            kemPriv = decrypted
+            if (version >= 0x02.toByte() && encKeyDataEnd + 4 <= bytes.size) {
+                val pubLen = intFromLittleEndian(bytes, encKeyDataEnd)
+                require(pubLen >= 0 && encKeyDataEnd + 4 + pubLen <= bytes.size) { "Backup file truncated" }
+                kemPub = bytes.copyOfRange(encKeyDataEnd + 4, encKeyDataEnd + 4 + pubLen)
+            } else {
+                val fresh = PqcCrypto.generateKeyPair()
+                kemPub = fresh.publicEncoded
+            }
+            val dsa = PqcCrypto.generateMlDsa65KeyPair()
+            dsaPriv = dsa.privateEncoded
+            dsaPub = dsa.publicEncoded
         }
+
+        PqcCrypto.validateKemPublicKey(kemPub)
+        PqcCrypto.validateDsaPublicKey(dsaPub)
 
         secure.putBytes(SecureStorage.KEY_KEM_PRIVATE, kemPriv)
         secure.putBytes(SecureStorage.KEY_KEM_PUBLIC, kemPub)
         kemKeyPair = PqcCrypto.KeyPair(kemPriv, kemPub)
 
-        val dsa = PqcCrypto.generateMlDsa65KeyPair()
-        secure.putBytes(SecureStorage.KEY_DSA_PRIVATE, dsa.privateEncoded)
-        secure.putBytes(SecureStorage.KEY_DSA_PUBLIC, dsa.publicEncoded)
-        dsaKeyPair = dsa
+        secure.putBytes(SecureStorage.KEY_DSA_PRIVATE, dsaPriv)
+        secure.putBytes(SecureStorage.KEY_DSA_PUBLIC, dsaPub)
+        dsaKeyPair = PqcCrypto.MlDsa65KeyPair(dsaPriv, dsaPub)
 
         resolver.delete(file, null, null)
 
         kemPriv.fill(0)
         kemPub.fill(0)
+        dsaPriv.fill(0)
+        dsaPub.fill(0)
+        decrypted.fill(0)
         encrypted.fill(0)
         aesKey.fill(0)
 
@@ -316,4 +381,39 @@ object SecureKeyManager {
             ((bytes[offset + 1].toInt() and 0xFF) shl 8) or
             ((bytes[offset + 2].toInt() and 0xFF) shl 16) or
             ((bytes[offset + 3].toInt() and 0xFF) shl 24)
+
+    /**
+     * Serialises both private keys for backup v3:
+     * kemPrivLen(4) || kemPriv || dsaPrivLen(4) || dsaPriv.
+     */
+    internal fun buildBackupPayload(kemPriv: ByteArray, dsaPriv: ByteArray): ByteArray {
+        val buf = ByteArrayOutputStream()
+        buf.write(intToLittleEndian(kemPriv.size))
+        buf.write(kemPriv)
+        buf.write(intToLittleEndian(dsaPriv.size))
+        buf.write(dsaPriv)
+        return buf.toByteArray()
+    }
+
+    /**
+     * Parses a backup v3 payload. Returns (kemPriv, dsaPriv).
+     * Throws on malformed input (bounds-checked).
+     */
+    internal fun parseBackupPayload(payload: ByteArray): Pair<ByteArray, ByteArray> {
+        var off = 0
+        require(off + 4 <= payload.size) { "Backup payload truncated" }
+        val kemPrivLen = intFromLittleEndian(payload, off)
+        off += 4
+        require(kemPrivLen >= 0 && off + kemPrivLen <= payload.size) { "Backup payload truncated" }
+        val kemPriv = payload.copyOfRange(off, off + kemPrivLen)
+        off += kemPrivLen
+        require(off + 4 <= payload.size) { "Backup payload truncated" }
+        val dsaPrivLen = intFromLittleEndian(payload, off)
+        off += 4
+        require(dsaPrivLen >= 0 && off + dsaPrivLen <= payload.size) { "Backup payload truncated" }
+        val dsaPriv = payload.copyOfRange(off, off + dsaPrivLen)
+        off += dsaPrivLen
+        require(off == payload.size) { "Backup payload has trailing bytes" }
+        return Pair(kemPriv, dsaPriv)
+    }
 }

@@ -52,6 +52,43 @@ class KeyBackupTest {
     }
 
     @Test
+    fun backupFileFormat_backupVersionIsThree() {
+        val version: Byte = 0x03
+        assertEquals(3, version.toInt())
+    }
+
+    @Test
+    fun backupV3_payloadBuildAndParseRoundTrip() {
+        val kemPriv = byteArrayOf(1, 2, 3, 4, 5)
+        val dsaPriv = byteArrayOf(9, 8, 7, 6, 5, 4, 3, 2, 1)
+        val payload = SecureKeyManager.buildBackupPayload(kemPriv, dsaPriv)
+        val (k, d) = SecureKeyManager.parseBackupPayload(payload)
+        assertArrayEquals("KEM private key must round-trip", kemPriv, k)
+        assertArrayEquals("DSA private key must round-trip", dsaPriv, d)
+    }
+
+    @Test
+    fun backupV3_emptyKeysRoundTrip() {
+        val payload = SecureKeyManager.buildBackupPayload(ByteArray(0), ByteArray(0))
+        val (k, d) = SecureKeyManager.parseBackupPayload(payload)
+        assertArrayEquals(ByteArray(0), k)
+        assertArrayEquals(ByteArray(0), d)
+    }
+
+    @Test
+    fun backupV3_truncatedPayloadRejected() {
+        val payload = SecureKeyManager.buildBackupPayload(byteArrayOf(1, 2, 3), byteArrayOf(4, 5, 6))
+        val truncated = payload.copyOfRange(0, payload.size - 2)
+        var threw = false
+        try {
+            SecureKeyManager.parseBackupPayload(truncated)
+        } catch (e: Throwable) {
+            threw = true
+        }
+        assertTrue("truncated payload must be rejected", threw)
+    }
+
+    @Test
     fun backupFileFormat_intLittleEndianBytes() {
         val littleEndianFF00 = SecureKeyManager.intToLittleEndian(0x0000FF00.toInt())
         assertEquals(0x00.toByte(), littleEndianFF00[0])

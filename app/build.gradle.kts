@@ -51,7 +51,10 @@ android {
         abi {
             isEnable = true
             reset()
-            include("arm64-v8a", "armeabi-v7a", "x86_64")
+            // x86 is listed so a universal APK is installable on x86 emulators;
+            // note socket-quic-quiche-android ships no x86 native lib, so QUIC
+            // degrades to the emulator guard (WebTransportClient) on those ABIs.
+            include("arm64-v8a", "armeabi-v7a", "x86_64", "x86")
             isUniversalApk = true
         }
     }
