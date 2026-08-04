@@ -2,6 +2,7 @@ package com.example.impulse.ui.screens
 
 import androidx.activity.compose.BackHandler
 import androidx.compose.animation.*
+import androidx.compose.animation.core.FastOutSlowInEasing
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
@@ -154,7 +155,10 @@ fun MainScreen() {
         ) { innerPadding ->
             Crossfade(
                 targetState = selectedItem,
-                animationSpec = tween(durationMillis = 250),
+                animationSpec = tween(
+                    durationMillis = 280,
+                    easing = FastOutSlowInEasing,
+                ),
                 label = "tab_crossfade"
             ) { tab ->
                 when (tab) {

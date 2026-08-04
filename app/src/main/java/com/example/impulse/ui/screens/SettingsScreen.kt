@@ -209,7 +209,8 @@ private fun ServerListContent(
                 shape = CardShape,
                 colors = CardDefaults.cardColors(
                     containerColor = MaterialTheme.colorScheme.surfaceContainer
-                )
+                ),
+                elevation = CardDefaults.cardElevation(defaultElevation = 0.dp)
             ) {
                 Column {
                     // Server header — tap to expand

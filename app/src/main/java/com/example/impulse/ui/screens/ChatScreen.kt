@@ -486,7 +486,7 @@ fun ChatScreen(
                             .statusBarsPadding(),
                         color = Color.Transparent,
                         contentColor = MaterialTheme.colorScheme.onSurface,
-                        shadowElevation = 2.dp
+                        shadowElevation = 0.dp
                     ) {
                         Row(
                             modifier = Modifier

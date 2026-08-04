@@ -20,6 +20,8 @@ import androidx.compose.material.icons.filled.PhoneAndroid
 import androidx.compose.material.icons.filled.ArrowDropDown
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
+import androidx.compose.runtime.snapshotFlow
+import kotlinx.coroutines.flow.drop
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -29,6 +31,7 @@ import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import com.example.impulse.R
 import com.example.impulse.locale.LocaleSettings
@@ -71,30 +74,57 @@ fun AppSettingsContent(
         // ── Theme mode ──────────────────────────────────────────────
         ImpulseCard {
             ImpulseSection(title = stringResource(R.string.app_settings_display_mode)) {
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.spacedBy(8.dp)
-                ) {
-                    ThemeModeData.entries.forEach { entry ->
-                        val isSelected = selectedTheme == entry.mode
-                        val bgColor by animateColorAsState(
-                            targetValue = if (isSelected)
-                                MaterialTheme.colorScheme.primary.copy(alpha = 0.15f)
-                            else
-                                MaterialTheme.colorScheme.surfaceContainer,
-                            label = "mode_bg"
-                        )
-                        val borderColor by animateColorAsState(
-                            targetValue = if (isSelected)
-                                MaterialTheme.colorScheme.primary
-                            else
-                                MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.4f),
-                            label = "mode_border"
-                        )
-
+                val modeEntries = ThemeModeData.entries
+                val modeIndex = modeEntries.indexOfFirst { it.mode == selectedTheme }.coerceAtLeast(0)
+                val modePager = rememberPagerState(
+                    initialPage = modeIndex,
+                    pageCount = { modeEntries.size }
+                )
+                // Apply the theme only once the swipe settles — avoids the
+                // jarring mid-drag theme switch.
+                LaunchedEffect(modePager) {
+                    snapshotFlow { modePager.currentPage }
+                        .drop(1)
+                        .collect { page ->
+                            modePager.animateScrollToPage(page)
+                            val entry = modeEntries[page]
+                            selectedTheme = entry.mode
+                            ThemeSettings.setThemeMode(entry.mode)
+                        }
+                }
+                HorizontalPager(
+                    state = modePager,
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .height(86.dp),
+                    beyondViewportPageCount = 1,
+                ) { page ->
+                    val entry = modeEntries[page]
+                    val isSelected = selectedTheme == entry.mode
+                    val bgColor by animateColorAsState(
+                        targetValue = if (isSelected)
+                            MaterialTheme.colorScheme.primary.copy(alpha = 0.15f)
+                        else
+                            MaterialTheme.colorScheme.surfaceContainer,
+                        label = "mode_bg"
+                    )
+                    val borderColor by animateColorAsState(
+                        targetValue = if (isSelected)
+                            MaterialTheme.colorScheme.primary
+                        else
+                            MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.4f),
+                        label = "mode_border"
+                    )
+                    Box(
+                        modifier = Modifier
+                            .fillMaxSize()
+                            .padding(horizontal = 8.dp, vertical = 4.dp),
+                        contentAlignment = Alignment.Center,
+                    ) {
                         Column(
                             modifier = Modifier
-                                .weight(1f)
+                                .fillMaxWidth()
+                                .fillMaxHeight()
                                 .clip(RoundedCornerShape(14.dp))
                                 .background(bgColor)
                                 .border(
@@ -110,7 +140,7 @@ fun AppSettingsContent(
                                 }
                                 .padding(vertical = 14.dp, horizontal = 4.dp),
                             horizontalAlignment = Alignment.CenterHorizontally,
-                            verticalArrangement = Arrangement.spacedBy(6.dp),
+                            verticalArrangement = Arrangement.Center,
                         ) {
                             Icon(
                                 imageVector = entry.icon,
@@ -121,6 +151,7 @@ fun AppSettingsContent(
                                     MaterialTheme.colorScheme.onSurfaceVariant,
                                 modifier = Modifier.size(22.dp)
                             )
+                            Spacer(Modifier.height(6.dp))
                             Text(
                                 text = stringResource(entry.labelRes),
                                 style = MaterialTheme.typography.labelSmall,
@@ -132,6 +163,25 @@ fun AppSettingsContent(
                                 maxLines = 1,
                             )
                         }
+                    }
+                }
+                // Dots indicator
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.Center,
+                ) {
+                    modeEntries.indices.forEach { i ->
+                        val selected = i == modePager.currentPage
+                        Box(
+                            modifier = Modifier
+                                .padding(4.dp)
+                                .size(if (selected) 8.dp else 6.dp)
+                                .clip(CircleShape)
+                                .background(
+                                    if (selected) MaterialTheme.colorScheme.primary
+                                    else MaterialTheme.colorScheme.outlineVariant
+                                )
+                        )
                     }
                 }
 
@@ -154,17 +204,26 @@ fun AppSettingsContent(
                     initialPage = variantIndex.coerceAtLeast(0),
                     pageCount = { variants.size }
                 )
-                // Keep the selected variant in sync when the pager settles.
-                LaunchedEffect(pagerState.currentPage) {
-                    val (v, _) = variants[pagerState.currentPage]
-                    themeVariant = v
-                    ThemeSettings.setThemeVariant(v)
+                // Apply the variant once the swipe settles (no jarring switch
+                // mid-drag) and ease the pager to the final page.
+                LaunchedEffect(pagerState) {
+                    snapshotFlow { pagerState.currentPage }
+                        .drop(1)
+                        .collect { page ->
+                            pagerState.animateScrollToPage(page)
+                            val (v, _) = variants[page]
+                            themeVariant = v
+                            ThemeSettings.setThemeVariant(v)
+                        }
                 }
                 HorizontalPager(
                     state = pagerState,
                     modifier = Modifier
                         .fillMaxWidth()
-                        .height(96.dp),
+                        .height(118.dp),
+                    // Peek: keep the neighbouring variants partially visible so
+                    // the carousel reads as swipeable, not as cramped options.
+                    beyondViewportPageCount = 1,
                 ) { page ->
                     val (variant, labelRes) = variants[page]
                     val isOled = variant == ThemeVariant.OLED
@@ -176,11 +235,25 @@ fun AppSettingsContent(
                         ThemeVariant.OLED -> Color(0xFF000000)
                         ThemeVariant.ULTRA_CONTRAST -> if (isDarkActive) Color(0xFF000000) else Color(0xFFFFFFFF)
                     }
-                    Card(
+                    val desc = when (variant) {
+                        ThemeVariant.CLASSIC -> stringResource(R.string.app_settings_variant_classic_desc)
+                        ThemeVariant.MATERIAL_YOU -> stringResource(R.string.app_settings_variant_material_you_desc)
+                        ThemeVariant.ULTRA_CONTRAST -> stringResource(R.string.app_settings_variant_ultra_contrast_desc)
+                        ThemeVariant.OLED -> stringResource(R.string.app_settings_variant_oled_desc)
+                    }
+                    // Center the card inside the page so neighbours peek on
+                    // both edges (fillMaxWidth alone pinned the card left).
+                    Box(
                         modifier = Modifier
                             .fillMaxSize()
-                            .padding(horizontal = 4.dp),
-                        shape = RoundedCornerShape(14.dp),
+                            .padding(horizontal = 8.dp, vertical = 4.dp),
+                        contentAlignment = Alignment.Center,
+                    ) {
+                    Card(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .fillMaxHeight(),
+                        shape = RoundedCornerShape(16.dp),
                         colors = CardDefaults.cardColors(
                             containerColor = if (isSelected)
                                 MaterialTheme.colorScheme.primary.copy(alpha = 0.12f)
@@ -198,17 +271,18 @@ fun AppSettingsContent(
                                     themeVariant = variant
                                     ThemeSettings.setThemeVariant(variant)
                                 }
-                                .padding(vertical = 10.dp, horizontal = 8.dp),
+                                .padding(vertical = 12.dp, horizontal = 10.dp),
                             horizontalAlignment = Alignment.CenterHorizontally,
+                            verticalArrangement = Arrangement.Center,
                         ) {
                             Box(
                                 modifier = Modifier
-                                    .size(34.dp)
-                                    .clip(RoundedCornerShape(8.dp))
+                                    .size(38.dp)
+                                    .clip(RoundedCornerShape(9.dp))
                                     .background(preview)
                                     .then(
                                         if (variant == ThemeVariant.CLASSIC)
-                                            Modifier.border(1.dp, MaterialTheme.colorScheme.outlineVariant, RoundedCornerShape(8.dp))
+                                            Modifier.border(1.dp, MaterialTheme.colorScheme.outlineVariant, RoundedCornerShape(9.dp))
                                         else Modifier
                                     ),
                                 contentAlignment = Alignment.Center,
@@ -225,17 +299,26 @@ fun AppSettingsContent(
                                     },
                                 )
                             }
-                            Spacer(Modifier.height(6.dp))
+                            Spacer(Modifier.height(8.dp))
                             Text(
                                 text = stringResource(labelRes),
-                                style = MaterialTheme.typography.labelSmall,
+                                style = MaterialTheme.typography.labelMedium,
                                 fontWeight = if (isSelected) FontWeight.SemiBold else FontWeight.Normal,
                                 color = if (isSelected) MaterialTheme.colorScheme.primary
                                 else if (enabled) MaterialTheme.colorScheme.onSurfaceVariant
                                 else MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.4f),
                                 maxLines = 1,
                             )
+                            Text(
+                                text = desc,
+                                style = MaterialTheme.typography.labelSmall,
+                                color = if (enabled) MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.75f)
+                                else MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.4f),
+                                textAlign = TextAlign.Center,
+                                maxLines = 2,
+                            )
                         }
+                    }
                     }
                 }
                 // Dots indicator
@@ -333,7 +416,8 @@ fun AppSettingsContent(
             }
         }
 
-        // ── Hue slider ──────────────────────────────────────────────
+        // ── Hue slider (hidden for Material You — the wallpaper drives colour) ──
+        if (themeVariant != ThemeVariant.MATERIAL_YOU) {
         ImpulseCard {
             ImpulseSection(title = stringResource(R.string.app_settings_hue)) {
                 val previewColor = hslToColor(hue, 0.88f, 0.58f)
@@ -433,6 +517,7 @@ fun AppSettingsContent(
                     }
                 }
             }
+        }
         }
 
         // ── Font scale ─────────────────────────────────────────────

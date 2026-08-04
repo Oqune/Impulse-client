@@ -26,14 +26,14 @@ import androidx.compose.ui.unit.sp
 // ── Card ────────────────────────────────────────────────────────────────
 
 /**
- * Consistent surface elevation. Cards are separated by colour (`tonalElevation`
- * tints the surface) plus a soft shadow — no hard border, which rendered as a
- * thick dark outline on old OS versions (API 28-30).
+ * Consistent surface elevation. Cards are separated by colour alone — zero
+ * elevation everywhere so no soft-shadow is drawn (which rendered as clipped
+ * dark bands on card/button edges in the light theme).
  */
 object ImpulseElevation {
-    val card = androidx.compose.ui.unit.Dp(1f)
-    val menu = androidx.compose.ui.unit.Dp(2f)
-    val overlay = androidx.compose.ui.unit.Dp(6f)
+    val card = androidx.compose.ui.unit.Dp(0f)
+    val menu = androidx.compose.ui.unit.Dp(0f)
+    val overlay = androidx.compose.ui.unit.Dp(0f)
 }
 
 @OptIn(ExperimentalMaterial3Api::class)

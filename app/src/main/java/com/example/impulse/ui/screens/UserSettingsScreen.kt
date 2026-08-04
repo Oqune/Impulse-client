@@ -108,7 +108,8 @@ fun UserSettingsContent(
             shape = RoundedCornerShape(20.dp),
             colors = CardDefaults.cardColors(
                 containerColor = MaterialTheme.colorScheme.primaryContainer
-            )
+            ),
+            elevation = CardDefaults.cardElevation(defaultElevation = 0.dp),
         ) {
             Row(
                 modifier = Modifier
@@ -291,7 +292,7 @@ fun UserSettingsContent(
         AlertDialog(
             onDismissRequest = { showNameDialog = false },
             containerColor = MaterialTheme.colorScheme.surface,
-            tonalElevation = 8.dp,
+            tonalElevation = 0.dp,
             title = { Text(stringResource(R.string.user_change_name_title)) },
             text = {
                 Column {

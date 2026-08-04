@@ -106,7 +106,8 @@ fun ChatListScreen(
                                     MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.3f)
                                 else
                                     MaterialTheme.colorScheme.surfaceContainer
-                            )
+                            ),
+                            elevation = CardDefaults.cardElevation(defaultElevation = 0.dp)
                         ) {
                             Row(
                                 modifier = Modifier

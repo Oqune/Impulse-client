@@ -17,7 +17,6 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
@@ -140,12 +139,7 @@ fun HomeScreen(
             ) {
             // ── Header ──
             Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                Box(
-                    contentAlignment = Alignment.Center,
-                    modifier = Modifier.graphicsLayer {
-                        rotationZ = -4f
-                    }
-                ) {
+                Box(contentAlignment = Alignment.Center) {
                     // Background gradient layer
                     Text(
                         text = stringResource(R.string.app_name),
