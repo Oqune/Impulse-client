@@ -1,13 +1,19 @@
-# BouncyCastle PQC — only keep the PQC provider and algorithm classes used
-# (ML-KEM-768 via Kyber, ML-DSA-65 via Dilithium)
--keep class org.bouncycastle.pqc.jcajce.provider.BouncyCastlePQCProvider { *; }
--keep class org.bouncycastle.pqc.jcajce.spec.KyberParameterSpec { *; }
--keep class org.bouncycastle.pqc.jcajce.spec.DilithiumParameterSpec { *; }
--keep class org.bouncycastle.pqc.jcajce.SecretKeyWithEncapsulation { *; }
--keep class org.bouncycastle.pqc.jcajce.spec.KEMGenerateSpec { *; }
--keep class org.bouncycastle.pqc.jcajce.spec.KEMExtractSpec { *; }
--dontwarn org.bouncycastle.pqc.jcajce.provider.BouncyCastlePQCProvider
--dontwarn org.bouncycastle.pqc.jcajce.spec.**
+# BouncyCastle PQC — R8 strips provider algorithm classes (registered via SPI
+# strings, not direct references), which made release builds throw
+# "NoSuchAlgorithmException: no such algorithm: Kyber for provider BCPQC".
+# Keep the whole PQC provider tree (incl. the Kyber/Dilithium service impls).
+-keep class org.bouncycastle.pqc.jcajce.provider.** { *; }
+-keep class org.bouncycastle.pqc.jcajce.spec.** { *; }
+-keep class org.bouncycastle.pqc.jcajce.** { *; }
+-keep class org.bouncycastle.pqc.math.** { *; }
+-keep class org.bouncycastle.pqc.asn1.** { *; }
+-keep class org.bouncycastle.jcajce.spec.** { *; }
+-keep class org.bouncycastle.jcajce.SecretKeyWithEncapsulation { *; }
+-keep class org.bouncycastle.jcajce.spec.KEMGenerateSpec { *; }
+-keep class org.bouncycastle.jcajce.spec.KEMExtractSpec { *; }
+-keepclassmembers class org.bouncycastle.jcajce.provider.** { *; }
+-dontwarn org.bouncycastle.pqc.**
+-dontwarn org.bouncycastle.jcajce.**
 
 # Room DAOs and entities
 -keep class * extends androidx.room.RoomDatabase
