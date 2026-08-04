@@ -23,7 +23,7 @@ import androidx.sqlite.db.SupportSQLiteDatabase
  * contain plaintext. This satisfies the "SQLite with encryption" requirement
  * without any native dependency, and the app now loads on 16 KB-page devices.
  */
-@Database(entities = [MessageEntity::class, PublicKeyEntity::class], version = 3, exportSchema = false)
+@Database(entities = [MessageEntity::class, PublicKeyEntity::class], version = 4, exportSchema = false)
 abstract class MessageDatabase : RoomDatabase() {
     abstract fun messageDao(): MessageDao
     abstract fun publicKeyDao(): PublicKeyDao
@@ -58,6 +58,15 @@ abstract class MessageDatabase : RoomDatabase() {
             }
         }
 
+        private val MIGRATION_3_4 = object : Migration(3, 4) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                // Conversation discriminator for DM isolation. All existing rows
+                // become group messages.
+                db.execSQL("ALTER TABLE messages ADD COLUMN conversation_id TEXT NOT NULL DEFAULT 'group'")
+                db.execSQL("CREATE INDEX IF NOT EXISTS `index_messages_server_id_conversation_id` ON `messages` (`server_id`, `conversation_id`)")
+            }
+        }
+
         fun getInstance(context: Context): MessageDatabase {
             return INSTANCE ?: synchronized(this) {
                 INSTANCE ?: build(context).also { INSTANCE = it }
@@ -70,7 +79,7 @@ abstract class MessageDatabase : RoomDatabase() {
                 MessageDatabase::class.java,
                 DB_NAME
             )
-                .addMigrations(MIGRATION_1_2, MIGRATION_2_3)
+                .addMigrations(MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4)
                 .fallbackToDestructiveMigrationOnDowngrade(dropAllTables = true)
                 .build()
         }
