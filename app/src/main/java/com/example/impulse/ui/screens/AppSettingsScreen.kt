@@ -96,7 +96,7 @@ fun AppSettingsContent(
                     state = modePager,
                     modifier = Modifier
                         .fillMaxWidth()
-                        .height(88.dp),
+                        .height(112.dp),
                     // contentPadding + pageSpacing reveal the neighbours on
                     // both edges (fillMaxWidth on the card alone did not).
                     contentPadding = PaddingValues(horizontal = 40.dp),
@@ -206,16 +206,32 @@ fun AppSettingsContent(
                 Spacer(Modifier.height(10.dp))
 
                 // Theme variant carousel — swipe to change: Classic / Material
-                // You / OLED / Ultra Contrast. OLED is disabled in light mode.
+                // You / Ultra Contrast / OLED. OLED only makes sense on a dark
+                // background, so in a light theme it is hidden entirely
+                // (Bug: "OLED selectable in light mode").
                 val variants = buildList {
                     add(ThemeVariant.CLASSIC to R.string.app_settings_variant_classic)
                     if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
                         add(ThemeVariant.MATERIAL_YOU to R.string.app_settings_variant_material_you)
                     }
                     add(ThemeVariant.ULTRA_CONTRAST to R.string.app_settings_variant_ultra_contrast)
-                    add(ThemeVariant.OLED to R.string.app_settings_oled)
+                    if (isDarkActive) {
+                        add(ThemeVariant.OLED to R.string.app_settings_oled)
+                    }
+                }
+                // If the effective theme just became light and the current
+                // variant is OLED (only reachable in dark mode), fall back to
+                // Classic — OLED has no light rendering.
+                LaunchedEffect(isDarkActive) {
+                    if (!isDarkActive && themeVariant == ThemeVariant.OLED) {
+                        themeVariant = ThemeVariant.CLASSIC
+                        ThemeSettings.setThemeVariant(ThemeVariant.CLASSIC)
+                    }
                 }
                 val variantIndex = variants.indexOfFirst { it.first == themeVariant }
+                // Recreate the pager when switching light/dark so the page count
+                // (OLED hidden/shown) and the selected page stay consistent.
+                key(isDarkActive) {
                 val pagerState = rememberPagerState(
                     initialPage = variantIndex.coerceAtLeast(0),
                     pageCount = { variants.size }
@@ -369,6 +385,7 @@ fun AppSettingsContent(
                                 )
                         )
                     }
+                }
                 }
             }
         }

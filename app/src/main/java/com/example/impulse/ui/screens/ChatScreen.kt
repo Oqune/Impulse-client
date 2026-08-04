@@ -30,6 +30,7 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 import androidx.lifecycle.viewmodel.compose.viewModel
 import com.example.impulse.data.MessageRepository
 import com.example.impulse.data.ServerConfig
@@ -81,57 +82,57 @@ fun ChatMessageItem(message: ChatMessage) {
     val isOwn = message.isOwn
     val messageType = message.messageType
 
-    Row(
+    // Constructive scheme: the bubble hugs its content (adaptive width up to
+    // 78% of the list) instead of stretching full-width, and the timestamp
+    // sits in the bubble's outer bottom corner — bottom-right for own,
+    // bottom-left for others.
+    BoxWithConstraints(
         modifier = Modifier
             .fillMaxWidth()
-            .padding(vertical = 4.dp, horizontal = 4.dp),
-        horizontalArrangement = if (isOwn) Arrangement.End else Arrangement.Start
+            .padding(horizontal = 4.dp, vertical = 3.dp)
     ) {
-        Box(
-            modifier = Modifier
-                .fillMaxWidth(0.85f)
-                .background(
-                    color = getMessageBackgroundColor(messageType, isOwn, message.sender),
-                    shape = RoundedCornerShape(
-                        topStart = 18.dp,
-                        topEnd = 18.dp,
-                        bottomStart = if (isOwn) 18.dp else 4.dp,
-                        bottomEnd = if (isOwn) 4.dp else 18.dp
-                    )
-                )
+        val bubbleMaxWidth = maxWidth * 0.78f
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = if (isOwn) Arrangement.End else Arrangement.Start
         ) {
-            Column(modifier = Modifier.padding(12.dp, 10.dp)) {
-                if (message.sender.isNotEmpty() && !isOwn) {
-                    Row(verticalAlignment = Alignment.CenterVertically) {
+            Box(
+                modifier = Modifier
+                    .widthIn(max = bubbleMaxWidth)
+                    .background(
+                        color = getMessageBackgroundColor(messageType, isOwn, message.sender),
+                        shape = RoundedCornerShape(
+                            topStart = 18.dp,
+                            topEnd = 18.dp,
+                            bottomStart = if (isOwn) 18.dp else 4.dp,
+                            bottomEnd = if (isOwn) 4.dp else 18.dp
+                        )
+                    )
+            ) {
+                Column(modifier = Modifier.padding(horizontal = 14.dp, vertical = 9.dp)) {
+                    if (message.sender.isNotEmpty() && !isOwn) {
                         Text(
                             text = message.sender,
-                            style = MaterialTheme.typography.labelMedium,
-                            fontWeight = FontWeight.Bold,
-                            color = getSenderColor(messageType, isOwn, message.sender),
+                            style = MaterialTheme.typography.labelSmall,
+                            fontWeight = FontWeight.Medium,
+                            color = getSenderColor(messageType, isOwn, message.sender).copy(alpha = 0.85f),
+                            modifier = Modifier.padding(bottom = 3.dp)
                         )
-                        if (message.senderFingerprint.isNotEmpty()) {
-                            Text(
-                                text = " #${message.senderFingerprint}",
-                                style = MaterialTheme.typography.labelSmall,
-                                fontWeight = FontWeight.Normal,
-                                color = getSenderColor(messageType, isOwn, message.sender).copy(alpha = 0.75f),
-                            )
-                        }
                     }
+                    Text(
+                        text = message.content,
+                        style = MaterialTheme.typography.bodyLarge,
+                        color = getContentColor(messageType, isOwn, message.sender)
+                    )
+                    Spacer(Modifier.height(3.dp))
+                    Text(
+                        text = message.timestamp.removeSurrounding("[", "]"),
+                        style = MaterialTheme.typography.labelSmall,
+                        fontSize = 10.sp,
+                        color = getTimestampColor(messageType, isOwn, message.sender),
+                        modifier = Modifier.align(if (isOwn) Alignment.End else Alignment.Start)
+                    )
                 }
-                Text(
-                    text = message.content,
-                    style = MaterialTheme.typography.bodyLarge,
-                    color = getContentColor(messageType, isOwn, message.sender)
-                )
-                Text(
-                    text = message.timestamp,
-                    style = MaterialTheme.typography.labelSmall,
-                    color = getTimestampColor(messageType, isOwn, message.sender),
-                    modifier = Modifier
-                        .align(if (isOwn) Alignment.End else Alignment.Start)
-                        .padding(top = 5.dp)
-                )
             }
         }
     }
@@ -240,29 +241,32 @@ fun MessageInputArea(
     GlassSurface(
         modifier = Modifier
             .fillMaxWidth()
-            .padding(horizontal = 12.dp, vertical = 8.dp)
+            .padding(horizontal = 12.dp, vertical = 6.dp)
             .navigationBarsPadding()
-            .padding(bottom = 8.dp),
-        shape = RoundedCornerShape(28.dp),
+            .padding(bottom = 6.dp),
+        shape = RoundedCornerShape(26.dp),
         alpha = 0.85f,
     ) {
         Row(
             modifier = Modifier
                 .fillMaxWidth()
-                .padding(horizontal = 8.dp, vertical = 8.dp),
+                .padding(start = 6.dp, end = 6.dp, top = 5.dp, bottom = 5.dp),
             verticalAlignment = Alignment.CenterVertically
         ) {
+            // Borderless field: no inner container box, no underline — it
+            // melts into the glass pill (Bug: "layered surfaceContainer box
+            // inside the glass input looked clunky").
             TextField(
                 value = messageInput,
                 onValueChange = onMessageChange,
                 modifier = Modifier
                     .weight(1f)
-                    .padding(end = 8.dp),
+                    .padding(end = 6.dp),
                 placeholder = {
                     Text(
                         text = if (isConnected) stringResource(R.string.chat_placeholder_message) else stringResource(R.string.chat_placeholder_no_connection),
                         style = MaterialTheme.typography.bodyMedium,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                        color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.6f)
                     )
                 },
                 enabled = isConnected,
@@ -272,9 +276,9 @@ fun MessageInputArea(
                     focusedTextColor = MaterialTheme.colorScheme.onSurface,
                     unfocusedTextColor = MaterialTheme.colorScheme.onSurface,
                     disabledTextColor = MaterialTheme.colorScheme.onSurfaceVariant,
-                    focusedContainerColor = MaterialTheme.colorScheme.surfaceContainer,
-                    unfocusedContainerColor = MaterialTheme.colorScheme.surfaceContainer,
-                    disabledContainerColor = MaterialTheme.colorScheme.surfaceContainer,
+                    focusedContainerColor = Color.Transparent,
+                    unfocusedContainerColor = Color.Transparent,
+                    disabledContainerColor = Color.Transparent,
                     focusedIndicatorColor = Color.Transparent,
                     unfocusedIndicatorColor = Color.Transparent,
                     disabledIndicatorColor = Color.Transparent,
@@ -282,18 +286,29 @@ fun MessageInputArea(
                 )
             )
 
+            // Circular send button: primary when sendable, muted otherwise,
+            // no shadow.
+            val sendBg by animateColorAsState(
+                targetValue = if (canSend) MaterialTheme.colorScheme.primary
+                else MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.7f),
+                label = "send_bg"
+            )
+            val sendFg by animateColorAsState(
+                targetValue = if (canSend) MaterialTheme.colorScheme.onPrimary
+                else MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.6f),
+                label = "send_fg"
+            )
             FloatingActionButton(
                 onClick = onSendClick,
-                modifier = Modifier
-                    .size(46.dp),
-                containerColor = if (canSend) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.surfaceVariant,
-                contentColor = if (canSend) MaterialTheme.colorScheme.onPrimary else MaterialTheme.colorScheme.onSurfaceVariant,
+                modifier = Modifier.size(40.dp),
+                containerColor = sendBg,
+                contentColor = sendFg,
                 elevation = FloatingActionButtonDefaults.elevation(defaultElevation = 0.dp, pressedElevation = 0.dp)
             ) {
                 Icon(
                     imageVector = Icons.AutoMirrored.Filled.Send,
                     contentDescription = stringResource(R.string.chat_send),
-                    modifier = Modifier.size(22.dp)
+                    modifier = Modifier.size(20.dp)
                 )
             }
         }
@@ -319,6 +334,7 @@ fun BoxScope.ScrollToBottomButton(
             modifier = Modifier.size(48.dp),
             containerColor = MaterialTheme.colorScheme.primary,
             contentColor = MaterialTheme.colorScheme.onPrimary,
+            elevation = FloatingActionButtonDefaults.elevation(defaultElevation = 0.dp, pressedElevation = 0.dp)
         ) {
             Icon(
                 imageVector = Icons.Default.KeyboardArrowDown,
@@ -336,24 +352,24 @@ fun BoxScope.ScrollToBottomButton(
 @Composable
 private fun getMessageBackgroundColor(messageType: MessageType, isOwn: Boolean, sender: String): Color {
     return when {
-        isOwn -> MaterialTheme.colorScheme.primaryContainer
+        isOwn -> MaterialTheme.colorScheme.primary
         messageType == MessageType.SYSTEM -> MaterialTheme.colorScheme.tertiaryContainer
         messageType == MessageType.ERROR -> MaterialTheme.colorScheme.errorContainer
         messageType == MessageType.TECHNICAL -> MaterialTheme.colorScheme.tertiaryContainer
         messageType == MessageType.INFO -> MaterialTheme.colorScheme.surfaceContainerHigh
         sender == "Система" || sender == "Сервер" -> MaterialTheme.colorScheme.tertiaryContainer
-        else -> MaterialTheme.colorScheme.secondaryContainer
+        else -> MaterialTheme.colorScheme.surfaceContainer
     }
 }
 
 @Composable
 private fun getSenderColor(messageType: MessageType, isOwn: Boolean, sender: String): Color {
     return when {
-        isOwn -> MaterialTheme.colorScheme.onPrimaryContainer
+        isOwn -> MaterialTheme.colorScheme.onPrimary
         messageType == MessageType.SYSTEM -> MaterialTheme.colorScheme.onTertiaryContainer
         messageType == MessageType.ERROR -> MaterialTheme.colorScheme.onErrorContainer
         messageType == MessageType.TECHNICAL -> MaterialTheme.colorScheme.onTertiaryContainer
-        messageType == MessageType.INFO -> MaterialTheme.colorScheme.onSurface
+        messageType == MessageType.INFO -> MaterialTheme.colorScheme.primary
         sender == "Система" || sender == "Сервер" -> MaterialTheme.colorScheme.onTertiaryContainer
         else -> MaterialTheme.colorScheme.primary
     }
@@ -362,28 +378,28 @@ private fun getSenderColor(messageType: MessageType, isOwn: Boolean, sender: Str
 @Composable
 private fun getContentColor(messageType: MessageType, isOwn: Boolean, sender: String): Color {
     return when {
-        isOwn -> MaterialTheme.colorScheme.onPrimaryContainer
+        isOwn -> MaterialTheme.colorScheme.onPrimary
         messageType == MessageType.SYSTEM -> MaterialTheme.colorScheme.onTertiaryContainer
         messageType == MessageType.ERROR -> MaterialTheme.colorScheme.onErrorContainer
         messageType == MessageType.TECHNICAL -> MaterialTheme.colorScheme.onTertiaryContainer
         messageType == MessageType.INFO -> MaterialTheme.colorScheme.onSurface
         sender == "Система" || sender == "Сервер" -> MaterialTheme.colorScheme.onTertiaryContainer
-        else -> MaterialTheme.colorScheme.onSecondaryContainer
+        else -> MaterialTheme.colorScheme.onSurface
     }
 }
 
 @Composable
 private fun getTimestampColor(messageType: MessageType, isOwn: Boolean, sender: String): Color {
     val baseColor = when {
-        isOwn -> MaterialTheme.colorScheme.onPrimaryContainer
+        isOwn -> MaterialTheme.colorScheme.onPrimary
         messageType == MessageType.SYSTEM -> MaterialTheme.colorScheme.onTertiaryContainer
         messageType == MessageType.ERROR -> MaterialTheme.colorScheme.onErrorContainer
         messageType == MessageType.TECHNICAL -> MaterialTheme.colorScheme.onTertiaryContainer
         messageType == MessageType.INFO -> MaterialTheme.colorScheme.onSurface
         sender == "Система" || sender == "Сервер" -> MaterialTheme.colorScheme.onTertiaryContainer
-        else -> MaterialTheme.colorScheme.onSecondaryContainer
+        else -> MaterialTheme.colorScheme.onSurfaceVariant
     }
-    return baseColor.copy(alpha = 0.8f)
+    return baseColor.copy(alpha = 0.7f)
 }
 
 // ============================================================================
