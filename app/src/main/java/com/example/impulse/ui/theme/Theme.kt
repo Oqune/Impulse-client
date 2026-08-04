@@ -3,6 +3,11 @@ package com.example.impulse.ui.theme
 import android.app.Activity
 import android.graphics.drawable.ColorDrawable
 import android.os.Build
+import androidx.compose.animation.AnimatedContent
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.animation.core.tween
+import androidx.compose.animation.togetherWith
 import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.dynamicDarkColorScheme
@@ -64,6 +69,16 @@ fun ImpulseTheme(
         typography = getTypography(ThemeSettings.fontScale),
         shapes = ImpulseShapes,
     ) {
-        content()
+        // Smooth crossfade when the theme changes (light<->dark, variant, hue)
+        // instead of an abrupt snap (Bug: "theme switch is jarring").
+        AnimatedContent(
+            targetState = colorScheme,
+            transitionSpec = {
+                (fadeIn(tween(320)) togetherWith fadeOut(tween(240)))
+            },
+            label = "theme_fade",
+        ) { _ ->
+            content()
+        }
     }
 }

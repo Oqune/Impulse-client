@@ -22,6 +22,7 @@ import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.runtime.snapshotFlow
 import kotlinx.coroutines.flow.drop
+import kotlinx.coroutines.launch
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -51,6 +52,7 @@ fun AppSettingsContent(
 ) {
     val context = LocalContext.current
     val serverPreferences = remember { ServerPreferences(context) }
+    val scope = rememberCoroutineScope()
 
     var selectedTheme by remember { mutableStateOf(ThemeSettings.themeMode) }
     var hue by remember { mutableFloatStateOf(ThemeSettings.hue) }
@@ -123,7 +125,7 @@ fun AppSettingsContent(
                     ) {
                         Column(
                             modifier = Modifier
-                                .fillMaxWidth()
+                                .fillMaxWidth(0.82f)
                                 .fillMaxHeight()
                                 .clip(RoundedCornerShape(14.dp))
                                 .background(bgColor)
@@ -135,26 +137,38 @@ fun AppSettingsContent(
                                     RoundedCornerShape(14.dp)
                                 )
                                 .clickable {
-                                    selectedTheme = entry.mode
-                                    ThemeSettings.setThemeMode(entry.mode)
+                                    scope.launch { modePager.animateScrollToPage(page) }
                                 }
                                 .padding(vertical = 14.dp, horizontal = 4.dp),
                             horizontalAlignment = Alignment.CenterHorizontally,
                             verticalArrangement = Arrangement.Center,
                         ) {
-                            Icon(
-                                imageVector = entry.icon,
-                                contentDescription = stringResource(entry.labelRes),
-                                tint = if (isSelected)
-                                    MaterialTheme.colorScheme.primary
-                                else
-                                    MaterialTheme.colorScheme.onSurfaceVariant,
-                                modifier = Modifier.size(22.dp)
-                            )
-                            Spacer(Modifier.height(6.dp))
+                            // Preview square, same visual language as the
+                            // variant carousel below.
+                            val preview = when (entry.mode) {
+                                ThemeMode.LIGHT -> Color(0xFFFFFFFF)
+                                ThemeMode.DARK -> Color(0xFF121212)
+                                ThemeMode.SYSTEM -> Color(0xFF888888)
+                            }
+                            Box(
+                                modifier = Modifier
+                                    .size(38.dp)
+                                    .clip(RoundedCornerShape(9.dp))
+                                    .background(preview)
+                                    .border(1.dp, MaterialTheme.colorScheme.outlineVariant, RoundedCornerShape(9.dp)),
+                                contentAlignment = Alignment.Center,
+                            ) {
+                                Icon(
+                                    imageVector = entry.icon,
+                                    contentDescription = stringResource(entry.labelRes),
+                                    tint = if (entry.mode == ThemeMode.LIGHT) Color.Black else Color.White,
+                                    modifier = Modifier.size(20.dp)
+                                )
+                            }
+                            Spacer(Modifier.height(8.dp))
                             Text(
                                 text = stringResource(entry.labelRes),
-                                style = MaterialTheme.typography.labelSmall,
+                                style = MaterialTheme.typography.labelMedium,
                                 fontWeight = if (isSelected) FontWeight.SemiBold else FontWeight.Normal,
                                 color = if (isSelected)
                                     MaterialTheme.colorScheme.primary
@@ -251,7 +265,7 @@ fun AppSettingsContent(
                     ) {
                     Card(
                         modifier = Modifier
-                            .fillMaxWidth()
+                            .fillMaxWidth(0.82f)
                             .fillMaxHeight(),
                         shape = RoundedCornerShape(16.dp),
                         colors = CardDefaults.cardColors(
@@ -268,8 +282,9 @@ fun AppSettingsContent(
                             modifier = Modifier
                                 .fillMaxSize()
                                 .clickable(enabled = enabled) {
-                                    themeVariant = variant
-                                    ThemeSettings.setThemeVariant(variant)
+                                    // Tap a visible neighbour: glide the pager
+                                    // to it; the settled-sync applies the theme.
+                                    scope.launch { pagerState.animateScrollToPage(page) }
                                 }
                                 .padding(vertical = 12.dp, horizontal = 10.dp),
                             horizontalAlignment = Alignment.CenterHorizontally,
