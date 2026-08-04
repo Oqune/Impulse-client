@@ -814,11 +814,17 @@ class ChatController(private val context: Context) {
         }
 
         // Symmetric conversation key: both sides address the thread by the OTHER
-        // participant's fingerprint. Sender stores "dm:<recipient fp>" (peer);
-        // receiver must store "dm:<sender fp>" (peer), NOT "dm:<env.dm>" (which
-        // is the receiver's OWN fingerprint). Using env.dm split the same DM into
-        // two one-way threads (Bug: "DM is one-way / chat with myself").
-        val conversationId = if (env.dm.isNotEmpty()) "dm:$senderFingerprint" else "group"
+        // participant's fingerprint, so the sender and receiver share ONE thread:
+        //  - received DM (isOwn=false): other = senderFingerprint (peer).
+        //  - own echo (isOwn=true):     other = env.dm (the recipient we wrote to),
+        //    NOT senderFingerprint (our own fp) — using senderFingerprint split a
+        //    sent DM into a phantom "dm:<self>" thread that vanished from the
+        //    conversation list after restart (Bug: "DM is one-way / thread lost").
+        val conversationId = when {
+            env.dm.isNotEmpty() && isOwn -> "dm:${env.dm}"
+            env.dm.isNotEmpty() -> "dm:$senderFingerprint"
+            else -> "group"
+        }
         repo.upsert(
             MessageEntity(
                 serverId = serverId,
@@ -883,12 +889,16 @@ class ChatController(private val context: Context) {
 
     /**
      * Decrypts a per-recipient blob from a sync response or stored message.
-     * Returns (senderFingerprint, sender, content, signature) or null on failure.
+     * Returns the parsed envelope plus the sender fingerprint, or null on
+     * failure. The FULL envelope (ts/nonce/dm included) is returned so the
+     * caller can re-verify the exact signed canonical form and address the
+     * message to the right conversation (Bug: "sync dropped the dm flag and
+     * re-stored DMs as group; sync verification failed without ts/nonce").
      */
     private fun decryptPerRecipientBlob(
         payload: ByteArray,
         serverId: String
-    ): Quad<String, String, String, String>? {
+    ): DecryptedBlob? {
         val pr = Protocol.Reader(payload)
 
         val senderPubHash = pr.bytes()
@@ -912,7 +922,7 @@ class ChatController(private val context: Context) {
                         LogManager.w(TAG, "decryptPerRecipientBlob: parseInnerEnvelope returned null for sender=$senderFingerprint")
                         return null
                     }
-                    return Quad(senderFingerprint, env.sender, env.content, env.signature)
+                    return DecryptedBlob(senderFingerprint, env)
                 } catch (e: Exception) {
                     LogManager.w(TAG, "decryptPerRecipientBlob: decrypt failed for sender=$senderFingerprint: ${e.message}")
                     return null
@@ -925,7 +935,10 @@ class ChatController(private val context: Context) {
         return null
     }
 
-    private data class Quad<out A, out B, out C, out D>(val first: A, val second: B, val third: C, val fourth: D)
+    private data class DecryptedBlob(
+        val senderFingerprint: String,
+        val env: Protocol.InnerEnvelope
+    )
 
     private fun onSyncResponse(r: Protocol.Reader) {
         val resp = Protocol.parseSyncResponse(r)
@@ -961,11 +974,12 @@ class ChatController(private val context: Context) {
                         LogManager.w(TAG, "SyncResponse decrypt failed for ${m.id}")
                         continue
                     }
-                    val (senderFingerprint, sender, content, signature) = result
+                    val senderFingerprint = result.senderFingerprint
+                    val env = result.env
+                    val sender = env.sender
                     val isOwn = sender == clientName
-                    LogManager.d(TAG, "onSyncResponse: msgId=${m.id} sender='$sender' isOwn=$isOwn")
+                    LogManager.d(TAG, "onSyncResponse: msgId=${m.id} sender='$sender' isOwn=$isOwn dm=${env.dm.take(8)}")
 
-                    val env = Protocol.InnerEnvelope(sender, signature, content)
                     val dsaPub = keyRepo.getDsaPublicKey(serverId, senderFingerprint)
                     if (dsaPub == null) {
                         LogManager.w(TAG, "DSA key missing for sync msg from $senderFingerprint, queuing")
@@ -1034,12 +1048,11 @@ class ChatController(private val context: Context) {
         val serverId = currentServer?.id ?: return null
         return try {
             val result = decryptPerRecipientBlob(entity.ciphertext, serverId) ?: return null
-            val (senderFingerprint, sender, content, _) = result
             DecryptedMessage(
                 serverMsgId = entity.serverMsgId,
-                sender = sender,
-                senderFingerprint = senderFingerprint.take(8),
-                plaintext = content,
+                sender = result.env.sender,
+                senderFingerprint = result.senderFingerprint.take(8),
+                plaintext = result.env.content,
                 isOwn = entity.isOwn,
                 timestamp = entity.timestamp
             )
@@ -1054,12 +1067,11 @@ class ChatController(private val context: Context) {
         return entities.mapNotNull { e ->
             try {
                 val result = decryptPerRecipientBlob(e.ciphertext, serverId) ?: return@mapNotNull null
-                val (senderFingerprint, sender, content, _) = result
                 DecryptedMessage(
                     serverMsgId = e.serverMsgId,
-                    sender = sender,
-                    senderFingerprint = senderFingerprint.take(8),
-                    plaintext = content,
+                    sender = result.env.sender,
+                    senderFingerprint = result.senderFingerprint.take(8),
+                    plaintext = result.env.content,
                     isOwn = e.isOwn,
                     timestamp = e.timestamp
                 )

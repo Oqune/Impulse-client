@@ -37,6 +37,11 @@ interface MessageDao {
     @Query("SELECT DISTINCT conversation_id FROM messages WHERE server_id = :serverId")
     suspend fun conversationsForServer(serverId: String): List<String>
 
+    /** Live version of [conversationsForServer]: emits whenever any row changes,
+     *  so a newly-arrived DM appears in the conversation list without leaving it. */
+    @Query("SELECT DISTINCT conversation_id FROM messages WHERE server_id = :serverId")
+    fun observeConversationsForServer(serverId: String): Flow<List<String>>
+
     /** Highest server_msg_id we already have for a server (for last_seen_id sync). */
     @Query("SELECT COALESCE(MAX(server_msg_id), 0) FROM messages WHERE server_id = :serverId")
     suspend fun maxServerMsgId(serverId: String): Long

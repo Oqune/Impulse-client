@@ -42,6 +42,9 @@ class MessageRepository(context: Context) {
 
     suspend fun conversations(serverId: String): List<String> = dao.conversationsForServer(serverId)
 
+    fun observeConversations(serverId: String): Flow<List<String>> =
+        dao.observeConversationsForServer(serverId)
+
     /** Highest server-assigned message id we already hold (for `last_seen_id`). */
     suspend fun lastSeenId(serverId: String): Long = dao.maxServerMsgId(serverId)
 

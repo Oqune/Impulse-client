@@ -280,9 +280,18 @@ fun MainScreen() {
                 LaunchedEffect(server.id) {
                     runCatching {
                         val known = ctrl.knownPeers(server.id)
-                        val names = known.associate { (fp, _) -> fp to fp }
-                        peerNames = names
-                        conversations = (listOf("group") + known.map { "dm:${it.first}" } + repo.conversations(server.id)).distinct()
+                        peerNames = known.associate { (fp, _) -> fp to fp }
+                    }
+                }
+                // Live conversation list: group + known peers + every conversation
+                // that has rows. Reactive to the DB so a DM received while on this
+                // screen shows up immediately (Bug: "messages don't arrive when
+                // not inside the chat" — the list was loaded exactly once).
+                LaunchedEffect(server.id) {
+                    repo.observeConversations(server.id).collect { dbConvs ->
+                        val known = runCatching { ctrl.knownPeers(server.id) }
+                            .getOrDefault(emptyList())
+                        conversations = (listOf("group") + known.map { "dm:${it.first}" } + dbConvs).distinct()
                     }
                 }
                 // Resolve display names once known (from a received message).
