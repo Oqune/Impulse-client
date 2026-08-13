@@ -40,3 +40,10 @@ build_*.log
 build_errors.txt
 qr_test.log
 scan_test.log
+  
+# AI agent artifacts -- never commit to VCS  
+.superpowers/  
+.kilo/  
+.idea/shelf/  
+*.log  
+docs/superpowers/  
