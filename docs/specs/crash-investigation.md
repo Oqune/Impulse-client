@@ -57,3 +57,60 @@
 - [ ] Гипотеза подтверждена фактами (не догадкой).
 - [ ] Написан SPEC в `docs/specs/YYYY-MM-DD-crash-<topic>.md`.
 - [ ] Получено одобрение владельца.
+
+---
+
+## Security audit findings (2026-08-15, read-only)
+
+> Источник: параллельный аудит 3 агентов (security red-team, protocol, cleanup/mines).
+> Код НЕ правился — только зафиксировано. Приоритеты для будущего SPEC-фикса.
+
+### CRITICAL — C1: подмена KEM/DSA-ключей через неаутентифицированный key exchange
+- Сервер релеит `0x0C` (KeyExchangeKemDsa) всем сессиям без проверки происхождения
+  (`server/src/relay/auth.rs:285-338`).
+- Клиент **слепо мёржит** чужие ключи по fingerprint
+  (`data/PublicKeyRepository.kt:13-34` `cacheKey`, `ChatController.kt:1254-1271`
+  `onCombinedKeyExchange` — только parse-check, без proof-of-possession KEM-ключа
+  и без связки KEM↔DSA подписью).
+- **Impact:** MITM + подделка/обрыв сообщений любого пира (атакующий публикует
+  `kemFp=<fp жертвы>` со своим DSA-ключом). Самая серьёзная дыра.
+- **Fix (SPEC):** требовать attestation — подписать `KEM_pub||DSA_pub` KEM-приватником
+  (или единый combined key); клиент НЕ перезаписывает ключи существующего fingerprint
+  без ре-аттестации; сервер ставит/эхоит `0x0C` с id исходной сессии.
+
+### HIGH — C2: outbox хранит plaintext сообщения
+- `ChatController.kt:626-643` `persistOutbox` пишет `obj.put("p", e.plaintext)` в
+  plain `SharedPreferences` (`impulse_outbox`), не `SecureStorage`.
+- **Fix:** хранить только уже-зашифрованный фрейм, либо шифровать at-rest через KeyStore.
+
+### MEDIUM — C3: OP_AUTH шлёт raw-пароль (doc/impl mismatch)
+- `Protocol.kt:143-159` шлёт raw password bytes + HMAC; docs говорят «SHA-256 hash».
+- **Fix:** PAKE (OPAQUE/CPace) или хотя бы `HMAC(Argon2(pw,salt), nonce)` без raw-пароля.
+
+### MEDIUM — C4: нет replay-кэша (nonce/ts не проверяются)
+- `processVerifiedMessage` проверяет подпись, но НЕ кэширует `(fp, nonce)`.
+  Сервер может реплеить старые blob с новым `serverMsgId`.
+- **Fix:** seen-set `(senderFingerprint, nonce)` + отказ дубликатов.
+
+### MEDIUM — X1: Argon2id params hardcoded (19456/2) ≠ OWASP (47104/3)
+- `Protocol.kt:165-183` и `crypto/mod.rs:29-33` используют слабые дефолты;
+  расходятся с AGENTS.md. Если сервер «исправят» на OWASP — клиенты перестанут
+  аутентифицироваться (silently).
+- **Fix:** выводить params из salt/params, которые сервер шлёт в AuthChallenge.
+
+### LOW / INFO
+- C5: display name не привязан к проверяющему ключу (spoofable).
+- C6: client нет aggregate receive-buffer cap (S1/S2 server-side есть) → OOM от злого сервера.
+- C7: хрупкий substring-JSON парсер подписанного envelope (`Protocol.kt:556-589`).
+- C8: negative temp-id коллизия при двух отправках в ту же миллисекунду.
+- S1: Argon2 DoS — нет глобального rate-limit, длина пароля не ограничена до хеша.
+- S2: nonce не single-use. S4: TLS-ключ — unencrypted PEM.
+- **ПОЗИТИВ:** AES-256-GCM nonce reuse НЕТ (свежий SecureRandom IV/вызов); BCPQC-unavailable
+  fails secure (ERROR, без insecure fallback); constant-time HMAC/Argon2; сервер НЕ дешифрует payloads.
+
+### Топ-5 приоритетов (из аудита)
+1. C1/J1 — закрыть key-substitution (attestation + no-overwrite).
+2. C2 — убрать plaintext из outbox.
+3. C3/J5 — убрать raw-пароль из wire (PAKE/минимум HMAC-only).
+4. C4/C5 — replay-cache + identity binding.
+5. S1/S2/C6 — auth DoS hardening + client buffer cap.
