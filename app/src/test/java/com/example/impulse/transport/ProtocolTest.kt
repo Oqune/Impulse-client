@@ -42,36 +42,42 @@ class ProtocolTest {
         assertTrue(parsed.payload.contentEquals(payload))
     }
 
+    // ── C3 (HMAC-only auth): the raw password MUST NOT travel on the wire ──────
+
     @Test
-    fun auth_sendsRawPassword() {
+    fun auth_sendsNoRawPassword() {
         val pw = "yourpassword"
-        val frame = Protocol.buildAuth(pw)
+        val nonce = ByteArray(16) { 0x42 }
+        val frame = Protocol.buildAuth(pw, nonce)
         assertEquals(Protocol.OP_AUTH, frame[0])
-        // Wire: [0x01] [u32 len][raw_password_bytes]
-        val reader = Protocol.Reader(frame, 1)
-        val rawPassword = reader.bytes()
-        assertEquals(pw, String(rawPassword, Charsets.UTF_8))
+        // Wire: [0x01] [u32 hmac_len=32] [32 hmac] — exactly 37 bytes, no password.
+        assertEquals(37, frame.size)
+        // The raw password must NOT appear anywhere on the wire.
+        val pwBytes = pw.toByteArray(Charsets.UTF_8)
+        var found = false
+        for (i in 0..frame.size - pwBytes.size) {
+            if (frame.copyOfRange(i, i + pwBytes.size).contentEquals(pwBytes)) {
+                found = true
+                break
+            }
+        }
+        assertFalse("Raw password must not travel on the wire (C3)", found)
     }
 
     @Test
-    fun auth_hmacChallengeResponse_verifiableByServer() {
+    fun auth_hmacChallengeResponse_verifiableByClientKey() {
         val password = "s3cret_p@ss!"
         val nonce = ByteArray(16) { it.toByte() }
 
-        // Client builds auth with HMAC response (Argon2 key).
         val frame = Protocol.buildAuth(password, nonce)
         assertEquals(Protocol.OP_AUTH, frame[0])
 
-        // Extract the raw password and HMAC response from the frame.
-        // Wire: [0x01] [u32 len][raw_password_bytes] [32 raw bytes: hmac]
+        // Extract the HMAC response (length-prefixed 32 bytes).
         val reader = Protocol.Reader(frame, 1)
-        val rawPassword = reader.bytes()
-        assertEquals(password, String(rawPassword, Charsets.UTF_8))
-
-        val hmacResponse = reader.readBytes(32)
+        val hmacResponse = reader.bytes()
         assertEquals(32, hmacResponse.size)
 
-        // Server-side: recompute HMAC using Argon2-derived key and nonce.
+        // Recompute HMAC using the same Argon2-derived key the client used.
         val key = Protocol.argon2DeriveKey(password)
         val mac = javax.crypto.Mac.getInstance("HmacSHA256")
         val secretSpec = javax.crypto.spec.SecretKeySpec(key, "HmacSHA256")
@@ -79,7 +85,7 @@ class ProtocolTest {
         mac.update(nonce)
         val expected = mac.doFinal()
 
-        assertTrue("HMAC response should match server computation", hmacResponse.contentEquals(expected))
+        assertTrue("HMAC response should match client-key computation", hmacResponse.contentEquals(expected))
     }
 
     @Test
@@ -90,10 +96,8 @@ class ProtocolTest {
 
         val frame = Protocol.buildAuth(password, nonce)
         val reader = Protocol.Reader(frame, 1)
-        reader.bytes() // skip raw password
-        val hmacResponse = reader.readBytes(32)
+        val hmacResponse = reader.bytes()
 
-        // Verify with wrong nonce — should fail.
         val key = Protocol.argon2DeriveKey(password)
         val mac = javax.crypto.Mac.getInstance("HmacSHA256")
         val secretSpec = javax.crypto.spec.SecretKeySpec(key, "HmacSHA256")
@@ -110,8 +114,7 @@ class ProtocolTest {
         val frame = Protocol.buildAuth("password_A", nonce)
 
         val reader = Protocol.Reader(frame, 1)
-        reader.bytes() // skip raw password
-        val hmacResponse = reader.readBytes(32)
+        val hmacResponse = reader.bytes()
 
         // Derive key from the WRONG password and verify — should fail.
         val key = Protocol.argon2DeriveKey("password_B")
@@ -138,15 +141,14 @@ class ProtocolTest {
         mac.init(secretSpec)
         val expectedHmac = mac.doFinal(nonce)
 
-        // Build expected wire format.
+        // Build expected wire format: [0x01][u32 hmac_len=32][32 hmac].
         val expected = byteArrayOf(
             0x01,                                           // OP_AUTH
-            0x04, 0x00, 0x00, 0x00,                         // u32 LE password length = 4
-            0x74, 0x65, 0x73, 0x74                          // "test" UTF-8
+            0x20, 0x00, 0x00, 0x00                          // u32 LE hmac length = 32
         ) + expectedHmac                                     // 32 bytes HMAC
 
-        assertArrayEquals("Wire format must match server spec", expected, frame)
-        assertEquals("Total length = 1 + 4 + 4 + 32 = 41", 41, frame.size)
+        assertArrayEquals("Wire format must match server spec (C3 HMAC-only)", expected, frame)
+        assertEquals("Total length = 1 + 4 + 32 = 37", 37, frame.size)
     }
 
     @Test
@@ -155,12 +157,9 @@ class ProtocolTest {
         val frame = Protocol.buildAuth("", nonce)
 
         assertEquals(Protocol.OP_AUTH, frame[0])
+        assertEquals(37, frame.size)
         val reader = Protocol.Reader(frame, 1)
-        val rawPassword = reader.bytes()
-        assertEquals(0, rawPassword.size)
-        assertEquals("", String(rawPassword, Charsets.UTF_8))
-
-        val hmacResponse = reader.readBytes(32)
+        val hmacResponse = reader.bytes()
         assertEquals(32, hmacResponse.size)
 
         // Verify HMAC is correct for empty password.
@@ -178,17 +177,18 @@ class ProtocolTest {
         val nonce = ByteArray(16) { 0xAA.toByte() }
         val frame = Protocol.buildAuth(password, nonce)
 
-        val reader = Protocol.Reader(frame, 1)
-        val rawPassword = reader.bytes()
-        assertEquals(12, rawPassword.size)
-        assertEquals(password, String(rawPassword, Charsets.UTF_8))
+        // C3: no password field — frame is always 37 bytes regardless of password.
+        assertEquals(37, frame.size)
 
-        // Verify the u32 length prefix encodes 12.
-        val pwdLen = (frame[1].toInt() and 0xFF) or
-            ((frame[2].toInt() and 0xFF) shl 8) or
-            ((frame[3].toInt() and 0xFF) shl 16) or
-            ((frame[4].toInt() and 0xFF) shl 24)
-        assertEquals(12, pwdLen)
+        // And the HMAC is still verifiable for the unicode password.
+        val reader = Protocol.Reader(frame, 1)
+        val hmacResponse = reader.bytes()
+        val key = Protocol.argon2DeriveKey(password)
+        val mac = javax.crypto.Mac.getInstance("HmacSHA256")
+        val secretSpec = javax.crypto.spec.SecretKeySpec(key, "HmacSHA256")
+        mac.init(secretSpec)
+        val expected = mac.doFinal(nonce)
+        assertTrue("HMAC should match for unicode password", hmacResponse.contentEquals(expected))
     }
 
     @Test
@@ -252,7 +252,7 @@ class ProtocolTest {
 
     @Test
     fun parseAuthChallenge_wrongSize_throws() {
-        // parseAuthChallenge expects exactly 16 bytes, give it 15.
+        // parseAuthChallenge expects at least 16 nonce bytes, give it 15.
         val tooFew = ByteArray(15) { it.toByte() }
         val reader = Protocol.Reader(tooFew)
         assertThrows(Protocol.ProtocolException::class.java) {
@@ -273,14 +273,10 @@ class ProtocolTest {
         val frames = clients.map { (pw, nonce) -> pw to Protocol.buildAuth(pw, nonce) }
 
         for ((idx, pair) in frames.withIndex()) {
-            val pw = pair.first
             val frame = pair.second
             assertEquals("Client $idx: opcode", Protocol.OP_AUTH, frame[0])
             assertEquals("Client $idx: frameLength", Protocol.frameLength(frame), frame.size)
-
-            val reader = Protocol.Reader(frame, 1)
-            val rawPassword = reader.bytes()
-            assertEquals("Client $idx: password roundtrip", pw, String(rawPassword, Charsets.UTF_8))
+            assertEquals("Client $idx: HMAC-only frame is 37 bytes", 37, frame.size)
         }
 
         // Verify each client's HMAC independently with its own Argon2 key.
@@ -289,8 +285,7 @@ class ProtocolTest {
             val nonce = client.nonce
             val frame = frames[idx].second
             val reader = Protocol.Reader(frame, 1)
-            reader.bytes()
-            val hmacResponse = reader.readBytes(32)
+            val hmacResponse = reader.bytes()
 
             val key = Protocol.argon2DeriveKey(pw)
             val mac = javax.crypto.Mac.getInstance("HmacSHA256")
@@ -306,8 +301,7 @@ class ProtocolTest {
         // Cross-verify: client 0's HMAC must NOT verify with client 1's key.
         val frame0 = frames[0].second
         val reader0 = Protocol.Reader(frame0, 1)
-        reader0.bytes()
-        val hmac0 = reader0.readBytes(32)
+        val hmac0 = reader0.bytes()
 
         val key1 = Protocol.argon2DeriveKey(clients[1].password)
         val mac1 = javax.crypto.Mac.getInstance("HmacSHA256")
@@ -316,7 +310,7 @@ class ProtocolTest {
         mac1.update(clients[0].nonce)
         val wrongExpected = mac1.doFinal()
 
-        assertFalse("Client 0 HMAC must not verify with client 1 key",
+        assertFalse("Client 0's HMAC must not verify with client 1 key",
             hmac0.contentEquals(wrongExpected))
     }
 }

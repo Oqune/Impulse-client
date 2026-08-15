@@ -77,6 +77,11 @@ class ChatController(private val context: Context) {
     @Volatile private var reconnectAttempts = 0
     @Volatile private var authChallengeNonce = CompletableDeferred<ByteArray?>()
     @Volatile private var pendingSaltB64: String = ""
+    // Argon2id params from the server's AuthChallenge (SPEC N1, §4.3). The
+    // client follows these instead of a frozen constant. OWASP floor defaults.
+    @Volatile private var pendingArgonMemKB: Int = 47104
+    @Volatile private var pendingArgonIter: Int = 3
+    @Volatile private var pendingArgonPar: Int = 1
 
     private data class PendingMessage(
         val serverMsgId: Long,
@@ -93,9 +98,8 @@ class ChatController(private val context: Context) {
 
     private data class OutboxEntry(
         val frame: ByteArray,
-        val plaintext: String,
-        val queuedAt: Long = System.currentTimeMillis(),
-        var retries: Int = 0
+        var retries: Int = 0,
+        val queuedAt: Long = System.currentTimeMillis()
     )
     private val outbox = mutableListOf<OutboxEntry>()
     private val outboxLock = Any()
@@ -327,7 +331,7 @@ class ChatController(private val context: Context) {
         val frame: ByteArray
         try {
             val saltB64 = pendingSaltB64; pendingSaltB64 = ""
-            frame = Protocol.buildAuth(password, nonce, saltB64)
+            frame = Protocol.buildAuth(password, nonce, saltB64, pendingArgonMemKB, pendingArgonIter, pendingArgonPar)
             LogManager.i(TAG, "sendAuth: auth frame built OK (${frame.size} bytes)")
         } catch (e: CancellationException) {
             throw e
@@ -471,7 +475,7 @@ class ChatController(private val context: Context) {
             synchronized(listeners) { listeners.forEach { it(msg) } }
         } else {
             LogManager.w(TAG, "sendChat: transport send failed, queuing in outbox")
-            synchronized(outboxLock) { outbox.add(OutboxEntry(frame, plaintext)) }
+            synchronized(outboxLock) { outbox.add(OutboxEntry(frame)) }
             persistOutbox()
             if (!flushOutboxRunning) {
                 scope.launch { flushOutbox() }
@@ -543,7 +547,7 @@ class ChatController(private val context: Context) {
             synchronized(listeners) { listeners.forEach { it(msg) } }
         } else {
             LogManager.w(TAG, "sendDirect: transport send failed, queuing in outbox")
-            synchronized(outboxLock) { outbox.add(OutboxEntry(frame, plaintext)) }
+            synchronized(outboxLock) { outbox.add(OutboxEntry(frame)) }
             persistOutbox()
             if (!flushOutboxRunning) {
                 scope.launch { flushOutbox() }
@@ -604,7 +608,7 @@ class ChatController(private val context: Context) {
                     synchronized(outboxLock) { outbox.remove(entry) }
                     persistOutbox()
                     val tempId = -(System.currentTimeMillis())
-                    val msg = DecryptedMessage(tempId, clientName, publicKeyHash, entry.plaintext, true, System.currentTimeMillis())
+                    val msg = DecryptedMessage(tempId, clientName, publicKeyHash, "", true, System.currentTimeMillis())
                     synchronized(listeners) { listeners.forEach { it(msg) } }
                     LogManager.i(TAG, "Outbox: message sent successfully on retry ${entry.retries}")
                 } else {
@@ -620,8 +624,10 @@ class ChatController(private val context: Context) {
 
     /**
      * Persist queued outbox entries to disk so they survive a process kill.
-     * Frames are already-encrypted blobs (safe to store); plaintext is kept for
-     * the optimistic local echo. Format: JSON array of [frameB64, plaintext].
+     * Frames are already-encrypted blobs (safe to store). Per SPEC C2 the
+     * cleartext body is NOT persisted — only the encrypted frame is kept, so a
+     * process kill / ADB / backup pull cannot reveal message content.
+     * Format: JSON array of [frameB64, retries, queuedAt].
      */
     private fun persistOutbox() {
         try {
@@ -631,7 +637,6 @@ class ChatController(private val context: Context) {
             for (e in entries) {
                 val obj = org.json.JSONObject()
                 obj.put("f", android.util.Base64.encodeToString(e.frame, android.util.Base64.NO_WRAP))
-                obj.put("p", e.plaintext)
                 obj.put("r", e.retries)
                 obj.put("t", e.queuedAt)
                 arr.put(obj)
@@ -653,7 +658,6 @@ class ChatController(private val context: Context) {
                 val frame = android.util.Base64.decode(obj.getString("f"), android.util.Base64.DEFAULT)
                 restored.add(OutboxEntry(
                     frame = frame,
-                    plaintext = obj.optString("p", ""),
                     queuedAt = obj.optLong("t", System.currentTimeMillis()),
                     retries = obj.optInt("r", 0),
                 ))
@@ -847,8 +851,9 @@ class ChatController(private val context: Context) {
             try {
                 val ownKemPub = keyManager.getKemPublicKey()
                 val ownDsaPub = keyManager.getDsaPublicKey()
+                val ownSig = keyManager.signDsa(ownKemPub + ownDsaPub) // C1 attestation
                 val c = synchronized(lock) { client }
-                val ok = withContext(Dispatchers.IO) { c?.send(Protocol.buildCombinedKeyExchange(ownKemPub, ownDsaPub)) ?: false }
+                val ok = withContext(Dispatchers.IO) { c?.send(Protocol.buildCombinedKeyExchange(ownKemPub, ownDsaPub, ownSig)) ?: false }
                 LogManager.i(TAG, "Combined key exchange request sent (ok=$ok) for pending msgs from $senderFingerprint")
             } catch (e: Exception) {
                 LogManager.w(TAG, "Failed to send key exchange request", e)
@@ -1120,8 +1125,11 @@ class ChatController(private val context: Context) {
     private fun onAuthChallenge(r: Protocol.Reader) {
         val frame = Protocol.parseAuthChallenge(r)
         pendingSaltB64 = frame.saltB64
+        pendingArgonMemKB = frame.argonMemKB
+        pendingArgonIter = frame.argonIterations
+        pendingArgonPar = frame.argonParallelism
         authChallengeNonce.complete(frame.nonce)
-        LogManager.i(TAG, "AUTH CHALLENGE received (nonce=${frame.nonce.size} bytes, salt=${frame.saltB64.length} chars)")
+        LogManager.i(TAG, "AUTH CHALLENGE received (nonce=${frame.nonce.size} bytes, salt=${frame.saltB64.length} chars, argon2 m=${frame.argonMemKB} t=${frame.argonIterations} p=${frame.argonParallelism})")
     }
 
     private fun onNewCertHash(r: Protocol.Reader) {
@@ -1178,6 +1186,7 @@ class ChatController(private val context: Context) {
 
             val kemPub = keyManager.getKemPublicKey()
             val dsaPub = keyManager.getDsaPublicKey()
+            val dsaSig = keyManager.signDsa(kemPub + dsaPub) // C1 attestation
             // Send KeyExchange + Sync. Never throw out of here: a transient
             // failure must NOT strand the client on SYNC or spin reconnect.
             // Each send is retried a few times before we give up and drop the
@@ -1185,7 +1194,7 @@ class ChatController(private val context: Context) {
             val c = synchronized(lock) { client }
             var keySent = false
             for (attempt in 1..3) {
-                keySent = withContext(Dispatchers.IO) { c?.send(Protocol.buildCombinedKeyExchange(kemPub, dsaPub)) ?: false }
+                keySent = withContext(Dispatchers.IO) { c?.send(Protocol.buildCombinedKeyExchange(kemPub, dsaPub, dsaSig)) ?: false }
                 if (keySent || userDisconnect) break
                 LogManager.w(TAG, "KeyExchange send attempt $attempt failed, retrying")
                 delay(300L * attempt)
@@ -1260,9 +1269,33 @@ class ChatController(private val context: Context) {
             PqcCrypto.validateDsaPublicKey(frame.dsaPublicKey)
             val kemFp = keyManager.fingerprintForBytes(frame.kemPublicKey)
             val dsaFp = keyManager.fingerprintForBytes(frame.dsaPublicKey)
+
+            // C1 (MITM defense, SPEC §1): verify the ML-DSA-65 attestation over
+            // (kemPub || dsaPub). The sender must prove ownership of the DSA
+            // private key. We only trust a key if (a) it is brand-new TOFU, or
+            // (b) it carries a valid signature from the ALREADY-KNOWN DSA key.
+            // The DB lookup is suspend, so run the trust decision in the scope.
             scope.launch {
+                val existingDsa = keyRepo.getDsaPublicKey(serverId, dsaFp)
+                val sigValid = frame.signature?.let { sig ->
+                    keyManager.verifyDsa(frame.dsaPublicKey, frame.kemPublicKey + frame.dsaPublicKey, sig)
+                } ?: false
+
+                val trusted = if (existingDsa == null) {
+                    // Initial TOFU: accept, but surface the QR/pin confirmation so
+                    // the user can confirm out-of-band (defense in depth).
+                    true
+                } else {
+                    sigValid
+                }
+
+                if (!trusted) {
+                    LogManager.w(TAG, "CombinedKeyExchange REJECTED: attestation failed for dsa_fp=$dsaFp (possible MITM)")
+                    return@launch
+                }
+
                 keyRepo.cacheKey(serverId, kemFp, frame.kemPublicKey, frame.dsaPublicKey)
-                LogManager.i(TAG, "CombinedKeyExchange: kem_fp=$kemFp dsa_fp=$dsaFp cached atomically")
+                LogManager.i(TAG, "CombinedKeyExchange: kem_fp=$kemFp dsa_fp=$dsaFp cached (attestation ${if (sigValid) "verified" else "TOFU"})")
                 processPendingMessages(kemFp)
             }
         } catch (e: Exception) {

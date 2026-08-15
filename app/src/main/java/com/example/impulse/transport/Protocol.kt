@@ -42,7 +42,7 @@ object Protocol {
      * allocation, preventing an OutOfMemoryError from a hostile or corrupt
      * server/relay.
      */
-    const val MAX_PAYLOAD_BYTES = 1 * 1024 * 1024
+    const val MAX_PAYLOAD_BYTES = 1_000_000 // SPEC N2/N3: canonical value, matches server (limits.rs). Previously 1*1024*1024 drifted by 48_576 bytes.
 
     // ---- Opcodes ----------------------------------------------------------
     const val OP_AUTH: Byte = 0x01
@@ -137,32 +137,48 @@ object Protocol {
      * the response is HMAC-SHA-256(key=Argon2id(password)_output, message=nonce)
      * — proving the client received the challenge and preventing replay attacks.
      *
-     * Wire format:
-     *   [0x01] [len(u32) raw_password_bytes] [len(u32) hmac_response] (if nonce provided)
+     * Wire format (SPEC C3, §4.2 — HMAC-only challenge response):
+     *   [0x01] [u32 hmac_len=32] [32 raw bytes: HMAC-SHA-256]
+     * The raw password NEVER travels on the wire; the client sends only
+     * HMAC(Argon2id(pw, salt), nonce), verified by the server against the key
+     * derived from the stored hash.
      */
-    fun buildAuth(password: String, challengeNonce: ByteArray? = null, argon2SaltB64: String = ""): ByteArray {
+    fun buildAuth(
+        password: String,
+        challengeNonce: ByteArray? = null,
+        argon2SaltB64: String = "",
+        argonMemKB: Int = 47104,
+        argonIterations: Int = 3,
+        argonParallelism: Int = 1
+    ): ByteArray {
         val w = Writer()
         w.u8(OP_AUTH.toInt())
-        w.bytes(password.toByteArray(Charsets.UTF_8))
         if (challengeNonce != null && challengeNonce.size == 16) {
             val key = try {
-                argon2DeriveKey(password, argon2SaltB64)
+                argon2DeriveKey(password, argon2SaltB64, argonMemKB, argonIterations, argonParallelism)
             } catch (e: UnsatisfiedLinkError) {
                 throw ProtocolException("Argon2 native library not available: ${e.message}")
             } catch (e: Exception) {
                 throw ProtocolException("Argon2 key derivation failed: ${e.message}")
             }
             val response = hmacSha256(key, challengeNonce)
-            w.rawBytes(response)
+            w.bytes(response) // length-prefixed 32-byte HMAC, no password field
         }
         return w.toByteArray()
     }
 
     /**
      * Derive a 32-byte key from a password using Argon2id.
-     * Parameters MUST match the server's Argon2::default() (m=19456, t=2, p=1).
+     * Parameters come from the server's AuthChallenge (SPEC N1, §4.3) with an
+     * OWASP floor (m=47104 KiB, t=3, p=1) — never the weak frozen 19456/2.
      */
-    internal fun argon2DeriveKey(password: String, saltB64: String = ""): ByteArray {
+    internal fun argon2DeriveKey(
+        password: String,
+        saltB64: String = "",
+        memKB: Int = 47104,
+        iterations: Int = 3,
+        parallelism: Int = 1
+    ): ByteArray {
         val saltBytes = if (saltB64.isNotEmpty()) {
             android.util.Base64.decode(saltB64, android.util.Base64.NO_WRAP)
         } else ByteArray(0)
@@ -170,9 +186,9 @@ object Protocol {
             org.bouncycastle.crypto.params.Argon2Parameters.ARGON2_id
         )
             .withSalt(saltBytes)
-            .withParallelism(1)
-            .withMemoryAsKB(19456)
-            .withIterations(2)
+            .withParallelism(parallelism.coerceAtLeast(1))
+            .withMemoryAsKB(memKB.coerceAtLeast(47104))
+            .withIterations(iterations.coerceAtLeast(3))
             .withVersion(0x13)
             .build()
         val generator = org.bouncycastle.crypto.generators.Argon2BytesGenerator()
@@ -244,10 +260,21 @@ object Protocol {
         return w.toByteArray()
     }
 
-    fun buildCombinedKeyExchange(kemPub: ByteArray, dsaPub: ByteArray): ByteArray {
+    /**
+     * Build a combined KEM+DSA key-exchange frame (client→server, SPEC §4.1).
+     * Wire: [0x0C] [u32 inner_len][u32 kem_len][kem][u32 dsa_len][dsa]
+     *        [u32 sig_len][sig]
+     * `signature` = ML-DSA-65 sign(dsaPriv, kemPub || dsaPub), computed by the
+     * caller via the key manager. It proves the sender owns the DSA private key,
+     * defeating blind key substitution (C1). The receiver verifies `signature`
+     * against the peer's (TOFU-pinned) DSA public key before trusting the keys.
+     * The raw DSA private key never leaves the key manager.
+     */
+    fun buildCombinedKeyExchange(kemPub: ByteArray, dsaPub: ByteArray, signature: ByteArray = ByteArray(0)): ByteArray {
         val inner = Writer()
         inner.bytes(kemPub)
         inner.bytes(dsaPub)
+        inner.bytes(signature)
         val innerBytes = inner.toByteArray()
         val w = Writer()
         w.u8(OP_KEY_EXCHANGE_KEM_DSA.toInt())
@@ -255,14 +282,19 @@ object Protocol {
         return w.toByteArray()
     }
 
-    data class CombinedKeyExchangeFrame(val kemPublicKey: ByteArray, val dsaPublicKey: ByteArray)
+    data class CombinedKeyExchangeFrame(
+        val kemPublicKey: ByteArray,
+        val dsaPublicKey: ByteArray,
+        val signature: ByteArray? = null
+    )
 
     fun parseCombinedKeyExchange(r: Reader): CombinedKeyExchangeFrame {
         val blob = r.bytes()
         val inner = Reader(blob)
         val kem = inner.bytes()
         val dsa = inner.bytes()
-        return CombinedKeyExchangeFrame(kem, dsa)
+        val sig = if (inner.remaining() > 0) inner.bytes() else null
+        return CombinedKeyExchangeFrame(kem, dsa, sig)
     }
 
     data class AuthResultFrame(val success: Boolean, val errorMessage: String?)
@@ -274,10 +306,22 @@ object Protocol {
         return AuthResultFrame(ok, msg)
     }
 
-    data class AuthChallengeFrame(val nonce: ByteArray, val saltB64: String = "")
+    data class AuthChallengeFrame(
+        val nonce: ByteArray,
+        val saltB64: String = "",
+        // Argon2id params advertised by the server (SPEC N1, §4.3). The client
+        // derives its HMAC key from these instead of a frozen constant, so it
+        // always follows the server (single source of truth). Floor = OWASP.
+        val argonMemKB: Int = 47104,
+        val argonIterations: Int = 3,
+        val argonParallelism: Int = 1
+    )
 
     /** Parses an AuthChallenge frame (opcode already consumed by caller).
-     *  Wire format: 16 raw nonce bytes + optional length-prefixed B64 salt. */
+     *  Wire format (SPEC §4.3):
+     *    16 raw nonce bytes + u32 salt_len + B64 salt + u32 params_len + "m=..,t=..,p=.."
+     *  The trailing m/t/p tag carries the server's OWASP Argon2id params so the
+     *  client derives its HMAC key from them (kills the N1 lockstep mine). */
     fun parseAuthChallenge(r: Reader): AuthChallengeFrame {
         if (r.remaining() < 16) throw ProtocolException("AuthChallenge: expected 16 bytes, got ${r.remaining()}")
         val nonce = r.readBytes(16)
@@ -287,7 +331,22 @@ object Protocol {
         } else {
             ""
         }
-        return AuthChallengeFrame(nonce, saltB64)
+        // Parse the m/t/p tag if present (old servers omit it → OWASP floor).
+        var mem = 47104
+        var iter = 3
+        var par = 1
+        if (r.remaining() > 0) {
+            val tag = String(r.bytes(), Charsets.UTF_8)
+            for (kv in tag.split(',')) {
+                val (k, v) = kv.split('=')
+                when (k) {
+                    "m" -> mem = v.toIntOrNull()?.coerceAtLeast(47104) ?: 47104
+                    "t" -> iter = v.toIntOrNull()?.coerceAtLeast(3) ?: 3
+                    "p" -> par = v.toIntOrNull()?.coerceAtLeast(1) ?: 1
+                }
+            }
+        }
+        return AuthChallengeFrame(nonce, saltB64, mem, iter, par)
     }
 
     data class SyncMessage(
@@ -435,14 +494,14 @@ object Protocol {
         val opcode = data[offset]
         return when (opcode) {
             OP_AUTH -> {
-                // Auth: [0x01] [u32: pwd_len] [pwd_bytes] [32 raw bytes: HMAC-SHA-256]
+                // C3 (HMAC-only): [0x01] [u32 hmac_len=32] [32 raw bytes: HMAC-SHA-256]
                 if (data.size - offset < 5) throw ProtocolException("frameLength: incomplete $opcode")
-                val pwdLen = ((data[offset + 1].toInt() and 0xFF)) or
+                val hmacLen = ((data[offset + 1].toInt() and 0xFF)) or
                     ((data[offset + 2].toInt() and 0xFF) shl 8) or
                     ((data[offset + 3].toInt() and 0xFF) shl 16) or
                     ((data[offset + 4].toInt() and 0xFF) shl 24)
-                if (pwdLen < 0 || pwdLen > MAX_PAYLOAD_BYTES) throw ProtocolException("frameLength: $opcode pwd_len=$pwdLen out of range")
-                1 + 4 + pwdLen + 32
+                if (hmacLen != 32) throw ProtocolException("frameLength: $opcode hmac_len=$hmacLen must be 32")
+                1 + 4 + hmacLen
             }
             OP_KEY_EXCHANGE_KEM_DSA -> {
                 if (data.size - offset < 5) throw ProtocolException("frameLength: incomplete $opcode")
@@ -450,7 +509,7 @@ object Protocol {
                     ((data[offset + 2].toInt() and 0xFF) shl 8) or
                     ((data[offset + 3].toInt() and 0xFF) shl 16) or
                     ((data[offset + 4].toInt() and 0xFF) shl 24)
-                if (payloadLen < 0 || payloadLen > MAX_PAYLOAD_BYTES * 2) throw ProtocolException("frameLength: $opcode len=$payloadLen out of range")
+                if (payloadLen < 0 || payloadLen > MAX_PAYLOAD_BYTES) throw ProtocolException("frameLength: $opcode len=$payloadLen out of range")
                 1 + 4 + payloadLen
             }
             OP_DATA -> {
@@ -460,7 +519,7 @@ object Protocol {
                     ((data[offset + 18].toInt() and 0xFF) shl 8) or
                     ((data[offset + 19].toInt() and 0xFF) shl 16) or
                     ((data[offset + 20].toInt() and 0xFF) shl 24)
-                if (payloadLen < 0 || payloadLen > MAX_PAYLOAD_BYTES * 2) throw ProtocolException("frameLength: OP_DATA len=$payloadLen out of range")
+                if (payloadLen < 0 || payloadLen > MAX_PAYLOAD_BYTES) throw ProtocolException("frameLength: OP_DATA len=$payloadLen out of range")
                 1 + 8 + 8 + 4 + payloadLen
             }
             OP_SYNC -> 1 + 8

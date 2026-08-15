@@ -31,12 +31,13 @@ class CombinedKeyExchangeTest {
         // Byte 0: opcode
         assertEquals(Protocol.OP_KEY_EXCHANGE_KEM_DSA, frame[0])
 
-        // Bytes 1-4: outer u32 total length = (4+3) + (4+4) = 15
+        // Bytes 1-4: outer u32 total length = (4+3) + (4+4) + (4+0) = 19
+        // (kem_len + kem + dsa_len + dsa + sig_len + sig[0])
         val outerLen = frame[1].toInt() and 0xFF or
             ((frame[2].toInt() and 0xFF) shl 8) or
             ((frame[3].toInt() and 0xFF) shl 16) or
             ((frame[4].toInt() and 0xFF) shl 24)
-        assertEquals(15, outerLen)
+        assertEquals(19, outerLen)
 
         // Bytes 5-8: inner u32 kem_len = 3
         val kemLen = frame[5].toInt() and 0xFF or
@@ -63,8 +64,15 @@ class CombinedKeyExchangeTest {
         assertEquals(0x33.toByte(), frame[18])
         assertEquals(0x44.toByte(), frame[19])
 
-        // Total: 1 + 4 + 15 = 20
-        assertEquals(20, frame.size)
+        // Bytes 20-23: inner u32 sig_len = 0 (no attestation in this test build)
+        val sigLen = frame[20].toInt() and 0xFF or
+            ((frame[21].toInt() and 0xFF) shl 8) or
+            ((frame[22].toInt() and 0xFF) shl 16) or
+            ((frame[23].toInt() and 0xFF) shl 24)
+        assertEquals(0, sigLen)
+
+        // Total: 1 + 4 + 19 = 24
+        assertEquals(24, frame.size)
     }
 
     // ── 3. frameLength matches actual size ──────────────────────────────────────
@@ -115,12 +123,13 @@ class CombinedKeyExchangeTest {
 
         val frame = Protocol.buildCombinedKeyExchange(kemPub, dsaPub)
 
-        // Outer u32 (bytes 1-4) must equal total inner bytes: (4+100) + (4+200) = 308
+        // Outer u32 (bytes 1-4) must equal total inner bytes:
+        // (4+kem) + (4+dsa) + (4+sig[0]) = (4+100) + (4+200) + 4 = 312
         val outerLen = frame[1].toInt() and 0xFF or
             ((frame[2].toInt() and 0xFF) shl 8) or
             ((frame[3].toInt() and 0xFF) shl 16) or
             ((frame[4].toInt() and 0xFF) shl 24)
-        assertEquals(4 + kemPub.size + 4 + dsaPub.size, outerLen)
+        assertEquals(4 + kemPub.size + 4 + dsaPub.size + 4, outerLen)
 
         // Total frame = 1 (opcode) + 4 (outer len) + outerLen
         assertEquals(1 + 4 + outerLen, frame.size)
@@ -163,8 +172,8 @@ class CombinedKeyExchangeTest {
         assertArrayEquals(kemPub, parsed.kemPublicKey)
         assertArrayEquals(dsaPub, parsed.dsaPublicKey)
 
-        // Verify total frame size: 1 + 4 + (4+1184) + (4+1952) = 1 + 4 + 1188 + 1956 = 3149
-        assertEquals(3149, frame.size)
+        // Verify total frame size: 1 + 4 + (4+1184) + (4+1952) + (4+0) = 3153
+        assertEquals(3153, frame.size)
     }
 
     // ── 9. Simulate the FULL flow: client build, server parse, relay, client parse ──
