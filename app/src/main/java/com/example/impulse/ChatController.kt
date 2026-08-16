@@ -1275,19 +1275,18 @@ class ChatController(private val context: Context) {
             // private key. We only trust a key if (a) it is brand-new TOFU, or
             // (b) it carries a valid signature from the ALREADY-KNOWN DSA key.
             // The DB lookup is suspend, so run the trust decision in the scope.
+            // The trust formula is factored into Protocol.evaluateKeyExchangeTrust
+            // so it is unit-testable on the JVM without an Android Context
+            // (see C1AttestationTest). Behaviour is unchanged.
             scope.launch {
                 val existingDsa = keyRepo.getDsaPublicKey(serverId, dsaFp)
-                val sigValid = frame.signature?.let { sig ->
-                    keyManager.verifyDsa(frame.dsaPublicKey, frame.kemPublicKey + frame.dsaPublicKey, sig)
-                } ?: false
-
-                val trusted = if (existingDsa == null) {
-                    // Initial TOFU: accept, but surface the QR/pin confirmation so
-                    // the user can confirm out-of-band (defense in depth).
-                    true
-                } else {
-                    sigValid
-                }
+                val trusted = Protocol.evaluateKeyExchangeTrust(
+                    existingDsa = existingDsa,
+                    kemPublicKey = frame.kemPublicKey,
+                    dsaPublicKey = frame.dsaPublicKey,
+                    signature = frame.signature,
+                    verify = { dsaPub, data, sig -> keyManager.verifyDsa(dsaPub, data, sig) }
+                )
 
                 if (!trusted) {
                     LogManager.w(TAG, "CombinedKeyExchange REJECTED: attestation failed for dsa_fp=$dsaFp (possible MITM)")
@@ -1295,7 +1294,10 @@ class ChatController(private val context: Context) {
                 }
 
                 keyRepo.cacheKey(serverId, kemFp, frame.kemPublicKey, frame.dsaPublicKey)
-                LogManager.i(TAG, "CombinedKeyExchange: kem_fp=$kemFp dsa_fp=$dsaFp cached (attestation ${if (sigValid) "verified" else "TOFU"})")
+                val attestVerified = frame.signature != null && keyManager.verifyDsa(
+                    frame.dsaPublicKey, frame.kemPublicKey + frame.dsaPublicKey, frame.signature
+                )
+                LogManager.i(TAG, "CombinedKeyExchange: kem_fp=$kemFp dsa_fp=$dsaFp cached (attestation ${if (attestVerified) "verified" else "TOFU"})")
                 processPendingMessages(kemFp)
             }
         } catch (e: Exception) {

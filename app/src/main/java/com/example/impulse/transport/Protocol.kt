@@ -297,6 +297,53 @@ object Protocol {
         return CombinedKeyExchangeFrame(kem, dsa, sig)
     }
 
+    /**
+     * Client-side C1 attestation trust decision (SPEC §1 / MITM defense).
+     *
+     * Pure and [Context]-free so it is unit-testable on the JVM without
+     * Robolectric (see `C1AttestationTest`). This mirrors — byte-for-byte in
+     * behaviour — the inline logic in [com.example.impulse.ChatController.onCombinedKeyExchange];
+     * [com.example.impulse.ChatController] calls this with
+     * `verify = { dsaPub, data, sig -> keyManager.verifyDsa(dsaPub, data, sig) }`.
+     *
+     * The attestation is `ML-DSA-65 sign(dsaPriv, kemPub || dsaPub)`, proving the
+     * sender owns the DSA private key. A receiving client therefore:
+     *  - if it has NEVER seen this peer's DSA key (`existingDsa == null`): trust
+     *    on TOFU, but the UI must surface an out-of-band QR/pin confirmation
+     *    (defense in depth);
+     *  - if it ALREADY pins this peer's DSA key: require a valid signature from
+     *    THAT key. A rogue relay substituting the KEM key (or forging either key)
+     *    without the pinned DSA private key fails verification and is REJECTED.
+     *
+     * @param existingDsa pinned DSA public key already known for this peer, or
+     *    `null` for first contact (TOFU).
+     * @param kemPublicKey KEM public key from the incoming frame.
+     * @param dsaPublicKey DSA public key from the incoming frame.
+     * @param signature attestation over `(kemPub || dsaPub)`, or `null`.
+     * @param verify injected DSA verifier so the unit test can pass
+     *    [com.example.impulse.security.PqcCrypto.verifyMlDsa65] directly while
+     *    production injects [com.example.impulse.security.SecureKeyManager.verifyDsa].
+     * @return `true` iff the key exchange should be trusted (and cached).
+     */
+    fun evaluateKeyExchangeTrust(
+        existingDsa: ByteArray?,
+        kemPublicKey: ByteArray,
+        dsaPublicKey: ByteArray,
+        signature: ByteArray?,
+        verify: (dsaPub: ByteArray, data: ByteArray, sig: ByteArray) -> Boolean
+    ): Boolean {
+        val sigValid = signature?.let { sig ->
+            verify(dsaPublicKey, kemPublicKey + dsaPublicKey, sig)
+        } ?: false
+        return if (existingDsa == null) {
+            // Initial TOFU: accept, but surface the QR/pin confirmation so the
+            // user can confirm out-of-band (defense in depth).
+            true
+        } else {
+            sigValid
+        }
+    }
+
     data class AuthResultFrame(val success: Boolean, val errorMessage: String?)
 
     /** Parses an AuthResult frame (opcode already consumed by caller). */
