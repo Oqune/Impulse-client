@@ -33,29 +33,28 @@
   идентичности между устройствами (новый ML-DSA ключ генерируется при импорте).
 - 🌗 Светлая / тёмная / системная темы и опциональная биометрическая блокировка.
 
-## Бинарный протокол (опкоды `0x01`–`0x0C`)
+## Бинарный протокол (опкоды `0x11`–`0x34`)
 
-Каждый кадр начинается с одного байта опкода. Кодирование полей — little-endian:
-`u8` (1 Б), `u32` (4 Б префикс длины), `u64` (8 Б), `bytes` (`u32` длина + raw).
+Каждый кадр начинается с одного байта опкода. Опкоды структурированы по доменам:
+старший полубайт — категория (`0x1_` Auth, `0x2_` Session, `0x3_` Data & Relay), младший — действие.
+Кодирование полей — little-endian: `u8` (1 Б), `u32` (4 Б префикс длины), `u64` (8 Б), `bytes` (`u32` длина + raw).
 Сервер никогда не видит метаданные plaintext — отправитель, подпись и
 содержимое живут внутри AES-256-GCM `OP_DATA` payload.
 
-| Опкод | Имя | Направление | Тело |
-|-------|-----|-------------|------|
-| `0x01` | `OP_AUTH` | C→S | `[u32 LE pwd_len][raw pwd bytes][32 raw HMAC bytes]` |
-| `0x02` | `OP_AUTH_RESULT` | S→C | `success(u8)` [error utf8 если !success] |
-| `0x03` | `OP_SYNC` | C→S | `last_seen_id(u64)` |
-| `0x04` | `OP_SYNC_RESPONSE` | S→C | `count(u32)` { `id(u64)`, `timestamp(u64)`, `len(u32)`, `payload(bytes)` } |
-| `0x05` | `OP_DATA` | обе | C→S: `len(u32)`+`payload`. S→C relay: `server_msg_id(u64)`+`timestamp(u64)`+`len(u32)`+`payload` |
-| `0x06` | `OP_HEARTBEAT` | обе | `client_timestamp(u64)` |
-| `0x07` | `OP_NEW_CERT_HASH` | S→C | `hash(32 байта raw)` + `expiry(u64)` (без префикса длины) |
-| `0x08` | `OP_DISCONNECT` | обе | без payload |
-| `0x0B` | `OP_AUTH_CHALLENGE` | S→C | `[16-byte nonce][u32 salt_len][B64 Argon2id salt]` |
-| `0x0C` | `OP_KEY_EXCHANGE_KEM_DSA` | обе | `kem_key_len(u32)`+`ML-KEM-768 публичный ключ` + `dsa_key_len(u32)`+`ML-DSA-65 публичный ключ` (комбинированный, ретранслируется атомарно) |
+| Опкод | Домен | Имя | Направление | Тело |
+|-------|-------|-----|-------------|------|
+| `0x11` | Auth | `OP_AUTH_CHALLENGE` | S→C | `[16-byte nonce][u32 salt_len][B64 Argon2id salt][u32 params_len][params]` |
+| `0x12` | Auth | `OP_AUTH` | C→S | `[u32 LE hmac_len=32][32 raw HMAC-SHA-256 proof bytes]` |
+| `0x13` | Auth | `OP_AUTH_RESULT` | S→C | `success(u8)` [error utf8 если !success] |
+| `0x21` | Session | `OP_HEARTBEAT` | обе | `client_timestamp(u64)` |
+| `0x22` | Session | `OP_NEW_CERT_HASH` | S→C | `hash(32 байта raw)` + `expiry(u64)` (без префикса длины) |
+| `0x23` | Session | `OP_DISCONNECT` | обе | без payload |
+| `0x31` | Data | `OP_KEY_EXCHANGE_KEM_DSA` | обе | `[u32 total_len][u32 kem_len][kem_pub][u32 dsa_len][dsa_pub][u32 sig_len][sig]` |
+| `0x32` | Data | `OP_DATA` | обе | C→S: `len(u32)`+`payload`. S→C relay: `server_msg_id(u64)`+`timestamp(u64)`+`len(u32)`+`payload` |
+| `0x33` | Data | `OP_SYNC` | C→S | `last_seen_id(u64)` |
+| `0x34` | Data | `OP_SYNC_RESPONSE` | S→C | `count(u32)` { `id(u64)`, `timestamp(u64)`, `len(u32)`, `payload(bytes)` } |
 
-Опкоды `0x09`–`0x0A` зарезервированы/не используются. Авторитетный список —
-константы `OP_*` в `transport/Protocol.kt` и enum `Opcode` в серверном
-`src/protocol.rs`; они ДОЛЖНЫ оставаться синхронизированными.
+Авторитетный список — объект `Op` / константы `OP_*` в `transport/Protocol.kt` и enum `Opcode` в серверном `src/protocol.rs`; они ДОЛЖНЫ оставаться синхронизированными.
 
 Клиент хранит авторитетную строку по реальному `server_msg_id`; собственная
 оптимистичная копия использует **отрицательный** временный id, чтобы не конфликтовать.
@@ -65,10 +64,10 @@
 Challenge-response на базе Argon2id + HMAC-SHA-256. Сервер хранит только Argon2id-хеш
 пароля (никогда — plaintext). Поток:
 
-1. Сервер шлёт `OP_AUTH_CHALLENGE` (0x0B): 16-байтный nonce + Argon2id salt.
+1. Сервер шлёт `OP_AUTH_CHALLENGE` (0x11): 16-байтный nonce + Argon2id salt + OWASP параметры.
 2. Клиент вычисляет `key = Argon2id(salt, password)`, затем `HMAC-SHA-256(key, nonce)`.
-3. Клиент шлёт `OP_AUTH` (0x01): `[pwd_len][raw pwd bytes][32 raw HMAC]`.
-4. Сервер проверяет HMAC и отвечает `OP_AUTH_RESULT` (0x02).
+3. Клиент шлёт `OP_AUTH` (0x12): `[u32 hmac_len=32][32 raw HMAC]` (пароль не передаётся по сети).
+4. Сервер проверяет HMAC и отвечает `OP_AUTH_RESULT` (0x13).
 
 Сгенерируйте хеш сервера через `impulse-server --hash-password <pw>` и передайте
 его в `config.toml` (`password_hash`) или через `--password-hash`.
@@ -100,9 +99,9 @@ cd Impulse-client
    Принимается только строгий payload `impulse-cert:<64 hex>`.
 4. Сервер может прислать *следующий* хеш сертификата (`OP_NEW_CERT_HASH`) для ротации.
 5. Публичные ключи ML-KEM-768 + ML-DSA-65 обмениваются атомарно через
-   `OP_KEY_EXCHANGE_KEM_DSA` (0x0C); когда ключи пиров закешированы — канал `READY`.
-6. **Аутентификация автоматическая** при подключении: сервер шлёт `OP_AUTH_CHALLENGE`,
-   клиент отвечает `OP_AUTH`, и по `OP_AUTH_RESULT` (0x02) в течение 15 с канал
+   `OP_KEY_EXCHANGE_KEM_DSA` (0x31); когда ключи пиров закешированы — канал `READY`.
+6. **Аутентификация автоматическая** при подключении: сервер шлёт `OP_AUTH_CHALLENGE` (0x11),
+   клиент отвечает `OP_AUTH` (0x12), и по `OP_AUTH_RESULT` (0x13) в течение 15 с канал
    становится `AUTHENTICATED → READY`. Отправка блокируется до `READY`.
 
 ## Заметки по реализации

@@ -336,16 +336,23 @@ class WebTransportClient(
             val frameLen = try {
                 Protocol.frameLength(bytes, pos)
             } catch (e: Exception) {
-                val b = bytes[pos].toInt() and 0xFF
+                val b = bytes[pos]
                 val knownOpcode = b in setOf(
-                    0x02, 0x04, 0x05, 0x06, 0x07, 0x08, 0x0B, 0x0C
+                    Protocol.Op.Auth.CHALLENGE,
+                    Protocol.Op.Auth.RESULT,
+                    Protocol.Op.Session.HEARTBEAT,
+                    Protocol.Op.Session.NEW_CERT_HASH,
+                    Protocol.Op.Session.DISCONNECT,
+                    Protocol.Op.Data.KEY_EXCHANGE,
+                    Protocol.Op.Data.DATA,
+                    Protocol.Op.Data.SYNC_RESPONSE
                 )
                 if (knownOpcode) {
                     // Valid opcode but frame is incomplete (large frame in chunks).
                     // Break and wait for more data to arrive.
                     break
                 }
-                LogManager.w(TAG, "frameLength failed at pos=$pos, byte=0x%02x — skipping".format(b))
+                LogManager.w(TAG, "frameLength failed at pos=$pos, byte=0x%02x — skipping".format(bytes[pos].toInt() and 0xFF))
                 pos++
                 continue
             }
@@ -371,6 +378,7 @@ class WebTransportClient(
         val opcode = raw[0]
         val opcodeName = when (opcode) {
             Protocol.OP_AUTH -> "Auth"
+            Protocol.OP_AUTH_CHALLENGE -> "AuthChallenge"
             Protocol.OP_AUTH_RESULT -> "AuthResult"
             Protocol.OP_SYNC -> "Sync"
             Protocol.OP_SYNC_RESPONSE -> "SyncResponse"

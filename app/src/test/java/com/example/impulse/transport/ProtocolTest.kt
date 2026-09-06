@@ -50,7 +50,7 @@ class ProtocolTest {
         val nonce = ByteArray(16) { 0x42 }
         val frame = Protocol.buildAuth(pw, nonce)
         assertEquals(Protocol.OP_AUTH, frame[0])
-        // Wire: [0x01] [u32 hmac_len=32] [32 hmac] — exactly 37 bytes, no password.
+        // Wire: [0x12] [u32 hmac_len=32] [32 hmac] — exactly 37 bytes, no password.
         assertEquals(37, frame.size)
         // The raw password must NOT appear anywhere on the wire.
         val pwBytes = pw.toByteArray(Charsets.UTF_8)
@@ -141,9 +141,9 @@ class ProtocolTest {
         mac.init(secretSpec)
         val expectedHmac = mac.doFinal(nonce)
 
-        // Build expected wire format: [0x01][u32 hmac_len=32][32 hmac].
+        // Build expected wire format: [0x12][u32 hmac_len=32][32 hmac].
         val expected = byteArrayOf(
-            0x01,                                           // OP_AUTH
+            Protocol.OP_AUTH,                               // OP_AUTH (0x12)
             0x20, 0x00, 0x00, 0x00                          // u32 LE hmac length = 32
         ) + expectedHmac                                     // 32 bytes HMAC
 
@@ -312,5 +312,34 @@ class ProtocolTest {
 
         assertFalse("Client 0's HMAC must not verify with client 1 key",
             hmac0.contentEquals(wrongExpected))
+    }
+
+    @Test
+    fun opcode_hierarchy_valuesMatchDomainCategorization() {
+        // Auth Domain (0x1_)
+        assertEquals(0x11.toByte(), Protocol.Op.Auth.CHALLENGE)
+        assertEquals(0x12.toByte(), Protocol.Op.Auth.RESPONSE)
+        assertEquals(0x13.toByte(), Protocol.Op.Auth.RESULT)
+        assertEquals(Protocol.Op.Auth.CHALLENGE, Protocol.OP_AUTH_CHALLENGE)
+        assertEquals(Protocol.Op.Auth.RESPONSE, Protocol.OP_AUTH)
+        assertEquals(Protocol.Op.Auth.RESULT, Protocol.OP_AUTH_RESULT)
+
+        // Session Control Domain (0x2_)
+        assertEquals(0x21.toByte(), Protocol.Op.Session.HEARTBEAT)
+        assertEquals(0x22.toByte(), Protocol.Op.Session.NEW_CERT_HASH)
+        assertEquals(0x23.toByte(), Protocol.Op.Session.DISCONNECT)
+        assertEquals(Protocol.Op.Session.HEARTBEAT, Protocol.OP_HEARTBEAT)
+        assertEquals(Protocol.Op.Session.NEW_CERT_HASH, Protocol.OP_NEW_CERT_HASH)
+        assertEquals(Protocol.Op.Session.DISCONNECT, Protocol.OP_DISCONNECT)
+
+        // Data & Relay Domain (0x3_)
+        assertEquals(0x31.toByte(), Protocol.Op.Data.KEY_EXCHANGE)
+        assertEquals(0x32.toByte(), Protocol.Op.Data.DATA)
+        assertEquals(0x33.toByte(), Protocol.Op.Data.SYNC)
+        assertEquals(0x34.toByte(), Protocol.Op.Data.SYNC_RESPONSE)
+        assertEquals(Protocol.Op.Data.KEY_EXCHANGE, Protocol.OP_KEY_EXCHANGE_KEM_DSA)
+        assertEquals(Protocol.Op.Data.DATA, Protocol.OP_DATA)
+        assertEquals(Protocol.Op.Data.SYNC, Protocol.OP_SYNC)
+        assertEquals(Protocol.Op.Data.SYNC_RESPONSE, Protocol.OP_SYNC_RESPONSE)
     }
 }

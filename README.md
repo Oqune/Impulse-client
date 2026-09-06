@@ -34,29 +34,28 @@ Pairs with the [Impulse server](https://github.com/Oqune/Impulse-server/).
   identity across devices, with a fresh ML-DSA key generated on import.
 - 🌗 Light / Dark / System themes and optional biometric app lock.
 
-## Binary protocol (opcodes `0x01`–`0x0C`)
+## Binary protocol (opcodes `0x11`–`0x34`)
 
-Every frame starts with a single opcode byte. Field encoding is little-endian:
-`u8` (1 B), `u32` (4 B length prefix), `u64` (8 B), `bytes` (`u32` length + raw).
+Every frame starts with a single opcode byte. Opcodes are domain-categorized:
+high nibble = category (`0x1_` Auth, `0x2_` Session, `0x3_` Data & Relay), low nibble = action.
+Field encoding is little-endian: `u8` (1 B), `u32` (4 B length prefix), `u64` (8 B), `bytes` (`u32` length + raw).
 The server never sees plaintext metadata — sender, signature and content live
 inside the AES-256-GCM `OP_DATA` payload.
 
-| Opcode | Name | Direction | Body |
-|--------|------|-----------|------|
-| `0x01` | `OP_AUTH` | C→S | `[u32 LE pwd_len][raw pwd bytes][32 raw HMAC bytes]` |
-| `0x02` | `OP_AUTH_RESULT` | S→C | `success(u8)` [error utf8 if !success] |
-| `0x03` | `OP_SYNC` | C→S | `last_seen_id(u64)` |
-| `0x04` | `OP_SYNC_RESPONSE` | S→C | `count(u32)` { `id(u64)`, `timestamp(u64)`, `len(u32)`, `payload(bytes)` } |
-| `0x05` | `OP_DATA` | both | C→S: `len(u32)`+`payload`. S→C relay: `server_msg_id(u64)`+`timestamp(u64)`+`len(u32)`+`payload` |
-| `0x06` | `OP_HEARTBEAT` | both | `client_timestamp(u64)` |
-| `0x07` | `OP_NEW_CERT_HASH` | S→C | `hash(32 bytes raw)` + `expiry(u64)` (no length prefix) |
-| `0x08` | `OP_DISCONNECT` | both | no payload |
-| `0x0B` | `OP_AUTH_CHALLENGE` | S→C | `[16-byte nonce][u32 LE salt_len][B64 Argon2id salt]` |
-| `0x0C` | `OP_KEY_EXCHANGE_KEM_DSA` | both | `kem_key_len(u32)`+`ML-KEM-768 public key` + `dsa_key_len(u32)`+`ML-DSA-65 public key` (combined, relayed atomically) |
+| Opcode | Domain | Name | Direction | Body |
+|--------|--------|------|-----------|------|
+| `0x11` | Auth | `OP_AUTH_CHALLENGE` | S→C | `[16-byte nonce][u32 salt_len][B64 Argon2id salt][u32 params_len][params]` |
+| `0x12` | Auth | `OP_AUTH` | C→S | `[u32 LE hmac_len=32][32 raw HMAC-SHA-256 proof bytes]` |
+| `0x13` | Auth | `OP_AUTH_RESULT` | S→C | `success(u8)` [error utf8 if !success] |
+| `0x21` | Session | `OP_HEARTBEAT` | both | `client_timestamp(u64)` |
+| `0x22` | Session | `OP_NEW_CERT_HASH` | S→C | `hash(32 bytes raw)` + `expiry(u64)` (no length prefix) |
+| `0x23` | Session | `OP_DISCONNECT` | both | no payload |
+| `0x31` | Data | `OP_KEY_EXCHANGE_KEM_DSA` | both | `[u32 total_len][u32 kem_len][kem_pub][u32 dsa_len][dsa_pub][u32 sig_len][sig]` |
+| `0x32` | Data | `OP_DATA` | both | C→S: `len(u32)`+`payload`. S→C relay: `server_msg_id(u64)`+`timestamp(u64)`+`len(u32)`+`payload` |
+| `0x33` | Data | `OP_SYNC` | C→S | `last_seen_id(u64)` |
+| `0x34` | Data | `OP_SYNC_RESPONSE` | S→C | `count(u32)` { `id(u64)`, `timestamp(u64)`, `len(u32)`, `payload(bytes)` } |
 
-Opcodes `0x09`–`0x0A` are reserved/unused. The authoritative list is defined in
-`transport/Protocol.kt` (`OP_*` constants) and the server's `src/protocol.rs`
-(`Opcode` enum) — they MUST stay in sync.
+The authoritative list is defined in `transport/Protocol.kt` (`Op` object / `OP_*` constants) and the server's `src/protocol.rs` (`Opcode` enum) — they MUST stay in sync.
 
 The client stores the authoritative row keyed by the real `server_msg_id`; its
 own optimistic copy uses a **negative** temp id so it can never collide.
@@ -66,10 +65,10 @@ own optimistic copy uses a **negative** temp id so it can never collide.
 Challenge-response over Argon2id + HMAC-SHA-256. The server stores only an
 Argon2id hash of the password (never the plaintext). Flow:
 
-1. Server sends `OP_AUTH_CHALLENGE` (0x0B): 16-byte nonce + Argon2id salt.
+1. Server sends `OP_AUTH_CHALLENGE` (0x11): 16-byte nonce + Argon2id salt + OWASP parameters.
 2. Client computes `key = Argon2id(salt, password)`, then `HMAC-SHA-256(key, nonce)`.
-3. Client sends `OP_AUTH` (0x01) with `[pwd_len][raw pwd bytes][32 raw HMAC]`.
-4. Server verifies the HMAC and replies `OP_AUTH_RESULT` (0x02).
+3. Client sends `OP_AUTH` (0x12) with `[u32 hmac_len=32][32 raw HMAC]` (no password on the wire).
+4. Server verifies the HMAC and replies `OP_AUTH_RESULT` (0x13).
 
 Generate the server password hash with `impulse-server --hash-password <pw>` and
 pass it via `config.toml` (`password_hash`) or `--password-hash`.
@@ -101,9 +100,9 @@ is requested on first QR scan. Signed release builds use the local
    Only a strict `impulse-cert:<64 hex>` payload is accepted.
 4. The server may push a *next* cert hash (`OP_NEW_CERT_HASH`) for rotation.
 5. ML-KEM-768 + ML-DSA-65 public keys are exchanged atomically via
-   `OP_KEY_EXCHANGE_KEM_DSA` (0x0C); once peer keys are cached the channel is `READY`.
-6. **Authentication is automatic** on connect: the server sends `OP_AUTH_CHALLENGE`,
-   the client replies with `OP_AUTH`, and on `OP_AUTH_RESULT` (0x02) within 15 s the
+   `OP_KEY_EXCHANGE_KEM_DSA` (0x31); once peer keys are cached the channel is `READY`.
+6. **Authentication is automatic** on connect: the server sends `OP_AUTH_CHALLENGE` (0x11),
+   the client replies with `OP_AUTH` (0x12), and on `OP_AUTH_RESULT` (0x13) within 15 s the
    channel becomes `AUTHENTICATED → READY`. Sending is blocked until `READY`.
 
 ## Implementation notes

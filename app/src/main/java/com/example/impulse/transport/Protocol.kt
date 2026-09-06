@@ -14,17 +14,20 @@ package com.example.impulse.transport
  *  - u64  : 8 bytes (ids / timestamps)
  *  - bytes: u32 length prefix followed by the raw bytes
  *
- * Opcodes:
- *  0x01 OP_AUTH         -> SHA-256(password) as lowercase hex (utf8)
- *  0x02 OP_AUTH_RESULT  <- success(u8) [error message bytes if !success]
- *  0x03 OP_SYNC         -> last_seen_id (u64)
- *  0x04 OP_SYNC_RESPONSE<- count(u32) { id(u64), timestamp(u64), len(u32), payload(bytes) }
- *  0x05 OP_DATA         -> len(u32), payload(bytes)            (both directions)
- *  0x06 OP_HEARTBEAT    -> client_timestamp(u64)                (both directions)
-* 0x07 OP_NEW_CERT_HASH<- 32 raw SHA-256 bytes, expiry(u64)
- * 0x08 OP_DISCONNECT     — either direction: no payload
- * 0x0B OP_AUTH_CHALLENGE  <- 16-byte random nonce             (server -> client)
- * 0x0C OP_KEY_EXCHANGE_KEM_DSA -> kem_key(bytes), dsa_key(bytes) (both directions)
+ * Opcodes (Domain-categorized: high nibble = domain, low nibble = action):
+ *  Auth Domain (0x1_):
+ *    0x11 OP_AUTH_CHALLENGE  <- 16-byte nonce, salt, Argon2 params (server -> client)
+ *    0x12 OP_AUTH            -> 32-byte HMAC-SHA-256 proof (client -> server)
+ *    0x13 OP_AUTH_RESULT     <- success(u8) [error message bytes if !success]
+ *  Session Control Domain (0x2_):
+ *    0x21 OP_HEARTBEAT       -> client_timestamp(u64) (both directions)
+ *    0x22 OP_NEW_CERT_HASH   <- 32 raw SHA-256 bytes, expiry(u64)
+ *    0x23 OP_DISCONNECT      — either direction: no payload
+ *  Data & Relay Domain (0x3_):
+ *    0x31 OP_KEY_EXCHANGE_KEM_DSA -> kem_key(bytes), dsa_key(bytes), sig(bytes) (both directions)
+ *    0x32 OP_DATA            -> len(u32), payload(bytes) (both directions)
+ *    0x33 OP_SYNC            -> last_seen_id (u64)
+ *    0x34 OP_SYNC_RESPONSE   <- count(u32) { id(u64), timestamp(u64), len(u32), payload(bytes) }
  */
 object Protocol {
 
@@ -45,16 +48,44 @@ object Protocol {
     const val MAX_PAYLOAD_BYTES = 1_000_000 // SPEC N2/N3: canonical value, matches server (limits.rs). Previously 1*1024*1024 drifted by 48_576 bytes.
 
     // ---- Opcodes ----------------------------------------------------------
-    const val OP_AUTH: Byte = 0x01
-    const val OP_AUTH_RESULT: Byte = 0x02
-    const val OP_SYNC: Byte = 0x03
-    const val OP_SYNC_RESPONSE: Byte = 0x04
-    const val OP_DATA: Byte = 0x05
-    const val OP_HEARTBEAT: Byte = 0x06
-    const val OP_NEW_CERT_HASH: Byte = 0x07
-    const val OP_DISCONNECT: Byte = 0x08
-    const val OP_AUTH_CHALLENGE: Byte = 0x0B
-    const val OP_KEY_EXCHANGE_KEM_DSA: Byte = 0x0C
+
+    /**
+     * Domain-categorized opcode hierarchy.
+     * High nibble indicates the domain: 0x1 (Auth), 0x2 (Session), 0x3 (Data & Relay).
+     * Wire representation is exactly 1 byte.
+     */
+    object Op {
+        object Auth {
+            const val CHALLENGE: Byte = 0x11
+            const val RESPONSE: Byte = 0x12
+            const val RESULT: Byte = 0x13
+        }
+        object Session {
+            const val HEARTBEAT: Byte = 0x21
+            const val NEW_CERT_HASH: Byte = 0x22
+            const val DISCONNECT: Byte = 0x23
+        }
+        object Data {
+            const val KEY_EXCHANGE: Byte = 0x31
+            const val DATA: Byte = 0x32
+            const val SYNC: Byte = 0x33
+            const val SYNC_RESPONSE: Byte = 0x34
+        }
+    }
+
+    // Top-level aliases for backward compatibility and clean ergonomics
+    const val OP_AUTH_CHALLENGE: Byte = Op.Auth.CHALLENGE
+    const val OP_AUTH: Byte = Op.Auth.RESPONSE
+    const val OP_AUTH_RESULT: Byte = Op.Auth.RESULT
+
+    const val OP_HEARTBEAT: Byte = Op.Session.HEARTBEAT
+    const val OP_NEW_CERT_HASH: Byte = Op.Session.NEW_CERT_HASH
+    const val OP_DISCONNECT: Byte = Op.Session.DISCONNECT
+
+    const val OP_KEY_EXCHANGE_KEM_DSA: Byte = Op.Data.KEY_EXCHANGE
+    const val OP_DATA: Byte = Op.Data.DATA
+    const val OP_SYNC: Byte = Op.Data.SYNC
+    const val OP_SYNC_RESPONSE: Byte = Op.Data.SYNC_RESPONSE
 
     // ======================================================================
     // Binary writer / reader helpers
@@ -138,7 +169,7 @@ object Protocol {
      * — proving the client received the challenge and preventing replay attacks.
      *
      * Wire format (SPEC C3, §4.2 — HMAC-only challenge response):
-     *   [0x01] [u32 hmac_len=32] [32 raw bytes: HMAC-SHA-256]
+     *   [0x12] [u32 hmac_len=32] [32 raw bytes: HMAC-SHA-256]
      * The raw password NEVER travels on the wire; the client sends only
      * HMAC(Argon2id(pw, salt), nonce), verified by the server against the key
      * derived from the stored hash.
@@ -262,7 +293,7 @@ object Protocol {
 
     /**
      * Build a combined KEM+DSA key-exchange frame (client→server, SPEC §4.1).
-     * Wire: [0x0C] [u32 inner_len][u32 kem_len][kem][u32 dsa_len][dsa]
+     * Wire: [0x31] [u32 inner_len][u32 kem_len][kem][u32 dsa_len][dsa]
      *        [u32 sig_len][sig]
      * `signature` = ML-DSA-65 sign(dsaPriv, kemPub || dsaPub), computed by the
      * caller via the key manager. It proves the sender owns the DSA private key,
@@ -574,14 +605,25 @@ object Protocol {
             OP_NEW_CERT_HASH -> 1 + 32 + 8
             OP_DISCONNECT -> 1
             OP_AUTH_CHALLENGE -> {
-                // [0x0B] [16 nonce] [u32 salt_len] [salt_bytes]
+                // [0x11] [16 nonce] [u32 salt_len] [salt_bytes] [optional u32 params_len] [params_bytes]
                 if (data.size - offset < 21) throw ProtocolException("frameLength: incomplete OP_AUTH_CHALLENGE (need 21, have ${data.size - offset})")
                 val saltLen = ((data[offset + 17].toInt() and 0xFF)) or
                     ((data[offset + 18].toInt() and 0xFF) shl 8) or
                     ((data[offset + 19].toInt() and 0xFF) shl 16) or
                     ((data[offset + 20].toInt() and 0xFF) shl 24)
                 if (saltLen < 0 || saltLen > 256) throw ProtocolException("frameLength: OP_AUTH_CHALLENGE salt_len=$saltLen out of range")
-                1 + 16 + 4 + saltLen
+                var total = 1 + 16 + 4 + saltLen
+                if (data.size - offset >= total + 4) {
+                    val pPos = offset + total
+                    val paramsLen = ((data[pPos].toInt() and 0xFF)) or
+                        ((data[pPos + 1].toInt() and 0xFF) shl 8) or
+                        ((data[pPos + 2].toInt() and 0xFF) shl 16) or
+                        ((data[pPos + 3].toInt() and 0xFF) shl 24)
+                    if (paramsLen in 0..256 && data.size - offset >= total + 4 + paramsLen) {
+                        total += 4 + paramsLen
+                    }
+                }
+                total
             }
             OP_AUTH_RESULT -> {
                 if (data.size - offset < 2) throw ProtocolException("frameLength: incomplete OP_AUTH_RESULT")
