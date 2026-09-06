@@ -27,7 +27,8 @@ import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.CoroutineExceptionHandler
 import kotlinx.coroutines.withTimeout
 import kotlinx.coroutines.withContext
-import kotlinx.coroutines.runBlocking
+import kotlinx.coroutines.NonCancellable
+import java.util.concurrent.atomic.AtomicLong
 
 class ChatController(private val context: Context) {
 
@@ -107,6 +108,13 @@ class ChatController(private val context: Context) {
 
     private val processedMsgIds = LinkedHashSet<Long>(512)
     private val dedupLock = Any()
+
+    // C4 replay cache: tracks (senderFingerprint:nonce) to reject message replays
+    private val seenNonces = LinkedHashMap<String, Long>(512, 0.75f, true)
+    private val seenNoncesLock = Any()
+
+    // Monotonic counter for optimistic local messages to avoid timestamp collisions
+    private val tempIdCounter = AtomicLong(-1L)
 
     data class DecryptedMessage(
         val serverMsgId: Long,
@@ -228,6 +236,7 @@ class ChatController(private val context: Context) {
     fun setAutoReconnect(enabled: Boolean) { autoReconnectEnabled = enabled }
 
     fun disconnect() {
+        val clientToDestroy: WebTransportClient?
         synchronized(lock) {
             userDisconnect = true
             reconnectJob?.cancel()
@@ -236,16 +245,19 @@ class ChatController(private val context: Context) {
             heartbeatJob = null
             authTimeoutJob?.cancel()
             authTimeoutJob = null
-            // Best-effort notify the server before tearing down the connection.
-            runBlocking {
+            clientToDestroy = client
+            client = null
+        }
+        if (clientToDestroy != null) {
+            // Best-effort notify the server and destroy asynchronously without blocking caller thread
+            CoroutineScope(Dispatchers.IO + NonCancellable).launch {
                 try {
-                    withTimeout(1000) {
-                        client?.send(Protocol.buildDisconnect())
+                    withTimeout(500) {
+                        clientToDestroy.send(Protocol.buildDisconnect())
                     }
                 } catch (_: Exception) { }
+                clientToDestroy.destroy()
             }
-            client?.destroy()
-            client = null
         }
         pendingSaltB64 = ""
         // Keep the outbox across disconnect/reconnect so queued messages are
@@ -470,7 +482,7 @@ class ChatController(private val context: Context) {
         val ok = withContext(Dispatchers.IO) { c?.send(frame) ?: false }
 
         if (ok) {
-            val tempId = -(System.currentTimeMillis())
+            val tempId = tempIdCounter.getAndDecrement()
             val msg = DecryptedMessage(tempId, clientName, publicKeyHash, plaintext, true, System.currentTimeMillis())
             synchronized(listeners) { listeners.forEach { it(msg) } }
         } else {
@@ -542,7 +554,7 @@ class ChatController(private val context: Context) {
         val ok = withContext(Dispatchers.IO) { c?.send(frame) ?: false }
 
         if (ok) {
-            val tempId = -(System.currentTimeMillis())
+            val tempId = tempIdCounter.getAndDecrement()
             val msg = DecryptedMessage(tempId, clientName, publicKeyHash, plaintext, true, System.currentTimeMillis(), "dm:$recipientFingerprint")
             synchronized(listeners) { listeners.forEach { it(msg) } }
         } else {
@@ -815,6 +827,27 @@ class ChatController(private val context: Context) {
         if (!keyManager.verifyDsa(dsaPub, canonical, sigBytes)) {
             LogManager.w(TAG, "ML-DSA-65 signature verification FAILED for msg $realId from ${env.sender}")
             return
+        }
+
+        // C4 Replay protection: verify that this message nonce from this sender hasn't been seen before
+        if (env.nonce.isNotEmpty()) {
+            val nonceKey = "$senderFingerprint:${env.nonce}"
+            val isDuplicate = synchronized(seenNoncesLock) {
+                if (seenNonces.containsKey(nonceKey)) {
+                    true
+                } else {
+                    if (seenNonces.size >= 2000) {
+                        val oldest = seenNonces.keys.firstOrNull()
+                        if (oldest != null) seenNonces.remove(oldest)
+                    }
+                    seenNonces[nonceKey] = System.currentTimeMillis()
+                    false
+                }
+            }
+            if (isDuplicate) {
+                LogManager.w(TAG, "REJECT msg $realId from ${env.sender}: replay detected for nonce ${env.nonce}")
+                return
+            }
         }
 
         // Symmetric conversation key: both sides address the thread by the OTHER

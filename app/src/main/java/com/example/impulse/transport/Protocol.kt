@@ -612,7 +612,7 @@ object Protocol {
                         ((data[pos + 17].toInt() and 0xFF) shl 8) or
                         ((data[pos + 18].toInt() and 0xFF) shl 16) or
                         ((data[pos + 19].toInt() and 0xFF) shl 24)
-                    if (payloadLen < 0 || payloadLen > MAX_PAYLOAD_BYTES * 2) throw ProtocolException("frameLength: OP_SYNC_RESPONSE payloadLen=$payloadLen out of range")
+                    if (payloadLen < 0 || payloadLen > MAX_PAYLOAD_BYTES) throw ProtocolException("frameLength: OP_SYNC_RESPONSE payloadLen=$payloadLen out of range")
                     pos += 20 + payloadLen
                 }
                 pos - offset

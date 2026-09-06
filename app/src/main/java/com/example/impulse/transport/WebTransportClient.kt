@@ -27,7 +27,7 @@ import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
-import kotlinx.coroutines.runBlocking
+import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.withTimeout
 import kotlinx.coroutines.withTimeoutOrNull
 import kotlin.coroutines.coroutineContext
@@ -98,16 +98,15 @@ class WebTransportClient(
         intentionalClose.set(true)
         val st = synchronized(lock) { stream }
         val se = synchronized(lock) { session }
-        // close() is suspend — use runBlocking with timeout to avoid hanging
-        runBlocking {
-            try { withTimeout(1000) { st?.close() } } catch (_: Exception) { }
-            try { withTimeout(1000) { se?.close() } } catch (_: Exception) { }
-        }
         synchronized(lock) {
             session = null
             stream = null
         }
         scope.cancel()
+        CoroutineScope(Dispatchers.IO + NonCancellable).launch {
+            try { withTimeout(1000) { st?.close() } } catch (_: Exception) { }
+            try { withTimeout(1000) { se?.close() } } catch (_: Exception) { }
+        }
     }
 
     suspend fun send(frame: ByteArray): Boolean {
