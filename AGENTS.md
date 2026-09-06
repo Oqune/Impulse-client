@@ -1,6 +1,6 @@
 # AGENTS.md — Impulse Client (Android/Kotlin)
 
-Дополнение к корневому `../AGENTS.md` и `../AI_MANIFESTO.md`. Специфика Android-клиента.
+Дополнение к `PROJECT.md` и `AI_MANIFESTO.md`. Специфика Android-клиента.
 
 ## Стек и архитектура
 - **Язык & UI:** Kotlin 2.0+, Jetpack Compose (Material 3 Expressive), Gradle (KSP).
