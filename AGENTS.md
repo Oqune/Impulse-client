@@ -1,32 +1,36 @@
 # AGENTS.md — Impulse Client (Android/Kotlin)
 
-Дополнение к корневому `../AGENTS.md`. Специфика client-части.
+Дополнение к корневому `../AGENTS.md` и `../AI_MANIFESTO.md`. Специфика Android-клиента.
 
-## Стек
-- Kotlin 2.0+, Jetpack Compose (Material 3), Gradle (KSP, не kapt).
-- Точка входа: `app/src/main/java/com/example/impulse/`.
-- Логика: `ChatController` (оркестратор) + `AuthManager`, `MessageEncryptor`,
-  `MessageDecryptor`, `KeyExchangeHandler`, `ConnectionOrchestrator` (DI через `AppContainer`).
-- Crypto: `security/PqcCrypto.kt` (ML-KEM-768, ML-DSA-65, AES-256-GCM),
-  `security/SecureKeyManager.kt`, `security/SecureStorage.kt`.
-- Хранение: Room (`data/db/`), TTL 72ч, шифр AES-256-GCM.
+## Стек и архитектура
+- **Язык & UI:** Kotlin 2.0+, Jetpack Compose (Material 3 Expressive), Gradle (KSP).
+- **Точка входа:** `app/src/main/java/com/example/impulse/`.
+- **Архитектура:** Чистая декомпозиция `ChatController` через внедрение зависимостей `AppContainer`:
+  - `AuthManager` — рукопожатие, challenge-response аутентификация.
+  - `MessageEncryptor` — сквозное шифрование и отправка сообщений.
+  - `MessageDecryptor` — проверка подлинности и расшифровка входящих фреймов.
+  - `KeyExchangeHandler` — обмен постквантовыми ключами с валидацией аттестации.
+  - `ConnectionOrchestrator` — управление жизненным циклом WebTransport/QUIC сессий.
+- **Постквантовая криптография:** BouncyCastle 1.84+ (`security/PqcCrypto.kt`):
+  - KEM: ML-KEM-768
+  - DSA: ML-DSA-65 (проверка подписи всех входящих и исторических сообщений)
+  - Симметричное шифрование: AES-256-GCM
+  - Хэширование и KDF: HKDF-SHA256, Argon2id (OWASP $m=47104, t=3, p=1$)
+- **Хранилище:** Room Database (KSP), зашифрованное хранилище ключей Android KeyStore (`SecureStorage.kt`).
 
-## Команды
-- Сборка debug: `./gradlew assembleDebug`
-- Тесты: `./gradlew testDebugUnitTest` (androidTest: `MessageDaoTest`, `TrustedCertManagerTest`)
+## Инженерные правила для ИИ-агента
+1. **Потокобезопасность и корутины:**
+   - Никаких вызовов `runBlocking` на `Dispatchers.Main` — сетевые и криптографические операции выполняются строго в корутинах на `Dispatchers.IO` или `Dispatchers.Default`.
+   - Использование потокобезопасных примитивов (`AtomicReference` для атомарных операций read-then-clear, StateFlow для UI состояния).
+2. **Безопасность ключевого материала:**
+   - Все байтовые массивы с приватными ключами и секретами немедленно зануляются в памяти (`fill(0)`) после завершения криптографической операции.
+   - Сообщения из локальной БД отображаются в UI ТОЛЬКО после успешной верификации цифровой подписи ML-DSA-65.
+3. **Wire-протокол:**
+   - Строгая побайтовая синхронизация с сервером по опкодам `0x01`–`0x0C` (`transport/Protocol.kt`).
 
-## Правила
-- **Главный поток:** НЕ `runBlocking` на main (исправлено в аудите).
-  Сетевые операции — в корутинах.
-- **Race conditions:** атомарность через `AtomicReference` (не `@Volatile` для
-  read-then-clear). См. `AuthManager.kt`.
-- **Подпись сообщений:** БД сообщения отображаются ТОЛЬКО после проверки
-  ML-DSA-65 (исправлено в аудите).
-- **Key material:** зероить в памяти после использования (`clearInMemoryKeys`).
-- **Backup:** DSA-ключи + IV сохраняются; не удалять бэкап при частичном сбое.
-- **BouncyCastle:** версия ≥ 1.84 (CVE-фиксы). ProGuard-правила для PKIX сохранены.
-- **Wire-протокол:** `transport/Protocol.kt` (опкоды 0x01–0x0C). Правки — с server + SPEC.
-
-## Тесты (покрыть, из аудита)
-- `ConnectionManager`, TOFU-верификация (`TrustedCertManager`), lifecycle `MessageRepository`.
-- Интеграционные с реальным сервером — пока нет (TODO).
+## Test-Gate (Обязательно перед коммитом)
+```powershell
+# Требуется JDK 17+
+./gradlew testDebugUnitTest
+./gradlew assembleDebug
+```
