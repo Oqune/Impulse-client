@@ -146,7 +146,7 @@ afterEvaluate {
                 // bare Windows dev box). CI runners have python3, so release APKs
                 // still get the 16 KB fix.
                 val probe = project.exec {
-                    commandLine(if (python == "python3") listOf("sh", "-lc", "command -v python3") else listOf("where", "python"))
+                    commandLine(python, "--version")
                     isIgnoreExitValue = true
                 }.exitValue
                 if (probe != 0) {
