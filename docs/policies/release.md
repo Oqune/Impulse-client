@@ -4,9 +4,8 @@
 `versionCode` / `versionName` в `app/build.gradle.kts` (сейчас 14 / "2.9.0").
 
 ## 1. Подготовка
-- Убедиться, что `master` чист и тесты зелёные:
-  ```bash
-  $env:JAVA_HOME = "C:\Program Files\Java\jdk-17"
+- Убедиться, что `master` чист и тесты зелёные (требуется JDK 17+):
+  ```powershell
   ./gradlew testDebugUnitTest
   ```
 - Поднять `versionCode` (+1) и `versionName` в `app/build.gradle.kts`.
@@ -17,9 +16,7 @@
 Файлы: `keystore/impulse-release.jks` + `keystore/keystore-password.txt`
 (оба в `.gitignore`).
 
-```bash
-$env:JAVA_HOME = "C:\Program Files\Java\jdk-17"
-$env:PATH = "$env:JAVA_HOME\bin;" + $env:PATH"
+```powershell
 ./gradlew assembleRelease
 ```
 Результат: `app/build/outputs/apk/release/ImpulseClient-{abi}-release.apk`
