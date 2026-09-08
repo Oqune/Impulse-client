@@ -363,15 +363,18 @@ object Protocol {
         signature: ByteArray?,
         verify: (dsaPub: ByteArray, data: ByteArray, sig: ByteArray) -> Boolean
     ): Boolean {
-        val sigValid = signature?.let { sig ->
+        // Frame must carry a valid self-attestation proving ownership of dsaPublicKey
+        val selfSigValid = signature?.let { sig ->
             verify(dsaPublicKey, kemPublicKey + dsaPublicKey, sig)
         } ?: false
+        if (!selfSigValid) return false
+
         return if (existingDsa == null) {
-            // Initial TOFU: accept, but surface the QR/pin confirmation so the
-            // user can confirm out-of-band (defense in depth).
+            // Initial TOFU: accept only with valid self-signature
             true
         } else {
-            sigValid
+            // When already pinned, must be signed by the pinned DSA key
+            verify(existingDsa, kemPublicKey + dsaPublicKey, signature)
         }
     }
 
@@ -612,16 +615,18 @@ object Protocol {
                     ((data[offset + 19].toInt() and 0xFF) shl 16) or
                     ((data[offset + 20].toInt() and 0xFF) shl 24)
                 if (saltLen < 0 || saltLen > 256) throw ProtocolException("frameLength: OP_AUTH_CHALLENGE salt_len=$saltLen out of range")
+                if (data.size - offset < 1 + 16 + 4 + saltLen) throw ProtocolException("frameLength: incomplete OP_AUTH_CHALLENGE salt (need ${1 + 16 + 4 + saltLen}, have ${data.size - offset})")
                 var total = 1 + 16 + 4 + saltLen
-                if (data.size - offset >= total + 4) {
+                if (data.size - offset > total) {
+                    if (data.size - offset < total + 4) throw ProtocolException("frameLength: incomplete OP_AUTH_CHALLENGE params length")
                     val pPos = offset + total
                     val paramsLen = ((data[pPos].toInt() and 0xFF)) or
                         ((data[pPos + 1].toInt() and 0xFF) shl 8) or
                         ((data[pPos + 2].toInt() and 0xFF) shl 16) or
                         ((data[pPos + 3].toInt() and 0xFF) shl 24)
-                    if (paramsLen in 0..256 && data.size - offset >= total + 4 + paramsLen) {
-                        total += 4 + paramsLen
-                    }
+                    if (paramsLen < 0 || paramsLen > 256) throw ProtocolException("frameLength: OP_AUTH_CHALLENGE paramsLen=$paramsLen out of range")
+                    if (data.size - offset < total + 4 + paramsLen) throw ProtocolException("frameLength: incomplete OP_AUTH_CHALLENGE params")
+                    total += 4 + paramsLen
                 }
                 total
             }

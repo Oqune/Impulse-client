@@ -14,7 +14,7 @@ biometric = "1.1.0"
 # Post-quantum crypto (ML-KEM / Kyber) + AES-GCM.
 # 1.79+ is required: it ships ML-KEM-768 (org.bouncycastle.pqc...MLKEMParameterSpec)
 # inside the bcprov multi-release jar.
-bouncycastle = "1.79"
+bouncycastle = "1.84"
 # Standalone ML Kit Barcode scanning (com.google.mlkit:barcode-scanning).
 # This is a different artifact from the previously used play-services variant
 # (com.google.android.gms:play-services-mlkit-barcode-scanning). It bundles

@@ -153,4 +153,22 @@ class C1AttestationTest {
         )
         assertTrue("first-contact (TOFU) peer must be accepted; out-of-band confirm is the UI's job", trusted)
     }
+
+    // ── 7. Rogue replaces BOTH KEM and DSA keys and provides a valid signature ─
+    //      under rogue DSA key. Receiver pins victim DSA key, so this must be REJECTED.
+    @Test
+    fun knownPeer_rogueReplacesBothKemAndDsaKeys_isRejected() {
+        val victim = makePeer()
+        val rogue = makePeer()
+        // Rogue signs its own KEM key with its own DSA key
+        val rogueSig = attest(rogue.kemPub, rogue.dsaPub, rogue.dsaPriv)
+        val trusted = Protocol.evaluateKeyExchangeTrust(
+            existingDsa = victim.dsaPub, // pinned victim key
+            kemPublicKey = rogue.kemPub,
+            dsaPublicKey = rogue.dsaPub, // rogue sends its own DSA key
+            signature = rogueSig,
+            verify = { dsaPub, data, s -> PqcCrypto.verifyMlDsa65(dsaPub, data, s) }
+        )
+        assertFalse("rogue replacing both KEM and DSA keys against pinned peer must be REJECTED", trusted)
+    }
 }

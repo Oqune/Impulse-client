@@ -20,7 +20,7 @@ import javax.crypto.spec.SecretKeySpec
  * accessors return **defensive copies** so callers cannot mutate internal
  * key material.
  *
- * Backup export uses PBKDF2-HMAC-SHA256 (100k iterations) + AES-256-GCM
+ * Backup export uses PBKDF2-HMAC-SHA256 (600k iterations) + AES-256-GCM
  * with a random 16-character password displayed to the user.
  */
 object SecureKeyManager {
@@ -31,7 +31,7 @@ object SecureKeyManager {
     private val initLock = Any()
     private val secureRandom = SecureRandom()
 
-    private const val PBKDF2_ITERATIONS = 100_000
+    private const val PBKDF2_ITERATIONS = 600_000
     private const val AES_KEY_LENGTH = 256
     private const val GCM_IV_LENGTH = 12
     private const val GCM_TAG_LENGTH = 128
@@ -94,7 +94,9 @@ object SecureKeyManager {
     /** Null out in-memory key pairs so the next [ensureKeyPair] call regenerates from storage. */
     fun clearInMemoryKeys() {
         synchronized(initLock) {
+            kemKeyPair?.privateEncoded?.fill(0)
             kemKeyPair = null
+            dsaKeyPair?.privateEncoded?.fill(0)
             dsaKeyPair = null
         }
     }
@@ -274,71 +276,70 @@ object SecureKeyManager {
         val aesKey = pbkdf2(password.toCharArray(), salt, PBKDF2_ITERATIONS, AES_KEY_LENGTH)
         val decrypted = aesGcmDecrypt(aesKey, iv, encrypted)
 
-        val secure = SecureStorage(context)
+        var kemPriv: ByteArray? = null
+        var kemPub: ByteArray? = null
+        var dsaPriv: ByteArray? = null
+        var dsaPub: ByteArray? = null
 
-        val kemPriv: ByteArray
-        val kemPub: ByteArray
-        val dsaPriv: ByteArray
-        val dsaPub: ByteArray
+        try {
+            if (version >= 0x03.toByte()) {
+                // v3 payload = kemPrivLen(4) || kemPriv || dsaPrivLen(4) || dsaPriv
+                val (k, d) = parseBackupPayload(decrypted)
+                kemPriv = k
+                dsaPriv = d
 
-        if (version >= 0x03.toByte()) {
-            // v3 payload = kemPrivLen(4) || kemPriv || dsaPrivLen(4) || dsaPriv
-            val (k, d) = parseBackupPayload(decrypted)
-            kemPriv = k
-            dsaPriv = d
-
-            var pubOff = encKeyDataEnd
-            require(pubOff + 4 <= bytes.size) { "Backup file truncated" }
-            val kemPubLen = intFromLittleEndian(bytes, pubOff)
-            pubOff += 4
-            require(kemPubLen >= 0 && pubOff + kemPubLen <= bytes.size) { "Backup file truncated" }
-            kemPub = bytes.copyOfRange(pubOff, pubOff + kemPubLen)
-            pubOff += kemPubLen
-            require(pubOff + 4 <= bytes.size) { "Backup file truncated" }
-            val dsaPubLen = intFromLittleEndian(bytes, pubOff)
-            pubOff += 4
-            require(dsaPubLen >= 0 && pubOff + dsaPubLen <= bytes.size) { "Backup file truncated" }
-            dsaPub = bytes.copyOfRange(pubOff, pubOff + dsaPubLen)
-            pubOff += dsaPubLen
-            require(pubOff == bytes.size) { "Backup file has trailing bytes" }
-        } else {
-            // v1/v2 carried only the ML-KEM key pair.
-            kemPriv = decrypted
-            if (version >= 0x02.toByte() && encKeyDataEnd + 4 <= bytes.size) {
-                val pubLen = intFromLittleEndian(bytes, encKeyDataEnd)
-                require(pubLen >= 0 && encKeyDataEnd + 4 + pubLen <= bytes.size) { "Backup file truncated" }
-                kemPub = bytes.copyOfRange(encKeyDataEnd + 4, encKeyDataEnd + 4 + pubLen)
+                var pubOff = encKeyDataEnd
+                require(pubOff + 4 <= bytes.size) { "Backup file truncated" }
+                val kemPubLen = intFromLittleEndian(bytes, pubOff)
+                pubOff += 4
+                require(kemPubLen >= 0 && pubOff + kemPubLen <= bytes.size) { "Backup file truncated" }
+                kemPub = bytes.copyOfRange(pubOff, pubOff + kemPubLen)
+                pubOff += kemPubLen
+                require(pubOff + 4 <= bytes.size) { "Backup file truncated" }
+                val dsaPubLen = intFromLittleEndian(bytes, pubOff)
+                pubOff += 4
+                require(dsaPubLen >= 0 && pubOff + dsaPubLen <= bytes.size) { "Backup file truncated" }
+                dsaPub = bytes.copyOfRange(pubOff, pubOff + dsaPubLen)
+                pubOff += dsaPubLen
+                require(pubOff == bytes.size) { "Backup file has trailing bytes" }
             } else {
-                val fresh = PqcCrypto.generateKeyPair()
-                kemPub = fresh.publicEncoded
+                // v1/v2 carried only the ML-KEM key pair.
+                kemPriv = decrypted.copyOf()
+                if (version >= 0x02.toByte() && encKeyDataEnd + 4 <= bytes.size) {
+                    val pubLen = intFromLittleEndian(bytes, encKeyDataEnd)
+                    require(pubLen >= 0 && encKeyDataEnd + 4 + pubLen <= bytes.size) { "Backup file truncated" }
+                    kemPub = bytes.copyOfRange(encKeyDataEnd + 4, encKeyDataEnd + 4 + pubLen)
+                } else {
+                    val fresh = PqcCrypto.generateKeyPair()
+                    kemPub = fresh.publicEncoded
+                }
+                val dsa = PqcCrypto.generateMlDsa65KeyPair()
+                dsaPriv = dsa.privateEncoded
+                dsaPub = dsa.publicEncoded
             }
-            val dsa = PqcCrypto.generateMlDsa65KeyPair()
-            dsaPriv = dsa.privateEncoded
-            dsaPub = dsa.publicEncoded
+
+            PqcCrypto.validateKemPublicKey(kemPub)
+            PqcCrypto.validateDsaPublicKey(dsaPub)
+
+            val secure = SecureStorage(context)
+            secure.putBytes(SecureStorage.KEY_KEM_PRIVATE, kemPriv)
+            secure.putBytes(SecureStorage.KEY_KEM_PUBLIC, kemPub)
+            kemKeyPair = PqcCrypto.KeyPair(kemPriv.clone(), kemPub.clone())
+
+            secure.putBytes(SecureStorage.KEY_DSA_PRIVATE, dsaPriv)
+            secure.putBytes(SecureStorage.KEY_DSA_PUBLIC, dsaPub)
+            dsaKeyPair = PqcCrypto.MlDsa65KeyPair(dsaPriv.clone(), dsaPub.clone())
+
+            return true
+        } finally {
+            kemPriv?.fill(0)
+            kemPub?.fill(0)
+            dsaPriv?.fill(0)
+            dsaPub?.fill(0)
+            decrypted.fill(0)
+            encrypted.fill(0)
+            aesKey.fill(0)
         }
-
-        PqcCrypto.validateKemPublicKey(kemPub)
-        PqcCrypto.validateDsaPublicKey(dsaPub)
-
-        secure.putBytes(SecureStorage.KEY_KEM_PRIVATE, kemPriv)
-        secure.putBytes(SecureStorage.KEY_KEM_PUBLIC, kemPub)
-        kemKeyPair = PqcCrypto.KeyPair(kemPriv, kemPub)
-
-        secure.putBytes(SecureStorage.KEY_DSA_PRIVATE, dsaPriv)
-        secure.putBytes(SecureStorage.KEY_DSA_PUBLIC, dsaPub)
-        dsaKeyPair = PqcCrypto.MlDsa65KeyPair(dsaPriv, dsaPub)
-
-        resolver.delete(file, null, null)
-
-        kemPriv.fill(0)
-        kemPub.fill(0)
-        dsaPriv.fill(0)
-        dsaPub.fill(0)
-        decrypted.fill(0)
-        encrypted.fill(0)
-        aesKey.fill(0)
-
-        return true
     }
 
     private fun generatePassword(length: Int): String {

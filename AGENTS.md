@@ -1,6 +1,10 @@
 # AGENTS.md — Impulse Client (Android/Kotlin)
 
-Дополнение к `PROJECT.md` и `AI_MANIFESTO.md`. Специфика Android-клиента.
+Дополнение к `PROJECT.md`, `AI_MANIFESTO.md` и канону видения `docs/VISION.md`. Специфика Android-клиента.
+
+## Дизайн-код и философия UI
+- **Эстетика:** Тактильный минимализм, эргономика GitHub Mobile в сочетании с надежностью современных VPN-клиентов (Mullvad).
+- **Визуальные стандарты:** Глубокий OLED Pure Black по умолчанию, адаптивное матовое стекло (`GlassSurface`), открытые криптографические бейджи и хэши, отсутствие soft-теней (`ImpulseElevation.card = 0.dp`), плавные кинетические переходы.
 
 ## Стек и архитектура
 - **Язык & UI:** Kotlin 2.0+, Jetpack Compose (Material 3 Expressive), Gradle (KSP).

@@ -113,9 +113,13 @@ object PqcCrypto {
         val kg = KeyGenerator.getInstance("Kyber", PQC_PROVIDER)
         kg.init(KEMGenerateSpec(pub, "AES"), secureRandom)
         val sk = kg.generateKey() as SecretKeyWithEncapsulation
-        val sharedSecret = sk.encoded.copyOf()
+        val rawSecret = sk.encoded
+        val sharedSecret = rawSecret.copyOf()
         val encapsulation = sk.encapsulation
-        sk.encoded.fill(0)
+        rawSecret.fill(0)
+        try {
+            sk.destroy()
+        } catch (_: Exception) {}
         return Pair(encapsulation, sharedSecret)
     }
 
@@ -129,8 +133,12 @@ object PqcCrypto {
         val kg = KeyGenerator.getInstance("Kyber", PQC_PROVIDER)
         kg.init(KEMExtractSpec(priv, encapsulatedKey, "AES"), secureRandom)
         val sk = kg.generateKey() as SecretKeyWithEncapsulation
-        val sharedSecret = sk.encoded.copyOf()
-        sk.encoded.fill(0)
+        val rawSecret = sk.encoded
+        val sharedSecret = rawSecret.copyOf()
+        rawSecret.fill(0)
+        try {
+            sk.destroy()
+        } catch (_: Exception) {}
         return sharedSecret
     }
 
@@ -194,7 +202,8 @@ object PqcCrypto {
 
     /** Decrypts data produced by [aesEncrypt]. */
     fun aesDecrypt(key: ByteArray, data: ByteArray): ByteArray {
-        require(data.size > GCM_IV_LENGTH) { "Ciphertext too short" }
+        val minLen = GCM_IV_LENGTH + (GCM_TAG_LENGTH / 8)
+        require(data.size >= minLen) { "Ciphertext too short (need at least $minLen bytes)" }
         val iv = data.copyOfRange(0, GCM_IV_LENGTH)
         val ct = data.copyOfRange(GCM_IV_LENGTH, data.size)
         val cipher = Cipher.getInstance(AES_GCM)

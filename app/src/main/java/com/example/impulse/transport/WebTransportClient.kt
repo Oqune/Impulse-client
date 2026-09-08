@@ -324,6 +324,13 @@ class WebTransportClient(
     }
 
     private suspend fun handleInboundChunk(chunk: ByteArray, acc: ByteArrayOutputStream) {
+        if (acc.size() + chunk.size > 8 * 1024 * 1024) {
+            LogManager.e(TAG, "Accumulator exceeded 8MB safety limit; closing connection")
+            acc.reset()
+            setState(ConnectionState.ERROR)
+            disconnect()
+            return
+        }
         acc.write(chunk)
         drainFrames(acc)
     }

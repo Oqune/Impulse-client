@@ -98,6 +98,7 @@ class ChatController(private val context: Context) {
     private val pendingMessagesLock = Any()
 
     private data class OutboxEntry(
+        val serverId: String,
         val frame: ByteArray,
         var retries: Int = 0,
         val queuedAt: Long = System.currentTimeMillis()
@@ -153,6 +154,7 @@ class ChatController(private val context: Context) {
             reconnectJob = null
             currentServer = server
             clientName = name
+            _state.value = ConnectionState.CONNECTING
         }
         LogManager.i(TAG, "connect: server=${server.id} name='$name'")
         // Key generation (ML-KEM + ML-DSA) can throw on some devices (e.g.
@@ -487,7 +489,8 @@ class ChatController(private val context: Context) {
             synchronized(listeners) { listeners.forEach { it(msg) } }
         } else {
             LogManager.w(TAG, "sendChat: transport send failed, queuing in outbox")
-            synchronized(outboxLock) { outbox.add(OutboxEntry(frame)) }
+            val sid = currentServer?.id ?: ""
+            synchronized(outboxLock) { outbox.add(OutboxEntry(sid, frame)) }
             persistOutbox()
             if (!flushOutboxRunning) {
                 scope.launch { flushOutbox() }
@@ -559,7 +562,8 @@ class ChatController(private val context: Context) {
             synchronized(listeners) { listeners.forEach { it(msg) } }
         } else {
             LogManager.w(TAG, "sendDirect: transport send failed, queuing in outbox")
-            synchronized(outboxLock) { outbox.add(OutboxEntry(frame)) }
+            val sid = currentServer?.id ?: ""
+            synchronized(outboxLock) { outbox.add(OutboxEntry(sid, frame)) }
             persistOutbox()
             if (!flushOutboxRunning) {
                 scope.launch { flushOutbox() }
@@ -600,9 +604,10 @@ class ChatController(private val context: Context) {
         if (flushOutboxRunning) return
         flushOutboxRunning = true
         try {
+            val curServer = currentServer?.id ?: return
             val entries: List<OutboxEntry>
             synchronized(outboxLock) {
-                entries = outbox.toList()
+                entries = outbox.filter { it.serverId == curServer }
             }
             if (entries.isEmpty()) return
 
@@ -619,9 +624,6 @@ class ChatController(private val context: Context) {
                 if (ok) {
                     synchronized(outboxLock) { outbox.remove(entry) }
                     persistOutbox()
-                    val tempId = -(System.currentTimeMillis())
-                    val msg = DecryptedMessage(tempId, clientName, publicKeyHash, "", true, System.currentTimeMillis())
-                    synchronized(listeners) { listeners.forEach { it(msg) } }
                     LogManager.i(TAG, "Outbox: message sent successfully on retry ${entry.retries}")
                 } else {
                     entry.retries++
@@ -639,7 +641,7 @@ class ChatController(private val context: Context) {
      * Frames are already-encrypted blobs (safe to store). Per SPEC C2 the
      * cleartext body is NOT persisted — only the encrypted frame is kept, so a
      * process kill / ADB / backup pull cannot reveal message content.
-     * Format: JSON array of [frameB64, retries, queuedAt].
+     * Format: JSON array of [serverId, frameB64, retries, queuedAt].
      */
     private fun persistOutbox() {
         try {
@@ -648,6 +650,7 @@ class ChatController(private val context: Context) {
             val arr = org.json.JSONArray()
             for (e in entries) {
                 val obj = org.json.JSONObject()
+                obj.put("s", e.serverId)
                 obj.put("f", android.util.Base64.encodeToString(e.frame, android.util.Base64.NO_WRAP))
                 obj.put("r", e.retries)
                 obj.put("t", e.queuedAt)
@@ -669,6 +672,7 @@ class ChatController(private val context: Context) {
                 val obj = arr.getJSONObject(i)
                 val frame = android.util.Base64.decode(obj.getString("f"), android.util.Base64.DEFAULT)
                 restored.add(OutboxEntry(
+                    serverId = obj.optString("s", currentServer?.id ?: ""),
                     frame = frame,
                     queuedAt = obj.optLong("t", System.currentTimeMillis()),
                     retries = obj.optInt("r", 0),
@@ -1224,10 +1228,9 @@ class ChatController(private val context: Context) {
             // failure must NOT strand the client on SYNC or spin reconnect.
             // Each send is retried a few times before we give up and drop the
             // connection to ERROR (which triggers reconnect).
-            val c = synchronized(lock) { client }
             var keySent = false
             for (attempt in 1..3) {
-                keySent = withContext(Dispatchers.IO) { c?.send(Protocol.buildCombinedKeyExchange(kemPub, dsaPub, dsaSig)) ?: false }
+                keySent = withContext(Dispatchers.IO) { synchronized(lock) { client }?.send(Protocol.buildCombinedKeyExchange(kemPub, dsaPub, dsaSig)) ?: false }
                 if (keySent || userDisconnect) break
                 LogManager.w(TAG, "KeyExchange send attempt $attempt failed, retrying")
                 delay(300L * attempt)
@@ -1244,7 +1247,7 @@ class ChatController(private val context: Context) {
             val lastSeen = runCatching { lastSeenId() }.getOrDefault(0L)
             var syncSent = false
             for (attempt in 1..3) {
-                syncSent = withContext(Dispatchers.IO) { c?.send(Protocol.buildSync(lastSeen)) ?: false }
+                syncSent = withContext(Dispatchers.IO) { synchronized(lock) { client }?.send(Protocol.buildSync(lastSeen)) ?: false }
                 if (syncSent || userDisconnect) break
                 LogManager.w(TAG, "Sync send attempt $attempt failed, retrying")
                 delay(300L * attempt)
@@ -1312,7 +1315,7 @@ class ChatController(private val context: Context) {
             // so it is unit-testable on the JVM without an Android Context
             // (see C1AttestationTest). Behaviour is unchanged.
             scope.launch {
-                val existingDsa = keyRepo.getDsaPublicKey(serverId, dsaFp)
+                val existingDsa = keyRepo.getDsaPublicKey(serverId, kemFp)
                 val trusted = Protocol.evaluateKeyExchangeTrust(
                     existingDsa = existingDsa,
                     kemPublicKey = frame.kemPublicKey,
