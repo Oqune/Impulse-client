@@ -459,7 +459,7 @@ class ChatController(private val context: Context) {
         val signature = keyManager.signDsa(innerCanonical)
         val signedEnvelope = Protocol.buildSignedInnerEnvelope(
             clientName,
-            android.util.Base64.encodeToString(signature, android.util.Base64.NO_WRAP),
+            Protocol.base64Encode(signature),
             plaintext,
             clientTs,
             nonce
@@ -530,7 +530,7 @@ class ChatController(private val context: Context) {
         val signature = keyManager.signDsa(innerCanonical)
         val signedEnvelope = Protocol.buildSignedInnerEnvelope(
             clientName,
-            android.util.Base64.encodeToString(signature, android.util.Base64.NO_WRAP),
+            Protocol.base64Encode(signature),
             plaintext,
             clientTs,
             nonce,
@@ -831,7 +831,7 @@ class ChatController(private val context: Context) {
             Protocol.buildInnerEnvelope(env.sender, "", env.content)
         }
         val sigBytes = runCatching {
-            android.util.Base64.decode(env.signature, android.util.Base64.NO_WRAP)
+            Protocol.base64Decode(env.signature)
         }.getOrNull()
         if (sigBytes == null || sigBytes.isEmpty()) {
             LogManager.w(TAG, "REJECT msg $realId from ${env.sender}: missing ML-DSA-65 signature")
