@@ -36,30 +36,35 @@ import com.example.impulse.util.NameGenerator
 fun MainScreen() {
     val context = LocalContext.current
     var selectedItem by rememberSaveable { mutableIntStateOf(0) }
-    var selectedServer by remember { mutableStateOf(ServerConfig.defaultServer) }
-    var clientName by remember { mutableStateOf("") }
+    var selectedServerId by rememberSaveable { mutableStateOf(ServerConfig.defaultServer.id) }
+    var clientName by rememberSaveable { mutableStateOf("") }
     var availableServers by remember { mutableStateOf(ServerConfig.builtInServers) }
     // Chats tab: selecting a server opens its conversation list (Group + DMs).
-    var chatsServer by remember { mutableStateOf<ServerConfig?>(null) }
-    var activeChatServer by remember { mutableStateOf<ServerConfig?>(null) }
-    var activeConversation by remember { mutableStateOf("group") }
-    var qrScanServer by remember { mutableStateOf<ServerConfig?>(null) }
+    var chatsServerId by rememberSaveable { mutableStateOf<String?>(null) }
+    var activeChatServerId by rememberSaveable { mutableStateOf<String?>(null) }
+    var activeConversation by rememberSaveable { mutableStateOf("group") }
+    var qrScanServerId by rememberSaveable { mutableStateOf<String?>(null) }
     var visibilityRefreshTrigger by remember { mutableIntStateOf(0) }
     var certRefreshTrigger by remember { mutableIntStateOf(0) }
+
+    val selectedServer = availableServers.find { it.id == selectedServerId } ?: ServerConfig.defaultServer
+    val chatsServer = availableServers.find { it.id == chatsServerId }
+    val activeChatServer = availableServers.find { it.id == activeChatServerId }
+    val qrScanServer = availableServers.find { it.id == qrScanServerId }
 
     val connectionManager = remember { ConnectionManager.getInstance(context) }
 
     // System back walks the overlay hierarchy: chat → conversation list →
     // QR/server list → normal (Bug: "back exits the app from every overlay").
-    BackHandler(enabled = qrScanServer != null || activeChatServer != null || chatsServer != null) {
+    BackHandler(enabled = qrScanServerId != null || activeChatServerId != null || chatsServerId != null) {
         when {
-            qrScanServer != null -> qrScanServer = null
-            activeChatServer != null -> {
+            qrScanServerId != null -> qrScanServerId = null
+            activeChatServerId != null -> {
                 // Return to the conversation list if we came from there.
-                activeChatServer = null
+                activeChatServerId = null
                 activeConversation = "group"
             }
-            chatsServer != null -> chatsServer = null
+            chatsServerId != null -> chatsServerId = null
         }
     }
 
@@ -70,7 +75,7 @@ fun MainScreen() {
         val savedClientName = serverPreferences.getClientName()
 
         availableServers = ServerConfig.builtInServers + customServers
-        if (savedServer != null) selectedServer = savedServer
+        if (savedServer != null) selectedServerId = savedServer.id
         clientName = savedClientName.ifBlank { NameGenerator.generate() }
 
         for (server in availableServers) {
@@ -94,39 +99,34 @@ fun MainScreen() {
         Triple(Icons.Default.Settings, stringResource(R.string.nav_settings), 2),
     )
 
-    val navSelectedColor = MaterialTheme.colorScheme.primary
-    val navUnselectedColor = MaterialTheme.colorScheme.onSurfaceVariant
-
     Box(modifier = Modifier.fillMaxSize().background(MaterialTheme.colorScheme.background)) {
         // Main content
         Scaffold(
-            modifier = Modifier.fillMaxSize(),
-            containerColor = Color.Transparent,
-            contentColor = MaterialTheme.colorScheme.onSurface,
             bottomBar = {
-                GlassSurface(
+                Surface(
                     modifier = Modifier
                         .fillMaxWidth()
-                        .navigationBarsPadding()
-                        .padding(horizontal = 20.dp, vertical = 12.dp)
-                        .zIndex(1f),
-                    shape = RoundedCornerShape(20.dp),
-                    alpha = 0.82f,
+                        .navigationBarsPadding(),
+                    color = MaterialTheme.colorScheme.surface,
+                    tonalElevation = 3.dp,
+                    shadowElevation = 8.dp,
                 ) {
                     Row(
                         modifier = Modifier
                             .fillMaxWidth()
-                            .height(60.dp)
-                            .padding(horizontal = 8.dp),
-                        horizontalArrangement = Arrangement.SpaceEvenly,
+                            .height(64.dp)
+                            .padding(horizontal = 16.dp, vertical = 6.dp),
+                        horizontalArrangement = Arrangement.SpaceAround,
                         verticalAlignment = Alignment.CenterVertically,
                     ) {
-                        navItems.forEachIndexed { index, (icon, label, _) ->
+                        val navSelectedColor = MaterialTheme.colorScheme.primary
+                        val navUnselectedColor = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.6f)
+                        navItems.forEach { (icon, label, index) ->
                             val isSelected = selectedItem == index
                             Box(
                                 modifier = Modifier
                                     .weight(1f)
-                                    .height(48.dp)
+                                    .fillMaxHeight()
                                     .clip(RoundedCornerShape(14.dp))
                                     .background(
                                         if (isSelected) MaterialTheme.colorScheme.primary.copy(alpha = 0.12f)
@@ -181,8 +181,8 @@ fun MainScreen() {
                         availableServers = availableServers,
                         clientName = clientName,
                         onServerSelected = { server ->
-                            chatsServer = server
-                            selectedServer = server
+                            chatsServerId = server.id
+                            selectedServerId = server.id
                         },
                         visibilityRefreshTrigger = visibilityRefreshTrigger,
                         modifier = Modifier.padding(innerPadding)
@@ -190,7 +190,7 @@ fun MainScreen() {
                     2 -> SettingsScreen(
                         selectedServer = selectedServer,
                         onServerSelected = { newServer ->
-                            selectedServer = newServer
+                            selectedServerId = newServer.id
                             ServerPreferences(context).saveSelectedServer(newServer)
                             val customServers = ServerPreferences(context).getCustomServers()
                             availableServers = ServerConfig.builtInServers + customServers
@@ -198,7 +198,7 @@ fun MainScreen() {
                         onServerUpdated = { updatedServer ->
                             val customServers = ServerPreferences(context).getCustomServers()
                             availableServers = ServerConfig.builtInServers + customServers
-                            if (selectedServer.id == updatedServer.id) selectedServer = updatedServer
+                            if (selectedServerId == updatedServer.id) selectedServerId = updatedServer.id
                         },
                         clientName = clientName,
                         onClientNameChange = { newName ->
@@ -214,15 +214,16 @@ fun MainScreen() {
                         onServerDeleted = { deletedServer ->
                             val customServers = ServerPreferences(context).getCustomServers()
                             availableServers = ServerConfig.builtInServers + customServers
-                            if (selectedServer == deletedServer) {
-                                selectedServer = availableServers.firstOrNull() ?: ServerConfig.defaultServer
-                                ServerPreferences(context).saveSelectedServer(selectedServer)
+                            if (selectedServerId == deletedServer.id) {
+                                val fallback = availableServers.firstOrNull() ?: ServerConfig.defaultServer
+                                selectedServerId = fallback.id
+                                ServerPreferences(context).saveSelectedServer(fallback)
                             }
                         },
                         onVisibilityChanged = { visibilityRefreshTrigger++ },
                         certRefreshTrigger = certRefreshTrigger,
                         connectionManager = connectionManager,
-                        onScanQr = { server -> qrScanServer = server },
+                        onScanQr = { server -> qrScanServerId = server.id },
                         modifier = Modifier.padding(bottom = innerPadding.calculateBottomPadding())
                     )
                 }
@@ -248,7 +249,7 @@ fun MainScreen() {
                     clientName = clientName,
                     connectionManager = connectionManager,
                     conversationId = activeConversation,
-                    onBack = { activeChatServer = null },
+                    onBack = { activeChatServerId = null },
                     modifier = Modifier
                 )
             }
@@ -314,11 +315,11 @@ fun MainScreen() {
                     state = status?.state,
                     onConversation = { conv ->
                         activeConversation = conv
-                        activeChatServer = server
+                        activeChatServerId = server.id
                         // Keep chatsServer so system-back returns to the
                         // conversation list, then to the server list.
                     },
-                    onBack = { chatsServer = null },
+                    onBack = { chatsServerId = null },
                 )
             }
         }
@@ -343,10 +344,10 @@ fun MainScreen() {
                     onCertScanned = { hash ->
                         certManager.trustHash(server.id, hash)
                         certRefreshTrigger++
-                        qrScanServer = null
+                        qrScanServerId = null
                         connectionManager.connect(server, clientName)
                     },
-                    onBack = { qrScanServer = null }
+                    onBack = { qrScanServerId = null }
                 )
             }
         }

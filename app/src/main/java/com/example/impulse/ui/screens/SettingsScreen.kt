@@ -1,5 +1,6 @@
 package com.example.impulse.ui.screens
 
+import androidx.activity.compose.BackHandler
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.expandVertically
 import androidx.compose.animation.shrinkVertically
@@ -65,6 +66,10 @@ fun SettingsScreen(
 
     fun goBack() {
         if (currentSection != SettingsSection.MAIN) currentSection = SettingsSection.MAIN
+    }
+
+    BackHandler(enabled = currentSection != SettingsSection.MAIN) {
+        currentSection = SettingsSection.MAIN
     }
 
     val title = when (currentSection) {

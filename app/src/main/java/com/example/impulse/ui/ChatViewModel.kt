@@ -7,6 +7,7 @@ import com.example.impulse.data.MessageRepository
 import com.example.impulse.data.ServerConfig
 import com.example.impulse.transport.ConnectionState
 import com.example.impulse.util.LogManager
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.*
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.Mutex
@@ -73,6 +74,7 @@ class ChatViewModel(
                 .map { entities ->
                     entities.mapNotNull { entity -> chatController.decryptEntity(entity) }
                 }
+                .flowOn(Dispatchers.Default)
                 .catch { e ->
                     LogManager.e("ChatViewModel", "observe failed", e)
                 }

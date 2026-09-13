@@ -34,9 +34,8 @@
         <activity
             android:name=".MainActivity"
             android:exported="true"
-            android:windowSoftInputMode="adjustNothing"
-        android:theme="@style/Theme.Impulse"
-        android:extractNativeLibs="true">
+            android:windowSoftInputMode="adjustResize"
+            android:theme="@style/Theme.Impulse">
             <intent-filter>
                 <action android:name="android.intent.action.MAIN" />
 

@@ -21,6 +21,7 @@ import androidx.compose.material.icons.filled.DeleteSweep
 import androidx.compose.material.icons.filled.Bookmark
 import androidx.compose.material.icons.filled.Person
 import androidx.compose.material.icons.filled.Public
+import androidx.compose.material.icons.filled.Shield
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.runtime.snapshotFlow
@@ -111,13 +112,44 @@ fun ChatMessageItem(message: ChatMessage) {
             ) {
                 Column(modifier = Modifier.padding(horizontal = 14.dp, vertical = 9.dp)) {
                     if (message.sender.isNotEmpty() && !isOwn) {
-                        Text(
-                            text = message.sender,
-                            style = MaterialTheme.typography.labelSmall,
-                            fontWeight = FontWeight.Medium,
-                            color = getSenderColor(messageType, isOwn, message.sender).copy(alpha = 0.85f),
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(6.dp),
                             modifier = Modifier.padding(bottom = 3.dp)
-                        )
+                        ) {
+                            Text(
+                                text = message.sender,
+                                style = MaterialTheme.typography.labelSmall,
+                                fontWeight = FontWeight.Medium,
+                                color = getSenderColor(messageType, isOwn, message.sender).copy(alpha = 0.85f),
+                            )
+                            if (message.senderFingerprint.isNotEmpty()) {
+                                Surface(
+                                    shape = RoundedCornerShape(4.dp),
+                                    color = MaterialTheme.colorScheme.primary.copy(alpha = 0.12f)
+                                ) {
+                                    Row(
+                                        modifier = Modifier.padding(horizontal = 4.dp, vertical = 1.dp),
+                                        verticalAlignment = Alignment.CenterVertically,
+                                        horizontalArrangement = Arrangement.spacedBy(2.dp)
+                                    ) {
+                                        Icon(
+                                            imageVector = Icons.Default.Shield,
+                                            contentDescription = "PQ-E2EE",
+                                            tint = MaterialTheme.colorScheme.primary,
+                                            modifier = Modifier.size(9.dp)
+                                        )
+                                        Text(
+                                            text = "…${message.senderFingerprint.take(6)}",
+                                            fontFamily = JetBrainsMono,
+                                            fontSize = 9.sp,
+                                            color = MaterialTheme.colorScheme.primary,
+                                            fontWeight = FontWeight.SemiBold
+                                        )
+                                    }
+                                }
+                            }
+                        }
                     }
                     Text(
                         text = message.content,
@@ -125,13 +157,26 @@ fun ChatMessageItem(message: ChatMessage) {
                         color = getContentColor(messageType, isOwn, message.sender)
                     )
                     Spacer(Modifier.height(3.dp))
-                    Text(
-                        text = message.timestamp.removeSurrounding("[", "]"),
-                        style = MaterialTheme.typography.labelSmall,
-                        fontSize = 10.sp,
-                        color = getTimestampColor(messageType, isOwn, message.sender),
-                        modifier = Modifier.align(if (isOwn) Alignment.End else Alignment.Start)
-                    )
+                    Row(
+                        modifier = Modifier.align(if (isOwn) Alignment.End else Alignment.Start),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(3.dp)
+                    ) {
+                        if (isOwn) {
+                            Icon(
+                                imageVector = Icons.Default.Shield,
+                                contentDescription = "PQ-E2EE",
+                                modifier = Modifier.size(9.dp),
+                                tint = getTimestampColor(messageType, isOwn, message.sender).copy(alpha = 0.7f)
+                            )
+                        }
+                        Text(
+                            text = message.timestamp.removeSurrounding("[", "]"),
+                            style = MaterialTheme.typography.labelSmall,
+                            fontSize = 10.sp,
+                            color = getTimestampColor(messageType, isOwn, message.sender),
+                        )
+                    }
                 }
             }
         }
@@ -241,9 +286,7 @@ fun MessageInputArea(
     GlassSurface(
         modifier = Modifier
             .fillMaxWidth()
-            .padding(horizontal = 12.dp, vertical = 6.dp)
-            .navigationBarsPadding()
-            .padding(bottom = 6.dp),
+            .padding(horizontal = 12.dp, vertical = 6.dp),
         shape = RoundedCornerShape(26.dp),
         alpha = 0.85f,
     ) {
@@ -326,7 +369,8 @@ fun BoxScope.ScrollToBottomButton(
         enter = scaleIn(tween(200)) + fadeIn(tween(200)),
         exit = scaleOut(tween(150)) + fadeOut(tween(150)),
         modifier = modifier
-            .padding(end = 16.dp, bottom = 88.dp)
+            .windowInsetsPadding(WindowInsets.ime.union(WindowInsets.navigationBars).only(WindowInsetsSides.Bottom))
+            .padding(end = 16.dp, bottom = 72.dp)
             .size(48.dp)
     ) {
         FloatingActionButton(
@@ -511,7 +555,7 @@ fun ChatScreen(
             Column(
                 modifier = Modifier
                     .fillMaxSize()
-                    .imePadding()
+                    .windowInsetsPadding(WindowInsets.ime.union(WindowInsets.navigationBars).only(WindowInsetsSides.Bottom))
             ) {
                 // Top bar with server name, back, and connect button
                 if (onBack != null) {

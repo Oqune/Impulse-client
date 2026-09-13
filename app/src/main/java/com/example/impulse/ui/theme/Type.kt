@@ -24,7 +24,7 @@ fun getTypography(scale: Float = 1.0f): Typography {
     // without the ragged mono-glyph artifacts (Bug: "fonts render badly on old
     // phones").
     val modern = android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.S
-    val bodyFont = if (modern) JetBrainsMono else FontFamily.Default
+    val bodyFont = FontFamily.Default
     val titleFont = if (modern) JetBrainsMono else FontFamily.Default
 
     return Typography(
