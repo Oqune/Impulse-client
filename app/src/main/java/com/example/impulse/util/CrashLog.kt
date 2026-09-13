@@ -79,7 +79,7 @@ object CrashLog {
             }
             throwable.printStackTrace(pw)
         }
-        return sw.toString()
+        return LogManager.redactSecrets(sw.toString())
     }
 
     /** Call once at startup (Application.onCreate) so we know where to write. */

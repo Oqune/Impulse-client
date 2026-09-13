@@ -52,9 +52,28 @@ class KeyBackupTest {
     }
 
     @Test
-    fun backupFileFormat_backupVersionIsThree() {
-        val version: Byte = 0x03
-        assertEquals(3, version.toInt())
+    fun backupFileFormat_backupVersionIsFour() {
+        assertEquals(4, SecureKeyManager.BACKUP_VERSION.toInt())
+    }
+
+    @Test
+    fun argon2_producesConsistentKeyFromSameInputs() {
+        val salt = ByteArray(16) { it.toByte() }
+        val key1 = SecureKeyManager.argon2DeriveKey("testPass123", salt)
+        val key2 = SecureKeyManager.argon2DeriveKey("testPass123", salt)
+        assertArrayEquals("same password+salt must produce same Argon2id key", key1, key2)
+        assertEquals(32, key1.size)
+    }
+
+    @Test
+    fun argon2_differentInputsProduceDifferentKeys() {
+        val salt1 = ByteArray(16) { 0x01 }
+        val salt2 = ByteArray(16) { 0x02 }
+        val key1 = SecureKeyManager.argon2DeriveKey("passwordA", salt1)
+        val key2 = SecureKeyManager.argon2DeriveKey("passwordB", salt1)
+        val key3 = SecureKeyManager.argon2DeriveKey("passwordA", salt2)
+        assertTrue("different passwords must produce different keys", !key1.contentEquals(key2))
+        assertTrue("different salts must produce different keys", !key1.contentEquals(key3))
     }
 
     @Test

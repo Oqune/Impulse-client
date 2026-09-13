@@ -46,13 +46,17 @@ class MainActivity : FragmentActivity() {
         super.onCreate(savedInstanceState)
 
         enableEdgeToEdge()
+        window.setFlags(
+            android.view.WindowManager.LayoutParams.FLAG_SECURE,
+            android.view.WindowManager.LayoutParams.FLAG_SECURE
+        )
 
         val themePreferences = ThemePreferences(applicationContext)
         ThemeSettings.initialize(themePreferences)
 
         setContent {
             ImpulseTheme {
-                var isUnlocked = remember { mutableStateOf(false) }
+                val isUnlocked = androidx.compose.runtime.saveable.rememberSaveable { mutableStateOf(false) }
                 val biometricHelper = com.example.impulse.util.BiometricHelper(applicationContext)
 
                 if (isUnlocked.value.not() && biometricHelper.isBiometricAvailable()) {

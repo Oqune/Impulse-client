@@ -62,6 +62,9 @@ class PublicKeyRepository(context: Context) {
     suspend fun getDsaPublicKey(serverId: String, fingerprint: String): ByteArray? =
         dao.getDsaKey(serverId, fingerprint)
 
+    suspend fun findDsaKeyByPub(serverId: String, dsaPub: ByteArray): ByteArray? =
+        dao.getDsaKeyByDsaPub(serverId, dsaPub)
+
     private fun fingerprintForBytes(data: ByteArray): String {
         return SecureKeyManager.fingerprintForBytes(data)
     }

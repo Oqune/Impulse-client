@@ -65,8 +65,7 @@ class NetworkMonitor private constructor(context: Context) {
     fun register() {
         try {
             val request = NetworkRequest.Builder()
-                .addCapability(NetworkCapabilities.NET_CAPABILITY_INTERNET)
-                .addCapability(NetworkCapabilities.NET_CAPABILITY_VALIDATED)
+                .addCapability(NetworkCapabilities.NET_CAPABILITY_NOT_RESTRICTED)
                 .build()
             connectivityManager.registerNetworkCallback(request, callback)
             LogManager.i(TAG, "network callback registered")
@@ -89,7 +88,10 @@ class NetworkMonitor private constructor(context: Context) {
 
         fun getInstance(context: Context): NetworkMonitor =
             INSTANCE ?: synchronized(this) {
-                INSTANCE ?: NetworkMonitor(context.applicationContext).also { it.register() }
+                INSTANCE ?: NetworkMonitor(context.applicationContext).also {
+                    INSTANCE = it
+                    it.register()
+                }
             }
     }
 }

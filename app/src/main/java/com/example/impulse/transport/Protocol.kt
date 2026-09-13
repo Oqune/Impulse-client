@@ -37,7 +37,9 @@ object Protocol {
      * and [com.example.impulse.ChatController.handleIncoming]) catch this and
      * drop the offending frame instead of crashing the app.
      */
-    class ProtocolException(message: String) : Exception(message)
+    open class ProtocolException(message: String) : Exception(message)
+    class IncompleteFrameException(message: String) : ProtocolException(message)
+    class MalformedFrameException(message: String) : ProtocolException(message)
 
     /**
      * Upper bound on any single binary payload (1 MiB). A length prefix larger
@@ -182,21 +184,28 @@ object Protocol {
         argonIterations: Int = 3,
         argonParallelism: Int = 1
     ): ByteArray {
+        if (challengeNonce == null || challengeNonce.size != 16) {
+            throw ProtocolException("Invalid challenge nonce: must be 16 bytes")
+        }
         val w = Writer()
         w.u8(OP_AUTH.toInt())
-        if (challengeNonce != null && challengeNonce.size == 16) {
-            val key = try {
-                argon2DeriveKey(password, argon2SaltB64, argonMemKB, argonIterations, argonParallelism)
-            } catch (e: UnsatisfiedLinkError) {
-                throw ProtocolException("Argon2 native library not available: ${e.message}")
-            } catch (e: Exception) {
-                throw ProtocolException("Argon2 key derivation failed: ${e.message}")
-            }
+        val key = try {
+            argon2DeriveKey(password, argon2SaltB64, argonMemKB, argonIterations, argonParallelism)
+        } catch (e: UnsatisfiedLinkError) {
+            throw ProtocolException("Argon2 native library not available: ${e.message}")
+        } catch (e: Exception) {
+            throw ProtocolException("Argon2 key derivation failed: ${e.message}")
+        }
+        try {
             val response = hmacSha256(key, challengeNonce)
             w.bytes(response) // length-prefixed 32-byte HMAC, no password field
+        } finally {
+            key.fill(0)
         }
         return w.toByteArray()
     }
+
+    private val DEFAULT_AUTH_SALT = "impulse-lan-salt-v1".toByteArray(Charsets.UTF_8).copyOf(16)
 
     /**
      * Derive a 32-byte key from a password using Argon2id.
@@ -211,8 +220,14 @@ object Protocol {
         parallelism: Int = 1
     ): ByteArray {
         val saltBytes = if (saltB64.isNotEmpty()) {
-            android.util.Base64.decode(saltB64, android.util.Base64.NO_WRAP)
-        } else ByteArray(0)
+            val decoded = android.util.Base64.decode(saltB64, android.util.Base64.NO_WRAP)
+            if (decoded.size < 16) {
+                throw ProtocolException("Argon2id salt must be at least 16 bytes (got ${decoded.size})")
+            }
+            decoded
+        } else {
+            DEFAULT_AUTH_SALT
+        }
         val params = org.bouncycastle.crypto.params.Argon2Parameters.Builder(
             org.bouncycastle.crypto.params.Argon2Parameters.ARGON2_id
         )
@@ -419,11 +434,14 @@ object Protocol {
         if (r.remaining() > 0) {
             val tag = String(r.bytes(), Charsets.UTF_8)
             for (kv in tag.split(',')) {
-                val (k, v) = kv.split('=')
-                when (k) {
-                    "m" -> mem = v.toIntOrNull()?.coerceAtLeast(47104) ?: 47104
-                    "t" -> iter = v.toIntOrNull()?.coerceAtLeast(3) ?: 3
-                    "p" -> par = v.toIntOrNull()?.coerceAtLeast(1) ?: 1
+                val parts = kv.split('=')
+                if (parts.size == 2) {
+                    val (k, v) = parts
+                    when (k.trim()) {
+                        "m" -> mem = v.trim().toIntOrNull()?.coerceAtLeast(47104) ?: 47104
+                        "t" -> iter = v.trim().toIntOrNull()?.coerceAtLeast(3) ?: 3
+                        "p" -> par = v.trim().toIntOrNull()?.coerceAtLeast(1) ?: 1
+                    }
                 }
             }
         }
@@ -568,40 +586,47 @@ object Protocol {
     }
 
     /** Returns the total byte length of the complete frame starting at [offset]
-     *  in [data], or throws [ProtocolException] if incomplete or unknown opcode.
+     *  in [data], or throws [IncompleteFrameException] if incomplete, or
+     *  [MalformedFrameException] if length fields are corrupted or opcode is unknown.
      *  Mirrors the server's try_read_packet logic. */
     fun frameLength(data: ByteArray, offset: Int = 0): Int {
-        if (offset >= data.size) throw ProtocolException("frameLength: empty")
+        if (offset >= data.size) throw IncompleteFrameException("frameLength: empty")
         val opcode = data[offset]
         return when (opcode) {
             OP_AUTH -> {
                 // C3 (HMAC-only): [0x01] [u32 hmac_len=32] [32 raw bytes: HMAC-SHA-256]
-                if (data.size - offset < 5) throw ProtocolException("frameLength: incomplete $opcode")
+                if (data.size - offset < 5) throw IncompleteFrameException("frameLength: incomplete $opcode")
                 val hmacLen = ((data[offset + 1].toInt() and 0xFF)) or
                     ((data[offset + 2].toInt() and 0xFF) shl 8) or
                     ((data[offset + 3].toInt() and 0xFF) shl 16) or
                     ((data[offset + 4].toInt() and 0xFF) shl 24)
-                if (hmacLen != 32) throw ProtocolException("frameLength: $opcode hmac_len=$hmacLen must be 32")
-                1 + 4 + hmacLen
+                if (hmacLen != 32) throw MalformedFrameException("frameLength: $opcode hmac_len=$hmacLen must be 32")
+                val total = 1 + 4 + hmacLen
+                if (data.size - offset < total) throw IncompleteFrameException("frameLength: incomplete $opcode body")
+                total
             }
             OP_KEY_EXCHANGE_KEM_DSA -> {
-                if (data.size - offset < 5) throw ProtocolException("frameLength: incomplete $opcode")
+                if (data.size - offset < 5) throw IncompleteFrameException("frameLength: incomplete $opcode")
                 val payloadLen = ((data[offset + 1].toInt() and 0xFF)) or
                     ((data[offset + 2].toInt() and 0xFF) shl 8) or
                     ((data[offset + 3].toInt() and 0xFF) shl 16) or
                     ((data[offset + 4].toInt() and 0xFF) shl 24)
-                if (payloadLen < 0 || payloadLen > MAX_PAYLOAD_BYTES) throw ProtocolException("frameLength: $opcode len=$payloadLen out of range")
-                1 + 4 + payloadLen
+                if (payloadLen < 0 || payloadLen > MAX_PAYLOAD_BYTES) throw MalformedFrameException("frameLength: $opcode len=$payloadLen out of range")
+                val total = 1 + 4 + payloadLen
+                if (data.size - offset < total) throw IncompleteFrameException("frameLength: incomplete $opcode body")
+                total
             }
             OP_DATA -> {
                 // Server→client Data: opcode(1) + id(u64=8) + timestamp(u64=8) + len(u32=4) + payload
-                if (data.size - offset < 21) throw ProtocolException("frameLength: incomplete OP_DATA (need 21, have ${data.size - offset})")
+                if (data.size - offset < 21) throw IncompleteFrameException("frameLength: incomplete OP_DATA (need 21, have ${data.size - offset})")
                 val payloadLen = ((data[offset + 17].toInt() and 0xFF)) or
                     ((data[offset + 18].toInt() and 0xFF) shl 8) or
                     ((data[offset + 19].toInt() and 0xFF) shl 16) or
                     ((data[offset + 20].toInt() and 0xFF) shl 24)
-                if (payloadLen < 0 || payloadLen > MAX_PAYLOAD_BYTES) throw ProtocolException("frameLength: OP_DATA len=$payloadLen out of range")
-                1 + 8 + 8 + 4 + payloadLen
+                if (payloadLen < 0 || payloadLen > MAX_PAYLOAD_BYTES) throw MalformedFrameException("frameLength: OP_DATA len=$payloadLen out of range")
+                val total = 1 + 8 + 8 + 4 + payloadLen
+                if (data.size - offset < total) throw IncompleteFrameException("frameLength: incomplete OP_DATA payload")
+                total
             }
             OP_SYNC -> 1 + 8
             OP_HEARTBEAT -> 1 + 8
@@ -609,62 +634,65 @@ object Protocol {
             OP_DISCONNECT -> 1
             OP_AUTH_CHALLENGE -> {
                 // [0x11] [16 nonce] [u32 salt_len] [salt_bytes] [optional u32 params_len] [params_bytes]
-                if (data.size - offset < 21) throw ProtocolException("frameLength: incomplete OP_AUTH_CHALLENGE (need 21, have ${data.size - offset})")
+                if (data.size - offset < 21) throw IncompleteFrameException("frameLength: incomplete OP_AUTH_CHALLENGE (need 21, have ${data.size - offset})")
                 val saltLen = ((data[offset + 17].toInt() and 0xFF)) or
                     ((data[offset + 18].toInt() and 0xFF) shl 8) or
                     ((data[offset + 19].toInt() and 0xFF) shl 16) or
                     ((data[offset + 20].toInt() and 0xFF) shl 24)
-                if (saltLen < 0 || saltLen > 256) throw ProtocolException("frameLength: OP_AUTH_CHALLENGE salt_len=$saltLen out of range")
-                if (data.size - offset < 1 + 16 + 4 + saltLen) throw ProtocolException("frameLength: incomplete OP_AUTH_CHALLENGE salt (need ${1 + 16 + 4 + saltLen}, have ${data.size - offset})")
+                if (saltLen < 0 || saltLen > 256) throw MalformedFrameException("frameLength: OP_AUTH_CHALLENGE salt_len=$saltLen out of range")
+                if (data.size - offset < 1 + 16 + 4 + saltLen) throw IncompleteFrameException("frameLength: incomplete OP_AUTH_CHALLENGE salt (need ${1 + 16 + 4 + saltLen}, have ${data.size - offset})")
                 var total = 1 + 16 + 4 + saltLen
                 if (data.size - offset > total) {
-                    if (data.size - offset < total + 4) throw ProtocolException("frameLength: incomplete OP_AUTH_CHALLENGE params length")
+                    if (data.size - offset < total + 4) throw IncompleteFrameException("frameLength: incomplete OP_AUTH_CHALLENGE params length")
                     val pPos = offset + total
                     val paramsLen = ((data[pPos].toInt() and 0xFF)) or
                         ((data[pPos + 1].toInt() and 0xFF) shl 8) or
                         ((data[pPos + 2].toInt() and 0xFF) shl 16) or
                         ((data[pPos + 3].toInt() and 0xFF) shl 24)
-                    if (paramsLen < 0 || paramsLen > 256) throw ProtocolException("frameLength: OP_AUTH_CHALLENGE paramsLen=$paramsLen out of range")
-                    if (data.size - offset < total + 4 + paramsLen) throw ProtocolException("frameLength: incomplete OP_AUTH_CHALLENGE params")
+                    if (paramsLen < 0 || paramsLen > 256) throw MalformedFrameException("frameLength: OP_AUTH_CHALLENGE paramsLen=$paramsLen out of range")
+                    if (data.size - offset < total + 4 + paramsLen) throw IncompleteFrameException("frameLength: incomplete OP_AUTH_CHALLENGE params")
                     total += 4 + paramsLen
                 }
                 total
             }
             OP_AUTH_RESULT -> {
-                if (data.size - offset < 2) throw ProtocolException("frameLength: incomplete OP_AUTH_RESULT")
+                if (data.size - offset < 2) throw IncompleteFrameException("frameLength: incomplete OP_AUTH_RESULT")
                 val success = data[offset + 1]
                 // Server encodes: success=0x01 → 2 bytes total; fail=0x00 → has error message
                 if (success != 0.toByte()) 2
                 else {
-                    if (data.size - offset < 6) throw ProtocolException("frameLength: incomplete OP_AUTH_RESULT")
+                    if (data.size - offset < 6) throw IncompleteFrameException("frameLength: incomplete OP_AUTH_RESULT")
                     val msgLen = ((data[offset + 2].toInt() and 0xFF)) or
                         ((data[offset + 3].toInt() and 0xFF) shl 8) or
                         ((data[offset + 4].toInt() and 0xFF) shl 16) or
                         ((data[offset + 5].toInt() and 0xFF) shl 24)
-                    if (msgLen < 0 || msgLen > MAX_PAYLOAD_BYTES) throw ProtocolException("frameLength: OP_AUTH_RESULT msgLen=$msgLen out of range")
-                    2 + 4 + msgLen
+                    if (msgLen < 0 || msgLen > MAX_PAYLOAD_BYTES) throw MalformedFrameException("frameLength: OP_AUTH_RESULT msgLen=$msgLen out of range")
+                    val total = 2 + 4 + msgLen
+                    if (data.size - offset < total) throw IncompleteFrameException("frameLength: incomplete OP_AUTH_RESULT msg")
+                    total
                 }
             }
             OP_SYNC_RESPONSE -> {
-                if (data.size - offset < 5) throw ProtocolException("frameLength: incomplete OP_SYNC_RESPONSE")
+                if (data.size - offset < 5) throw IncompleteFrameException("frameLength: incomplete OP_SYNC_RESPONSE")
                 val count = ((data[offset + 1].toInt() and 0xFF)) or
                     ((data[offset + 2].toInt() and 0xFF) shl 8) or
                     ((data[offset + 3].toInt() and 0xFF) shl 16) or
                     ((data[offset + 4].toInt() and 0xFF) shl 24)
-                if (count < 0 || count > 10_000) throw ProtocolException("frameLength: OP_SYNC_RESPONSE count=$count out of range")
+                if (count < 0 || count > 10_000) throw MalformedFrameException("frameLength: OP_SYNC_RESPONSE count=$count out of range")
                 var pos = offset + 5
                 repeat(count) {
-                    if (data.size - pos < 20) throw ProtocolException("frameLength: incomplete OP_SYNC_RESPONSE message")
+                    if (data.size - pos < 20) throw IncompleteFrameException("frameLength: incomplete OP_SYNC_RESPONSE message")
                     val payloadLen = ((data[pos + 16].toInt() and 0xFF)) or
                         ((data[pos + 17].toInt() and 0xFF) shl 8) or
                         ((data[pos + 18].toInt() and 0xFF) shl 16) or
                         ((data[pos + 19].toInt() and 0xFF) shl 24)
-                    if (payloadLen < 0 || payloadLen > MAX_PAYLOAD_BYTES) throw ProtocolException("frameLength: OP_SYNC_RESPONSE payloadLen=$payloadLen out of range")
+                    if (payloadLen < 0 || payloadLen > MAX_PAYLOAD_BYTES) throw MalformedFrameException("frameLength: OP_SYNC_RESPONSE payloadLen=$payloadLen out of range")
                     pos += 20 + payloadLen
+                    if (data.size < pos) throw IncompleteFrameException("frameLength: incomplete OP_SYNC_RESPONSE message payload")
                 }
                 pos - offset
             }
-            else -> throw ProtocolException("frameLength: unknown opcode $opcode")
+            else -> throw MalformedFrameException("frameLength: unknown opcode 0x%02x".format(opcode.toInt() and 0xFF))
         }
     }
 

@@ -36,7 +36,7 @@ object SecureKeyManager {
     private const val GCM_IV_LENGTH = 12
     private const val GCM_TAG_LENGTH = 128
     private const val SALT_LENGTH = 16
-    private const val BACKUP_VERSION: Byte = 0x03
+    const val BACKUP_VERSION: Byte = 0x04
     private const val BACKUP_FILENAME = "key_backup.enc"
     private const val BACKUP_PASSWORD_LENGTH = 16
 
@@ -158,7 +158,7 @@ object SecureKeyManager {
         val dsaPub = secure.getBytes(SecureStorage.KEY_DSA_PUBLIC)
             ?: throw IllegalStateException("No ML-DSA public key to export")
 
-        val aesKey = pbkdf2(password.toCharArray(), salt, PBKDF2_ITERATIONS, AES_KEY_LENGTH)
+        val aesKey = argon2DeriveKey(password, salt)
 
         val payload = buildBackupPayload(kemPriv, dsaPriv)
         val encrypted = aesGcmEncrypt(aesKey, iv, payload)
@@ -195,64 +195,6 @@ object SecureKeyManager {
         return password
     }
 
-    /**
-     * Exports to a user-selected SAF directory (preferred) or falls back to
-     * MediaStore Downloads (legacy, public directory).
-     */
-    fun exportKeyBackupLegacy(context: Context): String {
-        val password = generatePassword(BACKUP_PASSWORD_LENGTH)
-        val salt = ByteArray(SALT_LENGTH).also { secureRandom.nextBytes(it) }
-        val iv = ByteArray(GCM_IV_LENGTH).also { secureRandom.nextBytes(it) }
-
-        val secure = SecureStorage(context)
-        val kemPriv = secure.getBytes(SecureStorage.KEY_KEM_PRIVATE)
-            ?: throw IllegalStateException("No ML-KEM private key to export")
-        val kemPub = secure.getBytes(SecureStorage.KEY_KEM_PUBLIC)
-            ?: throw IllegalStateException("No ML-KEM public key to export")
-        val dsaPriv = secure.getBytes(SecureStorage.KEY_DSA_PRIVATE)
-            ?: throw IllegalStateException("No ML-DSA private key to export")
-        val dsaPub = secure.getBytes(SecureStorage.KEY_DSA_PUBLIC)
-            ?: throw IllegalStateException("No ML-DSA public key to export")
-
-        val aesKey = pbkdf2(password.toCharArray(), salt, PBKDF2_ITERATIONS, AES_KEY_LENGTH)
-
-        val payload = buildBackupPayload(kemPriv, dsaPriv)
-        val encrypted = aesGcmEncrypt(aesKey, iv, payload)
-
-        val bytes = ByteArrayOutputStream()
-        bytes.write(BACKUP_VERSION.toInt())
-        bytes.write(salt)
-        bytes.write(iv)
-        bytes.write(intToLittleEndian(encrypted.size))
-        bytes.write(encrypted)
-        bytes.write(intToLittleEndian(kemPub.size))
-        bytes.write(kemPub)
-        bytes.write(intToLittleEndian(dsaPub.size))
-        bytes.write(dsaPub)
-        val out = bytes.toByteArray()
-
-        val resolver = context.contentResolver
-        val contentValues = android.content.ContentValues().apply {
-            put(MediaStore.Downloads.DISPLAY_NAME, BACKUP_FILENAME)
-            put(MediaStore.Downloads.MIME_TYPE, "application/octet-stream")
-        }
-        val uri = resolver.insert(MediaStore.Downloads.EXTERNAL_CONTENT_URI, contentValues)
-            ?: throw IOException("Failed to create backup file")
-        resolver.openOutputStream(uri)?.use { it.write(out) }
-            ?: throw IOException("Failed to write backup file")
-
-        out.fill(0)
-        payload.fill(0)
-        kemPriv.fill(0)
-        kemPub.fill(0)
-        dsaPriv.fill(0)
-        dsaPub.fill(0)
-        encrypted.fill(0)
-        aesKey.fill(0)
-
-        return password
-    }
-
     fun importKeyBackup(context: Context, file: android.net.Uri, password: String): Boolean {
         val resolver = context.contentResolver
         val bytes = resolver.openInputStream(file)?.use { it.readBytes() }
@@ -260,7 +202,12 @@ object SecureKeyManager {
 
         require(bytes.size > 33) { "Backup file too small" }
         val version = bytes[0]
-        require(version == BACKUP_VERSION || version == 0x01.toByte() || version == 0x02.toByte()) {
+        require(
+            version == BACKUP_VERSION ||
+                version == 0x03.toByte() ||
+                version == 0x01.toByte() ||
+                version == 0x02.toByte()
+        ) {
             "Unsupported backup version: $version"
         }
 
@@ -273,7 +220,11 @@ object SecureKeyManager {
         val encKeyDataEnd = encKeyLenOffset + 4 + encKeyLen
         val encrypted = bytes.copyOfRange(encKeyLenOffset + 4, encKeyDataEnd)
 
-        val aesKey = pbkdf2(password.toCharArray(), salt, PBKDF2_ITERATIONS, AES_KEY_LENGTH)
+        val aesKey = if (version >= 0x04.toByte()) {
+            argon2DeriveKey(password, salt)
+        } else {
+            pbkdf2(password.toCharArray(), salt, PBKDF2_ITERATIONS, AES_KEY_LENGTH)
+        }
         val decrypted = aesGcmDecrypt(aesKey, iv, encrypted)
 
         var kemPriv: ByteArray? = null
@@ -345,6 +296,29 @@ object SecureKeyManager {
     private fun generatePassword(length: Int): String {
         val chars = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789!@#$%^&*"
         return (1..length).map { chars[secureRandom.nextInt(chars.length)] }.joinToString("")
+    }
+
+    internal fun argon2DeriveKey(
+        password: String,
+        salt: ByteArray,
+        memKB: Int = 47104,
+        iterations: Int = 3,
+        parallelism: Int = 1
+    ): ByteArray {
+        val params = org.bouncycastle.crypto.params.Argon2Parameters.Builder(
+            org.bouncycastle.crypto.params.Argon2Parameters.ARGON2_id
+        )
+            .withSalt(salt)
+            .withParallelism(parallelism.coerceAtLeast(1))
+            .withMemoryAsKB(memKB.coerceAtLeast(47104))
+            .withIterations(iterations.coerceAtLeast(3))
+            .withVersion(0x13)
+            .build()
+        val generator = org.bouncycastle.crypto.generators.Argon2BytesGenerator()
+        generator.init(params)
+        val output = ByteArray(32)
+        generator.generateBytes(password.toByteArray(Charsets.UTF_8), output, 0, output.size)
+        return output
     }
 
     internal fun pbkdf2(password: CharArray, salt: ByteArray, iterations: Int, keyLengthBits: Int): ByteArray {

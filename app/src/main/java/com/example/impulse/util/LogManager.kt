@@ -23,7 +23,7 @@ object LogManager {
     fun init(context: Context, isDebug: Boolean) {
         if (initialized.getAndSet(true)) return
         FileLogger.init(context)
-        Timber.plant(FileLogger.FileTree())
+        Timber.plant(FileLogger.FileTree(isDebug))
         if (isDebug) {
             Timber.plant(DebugTree())
         } else {

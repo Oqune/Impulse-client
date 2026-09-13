@@ -96,7 +96,7 @@ object FileLogger {
             .append(": ")
             .append(message)
         if (throwable != null) {
-            sb.append('\n').append(Log.getStackTraceString(throwable))
+            sb.append('\n').append(LogManager.redactSecrets(Log.getStackTraceString(throwable)))
         }
         queue.offer(sb.toString()) // drop if full
     }
@@ -212,10 +212,12 @@ object FileLogger {
     }
 
     /**
-     * Timber tree that forwards all logs to [FileLogger].
+     * Timber tree that forwards logs to [FileLogger].
+     * In release builds, only WARN and ERROR are written to disk.
      */
-    class FileTree : Timber.Tree() {
+    class FileTree(private val isDebug: Boolean = false) : Timber.Tree() {
         override fun log(priority: Int, tag: String?, message: String, t: Throwable?) {
+            if (!isDebug && priority < Log.WARN) return
             // The file channel is exposed via a FileProvider URI and may be
             // read by other apps given the URI, so redact secrets here too
             // (Bug: "unredacted secrets in file logs").

@@ -342,24 +342,16 @@ class WebTransportClient(
         while (pos < bytes.size) {
             val frameLen = try {
                 Protocol.frameLength(bytes, pos)
+            } catch (e: Protocol.IncompleteFrameException) {
+                // Legitimate frame whose body has not fully arrived in the buffer yet.
+                // Wait for the next chunk from the transport.
+                break
+            } catch (e: Protocol.MalformedFrameException) {
+                LogManager.w(TAG, "Malformed frame at pos=$pos: ${e.message} — discarding byte 0x%02x".format(bytes[pos].toInt() and 0xFF))
+                pos++
+                continue
             } catch (e: Exception) {
-                val b = bytes[pos]
-                val knownOpcode = b in setOf(
-                    Protocol.Op.Auth.CHALLENGE,
-                    Protocol.Op.Auth.RESULT,
-                    Protocol.Op.Session.HEARTBEAT,
-                    Protocol.Op.Session.NEW_CERT_HASH,
-                    Protocol.Op.Session.DISCONNECT,
-                    Protocol.Op.Data.KEY_EXCHANGE,
-                    Protocol.Op.Data.DATA,
-                    Protocol.Op.Data.SYNC_RESPONSE
-                )
-                if (knownOpcode) {
-                    // Valid opcode but frame is incomplete (large frame in chunks).
-                    // Break and wait for more data to arrive.
-                    break
-                }
-                LogManager.w(TAG, "frameLength failed at pos=$pos, byte=0x%02x — skipping".format(bytes[pos].toInt() and 0xFF))
+                LogManager.w(TAG, "frameLength failed at pos=$pos, byte=0x%02x — skipping".format(bytes[pos].toInt() and 0xFF), e)
                 pos++
                 continue
             }

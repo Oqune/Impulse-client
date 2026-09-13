@@ -644,9 +644,10 @@ class ChatController(private val context: Context) {
      * Format: JSON array of [serverId, frameB64, retries, queuedAt].
      */
     private fun persistOutbox() {
+        val serverId = currentServer?.id ?: return
         try {
             val entries: List<OutboxEntry>
-            synchronized(outboxLock) { entries = outbox.toList() }
+            synchronized(outboxLock) { entries = outbox.filter { it.serverId == serverId } }
             val arr = org.json.JSONArray()
             for (e in entries) {
                 val obj = org.json.JSONObject()
@@ -656,7 +657,7 @@ class ChatController(private val context: Context) {
                 obj.put("t", e.queuedAt)
                 arr.put(obj)
             }
-            outboxPrefs.edit().putString("outbox", arr.toString()).apply()
+            outboxPrefs.edit().putString("outbox_$serverId", arr.toString()).apply()
         } catch (e: Exception) {
             LogManager.w(TAG, "persistOutbox failed (non-fatal)", e)
         }
@@ -664,15 +665,16 @@ class ChatController(private val context: Context) {
 
     /** Load a previously-persisted outbox into memory (call once, at connect). */
     private fun restoreOutbox() {
+        val serverId = currentServer?.id ?: return
         try {
-            val raw = outboxPrefs.getString("outbox", null) ?: return
+            val raw = outboxPrefs.getString("outbox_$serverId", null) ?: return
             val arr = org.json.JSONArray(raw)
             val restored = mutableListOf<OutboxEntry>()
             for (i in 0 until arr.length()) {
                 val obj = arr.getJSONObject(i)
                 val frame = android.util.Base64.decode(obj.getString("f"), android.util.Base64.DEFAULT)
                 restored.add(OutboxEntry(
-                    serverId = obj.optString("s", currentServer?.id ?: ""),
+                    serverId = obj.optString("s", serverId),
                     frame = frame,
                     queuedAt = obj.optLong("t", System.currentTimeMillis()),
                     retries = obj.optInt("r", 0),
@@ -681,9 +683,9 @@ class ChatController(private val context: Context) {
             synchronized(outboxLock) {
                 if (outbox.isEmpty()) outbox.addAll(restored)
             }
-            outboxPrefs.edit().remove("outbox").apply()
+            outboxPrefs.edit().remove("outbox_$serverId").apply()
             if (restored.isNotEmpty()) {
-                LogManager.i(TAG, "restored ${restored.size} queued messages from disk")
+                LogManager.i(TAG, "restored ${restored.size} queued messages from disk for server $serverId")
             }
         } catch (e: Exception) {
             LogManager.w(TAG, "restoreOutbox failed (non-fatal)", e)
@@ -831,6 +833,16 @@ class ChatController(private val context: Context) {
         if (!keyManager.verifyDsa(dsaPub, canonical, sigBytes)) {
             LogManager.w(TAG, "ML-DSA-65 signature verification FAILED for msg $realId from ${env.sender}")
             return
+        }
+
+        // Clock skew validation: reject messages outside the 72h TTL window
+        if (env.clientTs != 0L) {
+            val maxClockSkewMs = 72 * 3600 * 1000L
+            val skew = kotlin.math.abs(System.currentTimeMillis() - env.clientTs)
+            if (skew > maxClockSkewMs) {
+                LogManager.w(TAG, "REJECT msg $realId from ${env.sender}: clock skew exceeded ($skew ms)")
+                return
+            }
         }
 
         // C4 Replay protection: verify that this message nonce from this sender hasn't been seen before
@@ -1096,7 +1108,8 @@ class ChatController(private val context: Context) {
                 senderFingerprint = result.senderFingerprint.take(8),
                 plaintext = result.env.content,
                 isOwn = entity.isOwn,
-                timestamp = entity.timestamp
+                timestamp = entity.timestamp,
+                conversationId = entity.conversationId
             )
         } catch (ex: Exception) {
             LogManager.w(TAG, "decryptEntity failed for ${entity.serverMsgId}", ex)
@@ -1115,7 +1128,8 @@ class ChatController(private val context: Context) {
                     senderFingerprint = result.senderFingerprint.take(8),
                     plaintext = result.env.content,
                     isOwn = e.isOwn,
-                    timestamp = e.timestamp
+                    timestamp = e.timestamp,
+                    conversationId = e.conversationId
                 )
             } catch (ex: Exception) {
                 LogManager.w(TAG, "history decrypt failed for ${e.serverMsgId}", ex)
@@ -1315,7 +1329,8 @@ class ChatController(private val context: Context) {
             // so it is unit-testable on the JVM without an Android Context
             // (see C1AttestationTest). Behaviour is unchanged.
             scope.launch {
-                val existingDsa = keyRepo.getDsaPublicKey(serverId, kemFp)
+                val existingDsa = keyRepo.findDsaKeyByPub(serverId, frame.dsaPublicKey)
+                    ?: keyRepo.getDsaPublicKey(serverId, kemFp)
                 val trusted = Protocol.evaluateKeyExchangeTrust(
                     existingDsa = existingDsa,
                     kemPublicKey = frame.kemPublicKey,

@@ -26,6 +26,9 @@ interface PublicKeyDao {
     @Query("SELECT dsa_public_key FROM public_keys WHERE server_id = :serverId AND fingerprint = :fingerprint AND dsa_public_key IS NOT NULL")
     suspend fun getDsaKey(serverId: String, fingerprint: String): ByteArray?
 
+    @Query("SELECT dsa_public_key FROM public_keys WHERE server_id = :serverId AND dsa_public_key = :dsaPublicKey AND dsa_public_key IS NOT NULL LIMIT 1")
+    suspend fun getDsaKeyByDsaPub(serverId: String, dsaPublicKey: ByteArray): ByteArray?
+
     @Query("DELETE FROM public_keys WHERE server_id = :serverId AND fingerprint = :fingerprint")
     suspend fun deleteByFingerprint(serverId: String, fingerprint: String)
 }
