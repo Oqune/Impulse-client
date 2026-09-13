@@ -21,7 +21,9 @@ import androidx.room.PrimaryKey
     tableName = "messages",
     indices = [
         Index(value = ["server_id"]),
-        Index(value = ["server_id", "server_msg_id"], unique = true)
+        Index(value = ["server_id", "server_msg_id"], unique = true),
+        Index(value = ["server_id", "conversation_id"]),
+        Index(value = ["timestamp"])
     ]
 )
 data class MessageEntity(
