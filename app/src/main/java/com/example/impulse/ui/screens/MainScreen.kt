@@ -198,6 +198,7 @@ fun MainScreen() {
                         onServerUpdated = { updatedServer ->
                             val customServers = ServerPreferences(context).getCustomServers()
                             availableServers = ServerConfig.builtInServers + customServers
+                            connectionManager.updateServerConfig(updatedServer)
                             if (selectedServerId == updatedServer.id) selectedServerId = updatedServer.id
                         },
                         clientName = clientName,

@@ -342,4 +342,33 @@ class ProtocolTest {
         assertEquals(Protocol.Op.Data.SYNC, Protocol.OP_SYNC)
         assertEquals(Protocol.Op.Data.SYNC_RESPONSE, Protocol.OP_SYNC_RESPONSE)
     }
+
+    @Test
+    fun argon2DeriveKey_matchesRustServerVector() {
+        // Test vector generated directly with `impulse-server --hash-password test123`:
+        // "$argon2id$v=19$m=47104,t=3,p=1$QBBijrqHObpW8aPHZViK3A$xV3j6Fha99DOHGY6k+LTyqxy6AnH7Ie/BLwQZEu91oM"
+        val password = "test123"
+        val saltB64 = "QBBijrqHObpW8aPHZViK3A"
+        val expectedKeyB64 = "xV3j6Fha99DOHGY6k+LTyqxy6AnH7Ie/BLwQZEu91oM"
+
+        val derivedKey = Protocol.argon2DeriveKey(
+            password = password,
+            saltB64 = saltB64,
+            memKB = 47104,
+            iterations = 3,
+            parallelism = 1
+        )
+
+        val paddedExpected = when (expectedKeyB64.length % 4) {
+            2 -> expectedKeyB64 + "=="
+            3 -> expectedKeyB64 + "="
+            else -> expectedKeyB64
+        }
+        val expectedBytes = java.util.Base64.getDecoder().decode(paddedExpected)
+        assertArrayEquals(
+            "Derived Argon2 key must exactly match Rust server's stored hash output",
+            expectedBytes,
+            derivedKey
+        )
+    }
 }

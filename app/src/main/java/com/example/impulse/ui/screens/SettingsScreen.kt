@@ -126,6 +126,7 @@ fun SettingsScreen(
                     ServerListContent(
                         modifier = Modifier.fillMaxSize(),
                         availableServers = availableServers,
+                        clientName = clientName,
                         connectionManager = connectionManager,
                         onVisibilityChanged = onVisibilityChanged,
                         certRefreshTrigger = certRefreshTrigger,
@@ -182,6 +183,7 @@ fun SettingsScreen(
 private fun ServerListContent(
     modifier: Modifier = Modifier,
     availableServers: List<ServerConfig>,
+    clientName: String = "",
     connectionManager: ConnectionManager?,
     onVisibilityChanged: () -> Unit,
     certRefreshTrigger: Int = 0,
@@ -271,6 +273,7 @@ private fun ServerListContent(
                     ) {
                         ServerExpandableSettings(
                             server = server,
+                            clientName = clientName,
                             connectionManager = connectionManager,
                             serverPreferences = serverPreferences,
                             onVisibilityChanged = onVisibilityChanged,
@@ -290,6 +293,7 @@ private fun ServerListContent(
 @Composable
 private fun ServerExpandableSettings(
     server: ServerConfig,
+    clientName: String = "",
     connectionManager: ConnectionManager?,
     serverPreferences: ServerPreferences,
     onVisibilityChanged: () -> Unit,
@@ -503,7 +507,14 @@ private fun ServerExpandableSettings(
                                 if (isConnected) {
                                     connectionManager.disconnect(server.id)
                                 } else {
-                                    connectionManager.connect(server, connectionManager.getController(server).clientName)
+                                    val nameToUse = clientName.ifBlank {
+                                        connectionManager.getController(server).clientName.ifBlank {
+                                            serverPreferences.getClientName().ifBlank {
+                                                com.example.impulse.util.NameGenerator.generate()
+                                            }
+                                        }
+                                    }
+                                    connectionManager.connect(server, nameToUse)
                                 }
                             },
                             modifier = Modifier.fillMaxWidth(),

@@ -73,6 +73,13 @@ class ConnectionManager private constructor(private val context: Context) {
     }
 
     @Synchronized
+    fun updateServerConfig(updatedServer: ServerConfig) {
+        val controller = controllers[updatedServer.id] ?: return
+        controller.updateServer(updatedServer)
+        LogManager.i(TAG, "Updated cached server config for ${updatedServer.id}")
+    }
+
+    @Synchronized
     fun disconnect(serverId: String) {
         controllers[serverId]?.disconnect()
         LogManager.i(TAG, "Disconnected from server=$serverId")

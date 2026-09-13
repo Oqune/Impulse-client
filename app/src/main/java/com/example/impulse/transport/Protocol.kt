@@ -220,9 +220,22 @@ object Protocol {
         parallelism: Int = 1
     ): ByteArray {
         val saltBytes = if (saltB64.isNotEmpty()) {
-            val decoded = android.util.Base64.decode(saltB64, android.util.Base64.NO_WRAP)
-            if (decoded.size < 16) {
-                throw ProtocolException("Argon2id salt must be at least 16 bytes (got ${decoded.size})")
+            val padded = when (saltB64.length % 4) {
+                2 -> saltB64 + "=="
+                3 -> saltB64 + "="
+                else -> saltB64
+            }
+            val decoded = try {
+                java.util.Base64.getDecoder().decode(padded)
+            } catch (_: Throwable) {
+                try {
+                    android.util.Base64.decode(padded, android.util.Base64.NO_WRAP)
+                } catch (_: Throwable) {
+                    android.util.Base64.decode(saltB64, android.util.Base64.NO_WRAP)
+                }
+            }
+            if (decoded == null || decoded.size < 16) {
+                throw ProtocolException("Argon2id salt must be at least 16 bytes (got ${decoded?.size ?: 0})")
             }
             decoded
         } else {

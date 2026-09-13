@@ -237,6 +237,12 @@ class ChatController(private val context: Context) {
 
     fun setAutoReconnect(enabled: Boolean) { autoReconnectEnabled = enabled }
 
+    fun updateServer(server: ServerConfig) {
+        synchronized(lock) {
+            currentServer = server
+        }
+    }
+
     fun disconnect() {
         val clientToDestroy: WebTransportClient?
         synchronized(lock) {
@@ -345,6 +351,7 @@ class ChatController(private val context: Context) {
         val frame: ByteArray
         try {
             val saltB64 = pendingSaltB64; pendingSaltB64 = ""
+            LogManager.i(TAG, "sendAuth: salt=${saltB64.length} chars, argon2(m=$pendingArgonMemKB,t=$pendingArgonIter,p=$pendingArgonPar)")
             frame = Protocol.buildAuth(password, nonce, saltB64, pendingArgonMemKB, pendingArgonIter, pendingArgonPar)
             LogManager.i(TAG, "sendAuth: auth frame built OK (${frame.size} bytes)")
         } catch (e: CancellationException) {
