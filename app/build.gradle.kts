@@ -11,19 +11,19 @@ android {
     namespace = "com.example.impulse"
     compileSdk = 36
 
-    signingConfigs {
-        create("release") {
-            val ksDir = project.rootProject.file("keystore")
-            val ksFile = ksDir.resolve("impulse-release.jks")
-            val passFile = ksDir.resolve("keystore-password.txt")
-            if (ksFile.exists() && passFile.exists()) {
+    val ksDir = project.rootProject.file("keystore")
+    val ksFile = ksDir.resolve("impulse-release.jks")
+    val passFile = ksDir.resolve("keystore-password.txt")
+    val hasReleaseSigning = ksFile.exists() && ksFile.length() > 0 && passFile.exists() && passFile.readText().trim().isNotEmpty()
+
+    if (hasReleaseSigning) {
+        signingConfigs {
+            create("release") {
                 storeFile = ksFile
                 storePassword = passFile.readText().trim()
                 keyAlias = "impulse"
                 keyPassword = passFile.readText().trim()
             }
-            // If the keystore is absent (e.g. fresh clone), the release build
-            // falls back to unsigned; CI/developers must supply the keystore.
         }
     }
 
@@ -31,8 +31,8 @@ android {
         applicationId = "com.example.impulse"
         minSdk = 28 // WebTransport via socket-http3 (third-party), no native API 33+ needed
         targetSdk = 36
-        versionCode = 16
-        versionName = "2.9.2"
+        versionCode = 17
+        versionName = "3.0.0"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
     }
@@ -40,7 +40,9 @@ android {
         release {
             isMinifyEnabled = true
             isShrinkResources = true
-            signingConfig = signingConfigs.getByName("release")
+            if (hasReleaseSigning) {
+                signingConfig = signingConfigs.getByName("release")
+            }
             proguardFiles(
                 getDefaultProguardFile("proguard-android-optimize.txt"),
                 "proguard-rules.pro"
@@ -164,6 +166,28 @@ afterEvaluate {
         val stripTask = tasks.findByName("strip${cap}DebugSymbols")
         if (stripTask != null) {
             stripTask.dependsOn(fixTask)
+            val fixStrippedTask = tasks.register("fixStrippedNativeLibsAlign${cap}") {
+                dependsOn(stripTask)
+                inputs.file(align16kbScript)
+                doLast {
+                    val strippedDir = stripTask.outputs.files.firstOrNull()
+                        ?: file("$buildDir/intermediates/stripped_native_libs/$variant/strip${cap}DebugSymbols/out")
+                    if (!strippedDir.isDirectory) return@doLast
+                    val probe = project.exec {
+                        commandLine(python, "--version")
+                        isIgnoreExitValue = true
+                    }.exitValue
+                    if (probe != 0) return@doLast
+                    strippedDir.walkTopDown().filter { it.name.endsWith(".so") }.forEach { so ->
+                        project.exec {
+                            commandLine(python, align16kbScript.asFile.absolutePath, so.absolutePath)
+                        }
+                    }
+                }
+            }
+            tasks.matching { it.name.startsWith("package$cap") }.configureEach {
+                dependsOn(fixStrippedTask)
+            }
         }
         // With ABI splits there is one package task per ABI plus the universal one
         // (packageDebug, packageDebugArm64_v8a, ...) — every one of them must run
