@@ -1,6 +1,6 @@
 <div align="center">
 
-[🇺🇸 **English**](README.md) | [🇷🇺 Русский](README.ru.md)
+[**English**](README.md) | [Русский](README.ru.md)
 
 ![logo](logo.png)
 
@@ -18,21 +18,13 @@ Pairs with the [Impulse server](https://github.com/Oqune/Impulse-server/).
 
 ## Features
 
-- 🚀 **WebTransport** transport (Android 9+), replacing WebSocket entirely.
-- 🔐 **Post-quantum E2EE**: Per-Recipient KEM Wrapping — each message is
-  individually encrypted for every recipient using **ML-KEM-768** encapsulation.
-  The sender encrypts the message with **AES-256-GCM** and signs it with
-  **ML-DSA-65 (Dilithium3)** so receivers authenticate the sender with PQ security.
-- 📷 **TOFU certificate pinning** via QR scan (`impulse-cert:<sha256>`), stored in
-  an encrypted `SecureStorage` (Android Keystore + AES-256-GCM); up to two hashes
-  (current + next) are kept for seamless certificate rotation.
-- 🗄️ **Encrypted local history** (Room). Each message body is encrypted with
-  AES-256-GCM before being written; automatic **72-hour TTL** cleanup.
-- 📱 Jetpack Compose (Material 3) UI; automatic reconnect with exponential
-  backoff; foreground service; boot-time reconnect.
-- 🔑 **Secure key export/import** (PBKDF2 + AES-256-GCM) for moving your ML-KEM
-  identity across devices, with a fresh ML-DSA key generated on import.
-- 🌗 Light / Dark / System themes and optional biometric app lock.
+- **WebTransport transport:** Android 9+ support, replacing WebSocket entirely with HTTP/3 datagrams and streams.
+- **Post-quantum E2EE:** Per-Recipient KEM Wrapping — each message is individually encrypted for every recipient using **ML-KEM-768** encapsulation. The sender encrypts the message with **AES-256-GCM** and signs it with **ML-DSA-65 (Dilithium3)** so receivers authenticate the sender with PQ security.
+- **TOFU certificate pinning:** QR scan (`impulse-cert:<sha256>`), stored in an encrypted `SecureStorage` (Android Keystore + AES-256-GCM); up to two hashes (current + next) are kept for seamless certificate rotation.
+- **Encrypted local history:** Room DB where each message body is encrypted with AES-256-GCM before being written; automatic **72-hour TTL** cleanup.
+- **Jetpack Compose (Material 3) UI:** Pure OLED dark mode, responsive layout, automatic reconnect with exponential backoff, foreground service, and boot-time reconnect.
+- **Secure key export/import:** PBKDF2 + AES-256-GCM for moving your ML-KEM identity across devices, with a fresh ML-DSA key generated on import.
+- **Interface & Security:** Light / Dark / System themes and optional biometric app lock.
 
 ## Binary protocol (opcodes `0x11`–`0x34`)
 
