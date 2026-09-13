@@ -35,23 +35,18 @@
 > ручная заливка APK в GitHub Release (п.3). GitHub Actions CI сейчас НЕ
 > используется для релиза (см. Known Issues).
 
-## 4. GitHub CI (`client-build.yml`) — STATUS
+## 4. GitHub CI (`client-build.yml`) — Автоматизация релизов
 - Триггер: push в `master`/`main` или tag `v*`, PR.
-- При tag `v*`: восстанавливает keystore из `secrets.ANDROID_KEYSTORE_BASE64`
-  + `secrets.KEYSTORE_PASSWORD`, собирает `assembleRelease`, создаёт GitHub Release.
-- **KNOWN ISSUE (2026-08-15): CI падает на всех последних runs (v2.9.0, v2.8.1,
-  v2.8.0) с ошибкой:**
-  ```
-  KeytoolException: Failed to read key impulse from store "...impulse-release.jks":
-  Tag number over 30 is not supported
-  ```
-  Причина: keystore сгенерирован в новом JDK (теги >30 в PKCS12), keytool на CI
-  (ubuntu, JDK 17) его не читает. Локально собирается, т.к. агент использует
-  тот же keystore тем же JDK.
-- **TODO (фикс, НЕ делать в фазе подготовки):** пересоздать keystore совместимым
-  форматом (JDK 17 `keytool`, PKCS12 без тегов >30) И/ИЛИ обновить CI на JDK 21,
-  либо перенести подпись на локальную и оставить CI только для проверки сборки.
+- **Подпись в CI:** При push тега `v*` воркфлоу проверяет наличие `secrets.ANDROID_KEYSTORE_BASE64` и `secrets.KEYSTORE_PASSWORD`.
+  - При наличии секретов: восстанавливает keystore и пароль, валидирует ненулевой размер (`ksFile.length() > 0`) и автоматически подписывает релизные APK.
+  - При отсутствии секретов: собирает неподписанный release APK без падения пайплайна (устранена ошибка `Tag number over 30 is not supported`, возникавшая из-за попытки чтения пустого 0-байтного файла).
+- Релизы на GitHub создаются с унифицированным заголовком `Impulse Client v<Major>.<Minor>.<Patch>`.
 
-## 5. Владелец подписи
-Локальный инженер/агент на доверенном ПК (keystore никогда не покидает локальную машину — требование безопасности `AGENTS.md` и `AI_MANIFESTO.md`).
-Подпись выполняется локально перед загрузкой артефактов в GitHub Releases.
+## 5. Стандарт версионирования (Protocol-Locked SemVer)
+Формат версий: `v<ProtocolMajor>.<ComponentMinor>.<Patch>`
+- **ProtocolMajor (первая цифра, эра v3+):** Сетевая совместимость E2EE Wire-протокола (опкоды `0x11`–`0x34`). Любой клиент `v3.x` совместим с любым сервером `v3.y`.
+- **ComponentMinor:** Независимый функциональный инкремент Android-клиента (`v3.0.x`).
+- **Patch:** Багфиксы, безопасность и UI-оптимизации.
+
+## 6. Безопасность секретов
+Keystore и пароль хранятся локально в `keystore/` (в `.gitignore`). Для автоматической сборки в GitHub Actions они загружаются в зашифрованные **GitHub Repository Secrets** (`ANDROID_KEYSTORE_BASE64`, `KEYSTORE_PASSWORD`) через sealed box Libsodium. Локальные файлы ключей никогда не коммитятся в git.

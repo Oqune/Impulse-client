@@ -38,3 +38,10 @@
 ./gradlew testDebugUnitTest
 ./gradlew assembleDebug
 ```
+
+## Релизы и версионирование
+- **Protocol-Locked SemVer:** `v<ProtocolMajor>.<ComponentMinor>.<Patch>` (текущая линейка: Client `v3.0.x`, Protocol v3).
+- Теги: строго `vX.Y.Z` (например, `v3.0.0`).
+- Заголовки релизов на GitHub: `Impulse Client vX.Y.Z`.
+- Патч-ноуты: строго без эмодзи, с обязательной таблицей архитектур и прямых ссылок на APK.
+
