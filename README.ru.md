@@ -1,20 +1,38 @@
 <div align="center">
 
+# Impulse Client
+
+**Постквантовый сквозно-шифрованный суверенный LAN-мессенджер**
+
 [English](README.md) | [**Русский**](README.ru.md)
 
-![logo](logo.png)
-
-[![Kotlin](https://img.shields.io/badge/Kotlin-2.0%2B-purple?logo=kotlin)](https://kotlinlang.org)
-[![Android](https://img.shields.io/badge/Platform-Android%209%2B-lightgrey)](https://www.android.com)
+[![Kotlin](https://img.shields.io/badge/Kotlin-2.0%2B-7F52FF?logo=kotlin&logoColor=white)](https://kotlinlang.org)
+[![Platform](https://img.shields.io/badge/Platform-Android%209%2B-3DDC84?logo=android&logoColor=white)](https://www.android.com)
+[![Transport](https://img.shields.io/badge/Transport-WebTransport%20%2F%20QUIC-00E5FF)](https://developer.android.com/reference/android/net/http/WebTransport)
+[![PQC](https://img.shields.io/badge/Crypto-ML--KEM--768%20%7C%20ML--DSA--65-22c55e)](https://csrc.nist.gov/pubs/fips/203/final)
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
-[![WebTransport](https://img.shields.io/badge/Transport-WebTransport-blue)](https://developer.android.com/reference/android/net/http/WebTransport)
-[![PQC](https://img.shields.io/badge/Crypto-ML--KEM--768%20%2F%20AES--256--GCM-green)](https://en.wikipedia.org/wiki/ML-KEM)
-[![Release](https://img.shields.io/github/v/release/Oqune/Impulse-client?label=latest)](https://github.com/Oqune/Impulse-client/releases)
-
-Минимальный, самостоятельно развёртываемый, **постквантовый сквозь-шифрованный** LAN-клиент чата для Android.
-Работает в паре с [сервером Impulse](https://github.com/Oqune/Impulse-server/).
+[![Release](https://img.shields.io/github/v/release/Oqune/Impulse-client?label=latest&color=7928CA)](https://github.com/Oqune/Impulse-client/releases)
 
 </div>
+
+> **Суверенность и эфемерность:** Минималистичный, автономный LAN-клиент чата для Android. Непрозрачный Zero-Knowledge релей, инкапсуляция общих ключей для каждого получателя (ML-KEM-768), постквантовые подписи Dilithium (ML-DSA-65) и аппаратная изоляция ключей.
+>
+> Работает в паре с [сервером Impulse](https://github.com/Oqune/Impulse-server/).
+
+---
+
+### Архитектурные спецификации
+
+| Уровень | Технология | Описание |
+| :--- | :--- | :--- |
+| **Транспорт** | WebTransport / QUIC | Стримы и датаграммы HTTP/3 поверх UDP-порта 4433 |
+| **Инкапсуляция ключей** | ML-KEM-768 | NIST FIPS 203 (Kyber-768) per-recipient шифрование |
+| **Электронная подпись** | ML-DSA-65 | NIST FIPS 204 (Dilithium3) постквантовая аттестация сообщений |
+| **Симметричное шифрование** | AES-256-GCM | Аутентифицированное шифрование с эфемерными IV |
+| **Модель доверия** | TOFU Fingerprinting | Закрепление SHA-256 сертификата сервера через QR-код |
+| **Локальное хранилище** | Зашифрованная Room DB | AES-256-GCM шифрование тел сообщений с автоочисткой по TTL 72 ч |
+
+---
 
 ## Возможности
 

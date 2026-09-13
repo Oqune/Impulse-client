@@ -1,20 +1,38 @@
 <div align="center">
 
-[**English**](README.md) | [Русский](README.ru.md)
+# Impulse Client
 
-![logo](logo.png)
+**Post-Quantum End-to-End Encrypted Sovereign LAN Messenger**
 
-[![Kotlin](https://img.shields.io/badge/Kotlin-2.0%2B-purple?logo=kotlin)](https://kotlinlang.org)
-[![Android](https://img.shields.io/badge/Platform-Android%209%2B-lightgrey)](https://www.android.com)
+[English](README.md) | [Русский](README.ru.md)
+
+[![Kotlin](https://img.shields.io/badge/Kotlin-2.0%2B-7F52FF?logo=kotlin&logoColor=white)](https://kotlinlang.org)
+[![Platform](https://img.shields.io/badge/Platform-Android%209%2B-3DDC84?logo=android&logoColor=white)](https://www.android.com)
+[![Transport](https://img.shields.io/badge/Transport-WebTransport%20%2F%20QUIC-00E5FF)](https://developer.android.com/reference/android/net/http/WebTransport)
+[![PQC](https://img.shields.io/badge/Crypto-ML--KEM--768%20%7C%20ML--DSA--65-22c55e)](https://csrc.nist.gov/pubs/fips/203/final)
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
-[![WebTransport](https://img.shields.io/badge/Transport-WebTransport-blue)](https://developer.android.com/reference/android/net/http/WebTransport)
-[![PQC](https://img.shields.io/badge/Crypto-ML--KEM--768%20%2F%20ML--DSA--65%20%2F%20AES--256--GCM-green)](https://en.wikipedia.org/wiki/ML-KEM)
-[![Release](https://img.shields.io/github/v/release/Oqune/Impulse-client?label=latest)](https://github.com/Oqune/Impulse-client/releases)
-
-Minimal, self-hosted, **post-quantum end-to-end-encrypted** LAN chat client for Android.
-Pairs with the [Impulse server](https://github.com/Oqune/Impulse-server/).
+[![Release](https://img.shields.io/github/v/release/Oqune/Impulse-client?label=latest&color=7928CA)](https://github.com/Oqune/Impulse-client/releases)
 
 </div>
+
+> **Sovereign & Ephemeral:** Minimal, self-hosted LAN chat client for Android. Zero-knowledge opaque relay, Per-Recipient post-quantum key encapsulation (ML-KEM-768), Dilithium digital signatures (ML-DSA-65), and hardware-isolated cryptographic key storage.
+>
+> Pairs with [Impulse Server](https://github.com/Oqune/Impulse-server/).
+
+---
+
+### Core Specifications
+
+| Layer | Technology | Details |
+| :--- | :--- | :--- |
+| **Transport** | WebTransport / QUIC | HTTP/3 streams and datagrams over UDP port 4433 |
+| **Key Encapsulation** | ML-KEM-768 | NIST FIPS 203 (Kyber-768) per-recipient encryption |
+| **Digital Signatures** | ML-DSA-65 | NIST FIPS 204 (Dilithium3) PQ message authentication |
+| **Symmetric Encryption** | AES-256-GCM | Authenticated encryption with ephemeral IVs |
+| **Trust Model** | TOFU Fingerprinting | Pinned SHA-256 server certificate via QR scan |
+| **Local Storage** | Encrypted Room DB | AES-256-GCM encrypted bodies with 72h auto-shredding |
+
+---
 
 ## Features
 
