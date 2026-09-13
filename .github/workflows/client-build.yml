@@ -42,9 +42,18 @@ jobs:
           KS_PASS: ${{ secrets.KEYSTORE_PASSWORD }}
         run: |
           mkdir -p keystore
-          echo "$KS_B64" | base64 -d > keystore/impulse-release.jks
-          echo -n "$KS_PASS" > keystore/keystore-password.txt
-          ls -la keystore/
+          if [ -n "$KS_B64" ] && [ -n "$KS_PASS" ]; then
+            echo "$KS_B64" | base64 -d > keystore/impulse-release.jks
+            echo -n "$KS_PASS" > keystore/keystore-password.txt
+            if [ ! -s keystore/impulse-release.jks ] || [ ! -s keystore/keystore-password.txt ]; then
+              echo "Decoded keystore or password is empty, removing to prevent build failure"
+              rm -f keystore/impulse-release.jks keystore/keystore-password.txt
+            else
+              echo "Keystore restored successfully ($(wc -c < keystore/impulse-release.jks) bytes)"
+            fi
+          else
+            echo "Keystore secrets missing, skipping keystore restoration"
+          fi
 
       - name: Build release APKs (all ABIs + universal)
         run: ./gradlew assembleRelease
@@ -52,10 +61,17 @@ jobs:
       - name: Rename APKs with version/ABI
         run: |
           cd app/build/outputs/apk/release
+          SAFE_REF=$(echo "${GITHUB_REF_NAME}" | tr '/' '-')
+          shopt -s nullglob
           for f in app-*-release.apk; do
             abi=${f#app-}
             abi=${abi%-release.apk}
-            mv "$f" "ImpulseClient-${GITHUB_REF_NAME}-${abi}-release.apk"
+            mv "$f" "ImpulseClient-${SAFE_REF}-${abi}-release.apk"
+          done
+          for f in app-*-release-unsigned.apk; do
+            abi=${f#app-}
+            abi=${abi%-release-unsigned.apk}
+            mv "$f" "ImpulseClient-${SAFE_REF}-${abi}-unsigned.apk"
           done
           ls -la
 
@@ -83,5 +99,6 @@ jobs:
       - name: Create release
         uses: softprops/action-gh-release@v2
         with:
+          name: Impulse Client ${{ github.ref_name }}
           files: artifacts/*.apk
           generate_release_notes: true
