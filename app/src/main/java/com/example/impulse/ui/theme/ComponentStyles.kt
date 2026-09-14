@@ -41,6 +41,7 @@ object ImpulseElevation {
 fun ImpulseCard(
     modifier: Modifier = Modifier,
     onClick: (() -> Unit)? = null,
+    border: BorderStroke? = standardCardBorder(),
     content: @Composable ColumnScope.() -> Unit,
 ) {
     // Use `surfaceContainer` (lighter than `surfaceContainerHigh`): on Material
@@ -57,6 +58,7 @@ fun ImpulseCard(
             shape = CardShape,
             colors = colors,
             elevation = elevation,
+            border = border,
         ) { Column(Modifier.padding(16.dp), content = content) }
     } else {
         Card(
@@ -64,6 +66,7 @@ fun ImpulseCard(
             shape = CardShape,
             colors = colors,
             elevation = elevation,
+            border = border,
         ) { Column(Modifier.padding(16.dp), content = content) }
     }
 }
@@ -190,10 +193,11 @@ fun ImpulseMenuCard(
             onClick()
         },
         modifier = modifier.fillMaxWidth(),
-        shape = ButtonShape,
+        shape = CardShape,
         colors = CardDefaults.cardColors(
             containerColor = MaterialTheme.colorScheme.surfaceContainer,
         ),
+        border = standardCardBorder(),
         elevation = CardDefaults.cardElevation(defaultElevation = ImpulseElevation.menu),
     ) {
         Row(
@@ -249,12 +253,10 @@ fun ImpulseMenuCard(
     }
 }
 
-// ── Button (flat, minimal) ──────────────────────────────────────────────
+// ── Buttons (standardized flat tactile) ──────────────────────────────────
 
 /**
- * Flat, shadow-free button: no elevation, a subtle container tint and a thin
- * outline by default. Clean and readable on old devices (no soft-shadow
- * artifacts).
+ * Flat, shadow-free secondary/outlined button: no elevation, subtle container tint and a 1dp border.
  */
 @Composable
 fun ImpulseButton(
@@ -267,13 +269,13 @@ fun ImpulseButton(
 ) {
     val container = contentColor.copy(alpha = 0.08f)
     val border = if (outlined) {
-        BorderStroke(1.dp, contentColor.copy(alpha = 0.4f))
+        BorderStroke(StandardBorderWidth, contentColor.copy(alpha = 0.40f))
     } else {
         null
     }
     Button(
         onClick = onClick,
-        modifier = modifier,
+        modifier = modifier.defaultMinSize(minHeight = 44.dp),
         shape = ButtonShape,
         colors = ButtonDefaults.buttonColors(
             containerColor = container,
@@ -292,8 +294,64 @@ fun ImpulseButton(
             Icon(icon, contentDescription = null, modifier = Modifier.size(16.dp))
             Spacer(Modifier.width(6.dp))
         }
-        Text(text, style = MaterialTheme.typography.labelMedium)
+        Text(text, style = MaterialTheme.typography.labelMedium, fontWeight = FontWeight.SemiBold)
     }
+}
+
+/**
+ * High-contrast primary button (filled accent, zero elevation).
+ */
+@Composable
+fun ImpulsePrimaryButton(
+    text: String,
+    onClick: () -> Unit,
+    modifier: Modifier = Modifier,
+    icon: ImageVector? = null,
+    containerColor: Color = MaterialTheme.colorScheme.primary,
+    contentColor: Color = MaterialTheme.colorScheme.onPrimary,
+) {
+    Button(
+        onClick = onClick,
+        modifier = modifier.defaultMinSize(minHeight = 44.dp),
+        shape = ButtonShape,
+        colors = ButtonDefaults.buttonColors(
+            containerColor = containerColor,
+            contentColor = contentColor,
+        ),
+        elevation = ButtonDefaults.buttonElevation(
+            defaultElevation = 0.dp,
+            pressedElevation = 0.dp,
+            focusedElevation = 0.dp,
+            hoveredElevation = 0.dp,
+            disabledElevation = 0.dp,
+        ),
+    ) {
+        if (icon != null) {
+            Icon(icon, contentDescription = null, modifier = Modifier.size(16.dp))
+            Spacer(Modifier.width(6.dp))
+        }
+        Text(text, style = MaterialTheme.typography.labelMedium, fontWeight = FontWeight.SemiBold)
+    }
+}
+
+/**
+ * Destructive button (error-tinted with 1dp border, zero elevation).
+ */
+@Composable
+fun ImpulseDestructiveButton(
+    text: String,
+    onClick: () -> Unit,
+    modifier: Modifier = Modifier,
+    icon: ImageVector? = null,
+) {
+    ImpulseButton(
+        text = text,
+        onClick = onClick,
+        modifier = modifier,
+        icon = icon,
+        contentColor = MaterialTheme.colorScheme.error,
+        outlined = true,
+    )
 }
 
 // ── Status dot ────────────────────────────────────────────────────────
@@ -317,7 +375,7 @@ fun StatusDot(
     }
 }
 
-// ── Shield badge ────────────────────────────────────────────────────────
+// ── Badges ────────────────────────────────────────────────────────────
 
 @Composable
 fun ShieldBadge(
@@ -327,8 +385,9 @@ fun ShieldBadge(
 ) {
     Surface(
         modifier = modifier,
-        shape = RoundedCornerShape(6.dp),
-        color = color.copy(alpha = 0.15f),
+        shape = ChipShape,
+        color = color.copy(alpha = 0.12f),
+        border = BorderStroke(StandardBorderWidth, color.copy(alpha = 0.25f)),
     ) {
         Row(
             modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp),
@@ -345,9 +404,31 @@ fun ShieldBadge(
                 text = text,
                 style = MaterialTheme.typography.labelSmall,
                 color = color,
-                fontWeight = FontWeight.Medium,
+                fontWeight = FontWeight.SemiBold,
             )
         }
+    }
+}
+
+@Composable
+fun TechBadge(
+    name: String,
+    modifier: Modifier = Modifier,
+    color: Color = MaterialTheme.colorScheme.primary,
+) {
+    Surface(
+        modifier = modifier,
+        shape = ChipShape,
+        color = color.copy(alpha = 0.08f),
+        border = BorderStroke(StandardBorderWidth, color.copy(alpha = 0.20f)),
+    ) {
+        Text(
+            text = name,
+            style = MaterialTheme.typography.labelSmall,
+            fontWeight = FontWeight.SemiBold,
+            color = color,
+            modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp)
+        )
     }
 }
 

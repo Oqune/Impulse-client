@@ -1,5 +1,6 @@
 package com.example.impulse.ui.screens
 
+import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
@@ -120,11 +121,10 @@ fun ChatListScreen(
                                         MaterialTheme.colorScheme.surfaceContainer
                                 ),
                                 border = if (isConnected) {
-                                    androidx.compose.foundation.BorderStroke(
-                                        0.5.dp,
-                                        MaterialTheme.colorScheme.primary.copy(alpha = 0.35f)
-                                    )
-                                } else null,
+                                    BorderStroke(StandardBorderWidth, MaterialTheme.colorScheme.primary.copy(alpha = 0.45f))
+                                } else {
+                                    standardCardBorder()
+                                },
                                 elevation = CardDefaults.cardElevation(defaultElevation = 0.dp)
                             ) {
                                 Row(

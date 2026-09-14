@@ -11,7 +11,6 @@ import androidx.compose.foundation.pager.HorizontalPager
 import androidx.compose.foundation.pager.rememberPagerState
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
-import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.DarkMode
@@ -129,14 +128,14 @@ fun AppSettingsContent(
                             modifier = Modifier
                                 .fillMaxWidth()
                                 .fillMaxHeight()
-                                .clip(RoundedCornerShape(14.dp))
+                                .clip(CardShape)
                                 .background(bgColor)
                                 .border(
                                     BorderStroke(
-                                        width = if (isSelected) 1.5.dp else 1.dp,
+                                        width = StandardBorderWidth,
                                         color = borderColor
                                     ),
-                                    RoundedCornerShape(14.dp)
+                                    CardShape
                                 )
                                 .clickable {
                                     scope.launch { modePager.animateScrollToPage(page) }
@@ -155,9 +154,9 @@ fun AppSettingsContent(
                             Box(
                                 modifier = Modifier
                                     .size(38.dp)
-                                    .clip(RoundedCornerShape(9.dp))
+                                    .clip(ChipShape)
                                     .background(preview)
-                                    .border(1.dp, MaterialTheme.colorScheme.outlineVariant, RoundedCornerShape(9.dp)),
+                                    .border(StandardBorderWidth, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.4f), ChipShape),
                                 contentAlignment = Alignment.Center,
                             ) {
                                 Icon(
@@ -304,14 +303,14 @@ fun AppSettingsContent(
                             modifier = Modifier
                                 .fillMaxWidth()
                                 .fillMaxHeight()
-                                .clip(RoundedCornerShape(14.dp))
+                                .clip(CardShape)
                                 .background(bgColor)
                                 .border(
                                     BorderStroke(
-                                        width = if (isSelected) 1.5.dp else 1.dp,
+                                        width = StandardBorderWidth,
                                         color = borderColor
                                     ),
-                                    RoundedCornerShape(14.dp)
+                                    CardShape
                                 )
                                 .clickable(enabled = enabled) {
                                     // Tap a visible neighbour: glide the pager
@@ -325,11 +324,11 @@ fun AppSettingsContent(
                             Box(
                                 modifier = Modifier
                                     .size(38.dp)
-                                    .clip(RoundedCornerShape(9.dp))
+                                    .clip(ChipShape)
                                     .background(preview)
                                     .then(
                                         if (variant == ThemeVariant.CLASSIC)
-                                            Modifier.border(1.dp, MaterialTheme.colorScheme.outlineVariant, RoundedCornerShape(9.dp))
+                                            Modifier.border(StandardBorderWidth, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.4f), ChipShape)
                                         else Modifier
                                     ),
                                 contentAlignment = Alignment.Center,
@@ -409,10 +408,10 @@ fun AppSettingsContent(
                         modifier = Modifier
                             .fillMaxWidth()
                             .clickable { expanded = true },
-                        shape = RoundedCornerShape(14.dp),
+                        shape = InputShape,
                         color = MaterialTheme.colorScheme.surfaceContainer,
                         border = BorderStroke(
-                            1.dp,
+                            StandardBorderWidth,
                             MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.4f)
                         ),
                         tonalElevation = 0.dp
@@ -481,25 +480,25 @@ fun AppSettingsContent(
                     Box(
                         modifier = Modifier
                             .size(40.dp)
-                            .clip(RoundedCornerShape(10.dp))
+                            .clip(ChipShape)
                             .background(previewBg)
-                            .border(1.dp, MaterialTheme.colorScheme.outlineVariant, RoundedCornerShape(10.dp))
+                            .border(StandardBorderWidth, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.4f), ChipShape)
                     )
                     // Primary color swatch
                     Box(
                         modifier = Modifier
                             .size(40.dp)
-                            .clip(RoundedCornerShape(10.dp))
+                            .clip(ChipShape)
                             .background(previewColor)
-                            .border(1.dp, MaterialTheme.colorScheme.outlineVariant, RoundedCornerShape(10.dp))
+                            .border(StandardBorderWidth, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.4f), ChipShape)
                     )
                     // Secondary / surface
                     Box(
                         modifier = Modifier
                             .size(40.dp)
-                            .clip(RoundedCornerShape(10.dp))
+                            .clip(ChipShape)
                             .background(previewColor.copy(alpha = 0.18f))
-                            .border(1.dp, MaterialTheme.colorScheme.outlineVariant, RoundedCornerShape(10.dp))
+                            .border(StandardBorderWidth, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.4f), ChipShape)
                     )
                     Spacer(Modifier.weight(1f))
                     Text(
@@ -516,7 +515,7 @@ fun AppSettingsContent(
                     modifier = Modifier
                         .fillMaxWidth()
                         .height(36.dp)
-                        .clip(RoundedCornerShape(18.dp))
+                        .clip(CircleShape)
                         .background(
                             Brush.horizontalGradient(
                                 colors = (0..360 step 10).map { hslToColor(it.toFloat(), 0.85f, 0.55f) }
@@ -573,8 +572,9 @@ fun AppSettingsContent(
                 Box(
                     modifier = Modifier
                         .fillMaxWidth()
-                        .clip(RoundedCornerShape(10.dp))
+                        .clip(InputShape)
                         .background(MaterialTheme.colorScheme.surfaceContainerHighest)
+                        .border(BorderStroke(StandardBorderWidth, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.3f)), InputShape)
                         .padding(14.dp)
                 ) {
                     Text(

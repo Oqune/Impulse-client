@@ -237,7 +237,7 @@ fun HomeScreen(
                                 modifier = Modifier.padding(top = 2.dp)
                             ) {
                                 Surface(
-                                    shape = RoundedCornerShape(4.dp),
+                                    shape = MicroShape,
                                     color = MaterialTheme.colorScheme.primary.copy(alpha = 0.12f)
                                 ) {
                                     Text(
@@ -362,7 +362,9 @@ fun HomeScreen(
                 modifier = Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.spacedBy(10.dp),
             ) {
-                OutlinedButton(
+                ImpulseButton(
+                    text = stringResource(R.string.home_connect_all),
+                    icon = Icons.Default.Link,
                     onClick = {
                         runCatching {
                             haptic.performHapticFeedback(androidx.compose.ui.hapticfeedback.HapticFeedbackType.TextHandleMove)
@@ -375,35 +377,17 @@ fun HomeScreen(
                         }
                     },
                     modifier = Modifier.weight(1f),
-                    shape = ButtonShape,
-                    colors = ButtonDefaults.outlinedButtonColors(
-                        containerColor = MaterialTheme.colorScheme.primary.copy(alpha = 0.08f),
-                        contentColor = MaterialTheme.colorScheme.primary,
-                    ),
-                    border = BorderStroke(1.dp, MaterialTheme.colorScheme.primary.copy(alpha = 0.4f)),
-                ) {
-                    Icon(Icons.Default.Link, contentDescription = null, modifier = Modifier.size(16.dp))
-                    Spacer(Modifier.width(6.dp))
-                    Text(stringResource(R.string.home_connect_all), style = MaterialTheme.typography.labelMedium)
-                }
-                OutlinedButton(
+                )
+                ImpulseDestructiveButton(
+                    text = stringResource(R.string.home_disconnect_all),
+                    icon = Icons.Default.LinkOff,
                     onClick = {
                         visibleServers.forEach { server ->
                             connectionManager.disconnect(server.id)
                         }
                     },
                     modifier = Modifier.weight(1f),
-                    shape = ButtonShape,
-                    colors = ButtonDefaults.outlinedButtonColors(
-                        containerColor = MaterialTheme.colorScheme.error.copy(alpha = 0.08f),
-                        contentColor = MaterialTheme.colorScheme.error,
-                    ),
-                    border = BorderStroke(1.dp, MaterialTheme.colorScheme.error.copy(alpha = 0.4f)),
-                ) {
-                    Icon(Icons.Default.LinkOff, contentDescription = null, modifier = Modifier.size(16.dp))
-                    Spacer(Modifier.width(6.dp))
-                    Text(stringResource(R.string.home_disconnect_all), style = MaterialTheme.typography.labelMedium)
-                }
+                )
             }
 
             // ── Tech showcase ──
@@ -432,11 +416,11 @@ fun HomeScreen(
                     techs.forEach { (name, desc) ->
                         Surface(
                             modifier = Modifier.padding(horizontal = 3.dp),
-                            shape = RoundedCornerShape(8.dp),
-                            color = MaterialTheme.colorScheme.primary.copy(alpha = 0.07f),
-                            border = androidx.compose.foundation.BorderStroke(
-                                0.5.dp,
-                                MaterialTheme.colorScheme.primary.copy(alpha = 0.12f),
+                            shape = ChipShape,
+                            color = MaterialTheme.colorScheme.primary.copy(alpha = 0.08f),
+                            border = BorderStroke(
+                                StandardBorderWidth,
+                                MaterialTheme.colorScheme.primary.copy(alpha = 0.20f),
                             ),
                         ) {
                             Column(

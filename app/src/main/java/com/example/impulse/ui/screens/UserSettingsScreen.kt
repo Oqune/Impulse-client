@@ -3,6 +3,7 @@ package com.example.impulse.ui.screens
 import android.widget.Toast
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
@@ -28,8 +29,7 @@ import androidx.compose.ui.unit.dp
 import com.example.impulse.R
 import com.example.impulse.security.SecureKeyManager
 import com.example.impulse.security.SecureStorage
-import com.example.impulse.ui.theme.ImpulseCard
-import com.example.impulse.ui.theme.ImpulseSection
+import com.example.impulse.ui.theme.*
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
@@ -61,12 +61,12 @@ fun UserSettingsContent(
 
     // Import state
     var showImportDialog by remember { mutableStateOf(false) }
+    var importUri by remember { mutableStateOf<android.net.Uri?>(null) }
     var importPassword by remember { mutableStateOf("") }
     var isImporting by remember { mutableStateOf(false) }
-    var importUri by remember { mutableStateOf<android.net.Uri?>(null) }
 
     val exportLauncher = rememberLauncherForActivityResult(
-        contract = ActivityResultContracts.CreateDocument("application/octet-stream")
+        ActivityResultContracts.CreateDocument("application/octet-stream")
     ) { uri ->
         if (uri != null) {
             isExporting = true
@@ -87,11 +87,10 @@ fun UserSettingsContent(
     }
 
     val importLauncher = rememberLauncherForActivityResult(
-        contract = ActivityResultContracts.OpenDocument()
+        ActivityResultContracts.OpenDocument()
     ) { uri ->
         if (uri != null) {
             importUri = uri
-            importPassword = ""
             showImportDialog = true
         }
     }
@@ -105,10 +104,11 @@ fun UserSettingsContent(
         // ── Profile card ──────────────────────────────────────────────
         Card(
             modifier = Modifier.fillMaxWidth(),
-            shape = RoundedCornerShape(20.dp),
+            shape = CardShape,
             colors = CardDefaults.cardColors(
                 containerColor = MaterialTheme.colorScheme.primaryContainer
             ),
+            border = standardCardBorder(),
             elevation = CardDefaults.cardElevation(defaultElevation = 0.dp),
         ) {
             Row(
@@ -147,6 +147,7 @@ fun UserSettingsContent(
                         color = MaterialTheme.colorScheme.onPrimaryContainer
                     )
                     if (pubKeyHash.isNotEmpty()) {
+                        Spacer(Modifier.height(4.dp))
                         Text(
                             text = pubKeyHash,
                             style = MaterialTheme.typography.labelSmall,
@@ -161,10 +162,12 @@ fun UserSettingsContent(
         // ── Name card ──────────────────────────────────────────────
         Card(
             modifier = Modifier.fillMaxWidth(),
-            shape = RoundedCornerShape(16.dp),
+            shape = CardShape,
             colors = CardDefaults.cardColors(
                 containerColor = MaterialTheme.colorScheme.surfaceContainer
-            )
+            ),
+            border = standardCardBorder(),
+            elevation = CardDefaults.cardElevation(defaultElevation = 0.dp),
         ) {
             Column(
                 modifier = Modifier
@@ -202,7 +205,7 @@ fun UserSettingsContent(
                         showNameDialog = true
                     },
                     modifier = Modifier.fillMaxWidth(),
-                    shape = RoundedCornerShape(12.dp)
+                    shape = ButtonShape
                 ) {
                     Icon(Icons.Default.Edit, contentDescription = null)
                     Spacer(Modifier.width(8.dp))
@@ -224,7 +227,7 @@ fun UserSettingsContent(
                     onClick = { exportLauncher.launch("key_backup.enc") },
                     enabled = !isExporting,
                     modifier = Modifier.fillMaxWidth(),
-                    shape = RoundedCornerShape(12.dp),
+                    shape = ButtonShape,
                 ) {
                     if (isExporting) {
                         CircularProgressIndicator(
@@ -243,7 +246,8 @@ fun UserSettingsContent(
                     onClick = { importLauncher.launch(arrayOf("application/octet-stream")) },
                     enabled = !isImporting,
                     modifier = Modifier.fillMaxWidth(),
-                    shape = RoundedCornerShape(12.dp),
+                    shape = ButtonShape,
+                    border = BorderStroke(StandardBorderWidth, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.4f)),
                 ) {
                     if (isImporting) {
                         CircularProgressIndicator(
@@ -271,7 +275,8 @@ fun UserSettingsContent(
                 OutlinedButton(
                     onClick = { showResetKeysDialog = true },
                     modifier = Modifier.fillMaxWidth(),
-                    shape = RoundedCornerShape(12.dp),
+                    shape = ButtonShape,
+                    border = BorderStroke(StandardBorderWidth, MaterialTheme.colorScheme.error.copy(alpha = 0.4f)),
                     colors = ButtonDefaults.outlinedButtonColors(
                         contentColor = MaterialTheme.colorScheme.error
                     ),
@@ -316,7 +321,8 @@ fun UserSettingsContent(
                                 Text(nameError)
                             }
                         },
-                        singleLine = true
+                        singleLine = true,
+                        shape = InputShape
                     )
                 }
             },
@@ -404,7 +410,7 @@ fun UserSettingsContent(
                 showExportPasswordDialog = false
                 exportedPassword = null
             },
-            shape = RoundedCornerShape(16.dp),
+            shape = CardShape,
             icon = {
                 Icon(
                     Icons.Default.Warning,
@@ -426,8 +432,9 @@ fun UserSettingsContent(
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                     )
                     Surface(
-                        shape = RoundedCornerShape(10.dp),
+                        shape = InputShape,
                         color = MaterialTheme.colorScheme.surfaceContainerHighest,
+                        border = BorderStroke(StandardBorderWidth, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.4f)),
                         modifier = Modifier.fillMaxWidth(),
                     ) {
                         Text(
@@ -449,7 +456,7 @@ fun UserSettingsContent(
                             Toast.makeText(context, context.getString(R.string.backup_password_copied), Toast.LENGTH_SHORT).show()
                         },
                         modifier = Modifier.fillMaxWidth(),
-                        shape = RoundedCornerShape(10.dp),
+                        shape = ButtonShape,
                     ) {
                         Text(stringResource(R.string.backup_copy_password))
                     }
@@ -474,7 +481,7 @@ fun UserSettingsContent(
                 importUri = null
                 importPassword = ""
             },
-            shape = RoundedCornerShape(16.dp),
+            shape = CardShape,
             icon = {
                 Icon(
                     Icons.Default.FileDownload,
@@ -501,7 +508,7 @@ fun UserSettingsContent(
                         label = { Text(stringResource(R.string.backup_restore_password_label)) },
                         singleLine = true,
                         modifier = Modifier.fillMaxWidth(),
-                        shape = RoundedCornerShape(10.dp),
+                        shape = InputShape,
                     )
                     Text(
                         text = stringResource(R.string.backup_restore_warning),

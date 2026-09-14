@@ -8,6 +8,7 @@ import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Home
@@ -196,10 +197,10 @@ fun MainScreen() {
             contentAlignment = Alignment.Center
         ) {
             Surface(
-                shape = RoundedCornerShape(28.dp),
+                shape = CircleShape,
                 color = MaterialTheme.colorScheme.surface.copy(alpha = 0.92f),
                 border = BorderStroke(
-                    1.dp,
+                    StandardBorderWidth,
                     MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.30f)
                 ),
                 tonalElevation = 0.dp,
@@ -209,8 +210,8 @@ fun MainScreen() {
                 Row(
                     modifier = Modifier
                         .fillMaxWidth()
-                        .height(58.dp)
-                        .padding(horizontal = 12.dp, vertical = 4.dp),
+                        .height(60.dp)
+                        .padding(horizontal = 8.dp, vertical = 6.dp),
                     horizontalArrangement = Arrangement.SpaceAround,
                     verticalAlignment = Alignment.CenterVertically,
                 ) {
@@ -244,7 +245,7 @@ fun MainScreen() {
                             modifier = Modifier
                                 .weight(animWeight)
                                 .fillMaxHeight()
-                                .clip(RoundedCornerShape(20.dp))
+                                .clip(CircleShape)
                                 .background(MaterialTheme.colorScheme.primary.copy(alpha = animBgAlpha))
                                 .clickable {
                                     if (selectedItem != index) {
@@ -258,33 +259,14 @@ fun MainScreen() {
                                 },
                             contentAlignment = Alignment.Center,
                         ) {
-                            Column(
-                                horizontalAlignment = Alignment.CenterHorizontally,
-                                verticalArrangement = Arrangement.Center,
-                            ) {
-                                Icon(
-                                    icon,
-                                    contentDescription = label,
-                                    tint = if (isSelected) navSelectedColor else navUnselectedColor,
-                                    modifier = Modifier
-                                        .size(22.dp)
-                                        .scale(animIconScale),
-                                )
-                                Spacer(Modifier.height(3.dp))
-                                androidx.compose.animation.AnimatedVisibility(
-                                    visible = isSelected,
-                                    enter = fadeIn(tween(180)) + expandVertically(tween(180)),
-                                    exit = fadeOut(tween(140)) + shrinkVertically(tween(140)),
-                                ) {
-                                    Box(
-                                        modifier = Modifier
-                                            .width(16.dp)
-                                            .height(3.dp)
-                                            .clip(RoundedCornerShape(1.5.dp))
-                                            .background(MaterialTheme.colorScheme.primary)
-                                    )
-                                }
-                            }
+                            Icon(
+                                icon,
+                                contentDescription = label,
+                                tint = if (isSelected) navSelectedColor else navUnselectedColor,
+                                modifier = Modifier
+                                    .size(23.dp)
+                                    .scale(animIconScale),
+                            )
                         }
                     }
                 }

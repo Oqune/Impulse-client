@@ -21,8 +21,7 @@ import androidx.compose.ui.unit.dp
 import com.example.impulse.R
 import com.example.impulse.data.ServerConfig
 import com.example.impulse.transport.ConnectionState
-import com.example.impulse.ui.theme.CardShape
-import com.example.impulse.ui.theme.StatusDot
+import com.example.impulse.ui.theme.*
 
 /**
  * One server's conversation list: the group chat, the Saved/Favorites (self)
@@ -113,6 +112,7 @@ fun ChatConversationListScreen(
                             colors = CardDefaults.cardColors(
                                 containerColor = MaterialTheme.colorScheme.surfaceContainer
                             ),
+                            border = standardCardBorder(),
                             elevation = CardDefaults.cardElevation(defaultElevation = 0.dp)
                         ) {
                             Row(

@@ -11,6 +11,7 @@ import androidx.compose.ui.draw.scale
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.rememberLazyListState
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
@@ -104,10 +105,10 @@ fun ChatMessageItem(message: ChatMessage) {
                     .background(
                         color = getMessageBackgroundColor(messageType, isOwn, message.sender),
                         shape = RoundedCornerShape(
-                            topStart = 18.dp,
-                            topEnd = 18.dp,
-                            bottomStart = if (isOwn) 18.dp else 4.dp,
-                            bottomEnd = if (isOwn) 4.dp else 18.dp
+                            topStart = 16.dp,
+                            topEnd = 16.dp,
+                            bottomStart = if (isOwn) 16.dp else 4.dp,
+                            bottomEnd = if (isOwn) 4.dp else 16.dp
                         )
                     )
             ) {
@@ -129,7 +130,7 @@ fun ChatMessageItem(message: ChatMessage) {
                             )
                             if (message.senderFingerprint.isNotEmpty()) {
                                 Surface(
-                                    shape = RoundedCornerShape(4.dp),
+                                    shape = MicroShape,
                                     color = MaterialTheme.colorScheme.primary.copy(alpha = 0.12f)
                                 ) {
                                     Row(
@@ -202,7 +203,7 @@ fun FullWidthInfoMessage(message: ChatMessage) {
             modifier = Modifier
                 .background(
                     color = MaterialTheme.colorScheme.surfaceContainer,
-                    shape = RoundedCornerShape(12.dp)
+                    shape = ChipShape
                 )
                 .padding(horizontal = 16.dp, vertical = 8.dp)
         )
@@ -268,7 +269,7 @@ fun ConnectionStatusIndicator(connectionState: ConnectionState) {
                 modifier = Modifier
                     .background(
                         color = animatedBgColor,
-                        shape = RoundedCornerShape(12.dp)
+                        shape = ChipShape
                     )
                     .padding(horizontal = 16.dp, vertical = 6.dp)
             )
@@ -291,7 +292,7 @@ fun MessageInputArea(
         modifier = Modifier
             .fillMaxWidth()
             .padding(horizontal = 12.dp, vertical = 6.dp),
-        shape = RoundedCornerShape(26.dp),
+        shape = CircleShape,
         alpha = 0.85f,
     ) {
         Row(
@@ -367,6 +368,7 @@ fun MessageInputArea(
                 modifier = Modifier
                     .size(40.dp)
                     .scale(sendScale),
+                shape = CircleShape,
                 containerColor = sendBg,
                 contentColor = sendFg,
                 elevation = FloatingActionButtonDefaults.elevation(defaultElevation = 0.dp, pressedElevation = 0.dp)
@@ -399,6 +401,7 @@ fun BoxScope.ScrollToBottomButton(
         FloatingActionButton(
             onClick = onClick,
             modifier = Modifier.size(48.dp),
+            shape = CircleShape,
             containerColor = MaterialTheme.colorScheme.primary,
             contentColor = MaterialTheme.colorScheme.onPrimary,
             elevation = FloatingActionButtonDefaults.elevation(defaultElevation = 0.dp, pressedElevation = 0.dp)

@@ -239,6 +239,7 @@ private fun ServerListContent(
                 colors = CardDefaults.cardColors(
                     containerColor = MaterialTheme.colorScheme.surfaceContainer
                 ),
+                border = if (isConnected) standardActiveCardBorder() else standardCardBorder(),
                 elevation = CardDefaults.cardElevation(defaultElevation = 0.dp)
             ) {
                 Column {
@@ -436,8 +437,9 @@ private fun ServerExpandableSettings(
                 Text(stringResource(R.string.settings_certificates), style = MaterialTheme.typography.bodyMedium, modifier = Modifier.weight(1f))
                 if (!isCertTrusted) {
                     Surface(
-                        shape = RoundedCornerShape(6.dp),
+                        shape = ChipShape,
                         color = MaterialTheme.colorScheme.error.copy(alpha = 0.1f),
+                        border = BorderStroke(StandardBorderWidth, MaterialTheme.colorScheme.error.copy(alpha = 0.3f)),
                     ) {
                         Text(
                             stringResource(R.string.settings_cert_none),
@@ -461,7 +463,7 @@ private fun ServerExpandableSettings(
                     OutlinedButton(
                         onClick = { onScanQr(server) },
                         modifier = Modifier.fillMaxWidth(),
-                        shape = RoundedCornerShape(12.dp),
+                        shape = ButtonShape,
                     ) {
                         Icon(Icons.Default.QrCodeScanner, contentDescription = null, modifier = Modifier.size(16.dp))
                         Spacer(Modifier.width(6.dp))
@@ -594,7 +596,7 @@ private fun ServerExpandableSettings(
                                 }
                             },
                             modifier = Modifier.fillMaxWidth(),
-                            shape = RoundedCornerShape(12.dp)
+                            shape = ButtonShape
                         ) {
                             Icon(
                                 if (isConnected) Icons.Default.LinkOff else Icons.Default.Link,
@@ -673,7 +675,7 @@ private fun ServerExpandableSettings(
                             label = { Text(stringResource(R.string.settings_name)) },
                             singleLine = true,
                             modifier = Modifier.fillMaxWidth(),
-                            shape = RoundedCornerShape(12.dp),
+                            shape = InputShape,
                             textStyle = MaterialTheme.typography.bodyMedium,
                         )
                         OutlinedTextField(
@@ -682,7 +684,7 @@ private fun ServerExpandableSettings(
                             label = { Text(stringResource(R.string.settings_ip_domain)) },
                             singleLine = true,
                             modifier = Modifier.fillMaxWidth(),
-                            shape = RoundedCornerShape(12.dp),
+                            shape = InputShape,
                             textStyle = MaterialTheme.typography.bodyMedium,
                             isError = addressError,
                             supportingText = if (addressError) {{ Text(stringResource(R.string.settings_invalid_format)) }} else null,
@@ -693,7 +695,7 @@ private fun ServerExpandableSettings(
                             label = { Text(stringResource(R.string.settings_port)) },
                             singleLine = true,
                             modifier = Modifier.fillMaxWidth(),
-                            shape = RoundedCornerShape(12.dp),
+                            shape = InputShape,
                             textStyle = MaterialTheme.typography.bodyMedium,
                             isError = portError,
                             supportingText = if (portError) {{ Text(stringResource(R.string.settings_port_range)) }} else null,
@@ -704,7 +706,7 @@ private fun ServerExpandableSettings(
                             label = { Text(stringResource(R.string.settings_password_optional)) },
                             singleLine = true,
                             modifier = Modifier.fillMaxWidth(),
-                            shape = RoundedCornerShape(12.dp),
+                            shape = InputShape,
                             textStyle = MaterialTheme.typography.bodyMedium,
                             // Never show server passwords in plaintext (Bug: "password field is plaintext").
                             visualTransformation = if (editPassword.isEmpty()) {
@@ -731,7 +733,7 @@ private fun ServerExpandableSettings(
                                 }
                             },
                             modifier = Modifier.fillMaxWidth(),
-                            shape = RoundedCornerShape(12.dp)
+                            shape = ButtonShape
                         ) {
                             Text(stringResource(R.string.common_save))
                         }
@@ -841,7 +843,7 @@ private fun AddServerDialog(
                     label = { Text(stringResource(R.string.settings_name)) },
                     singleLine = true,
                     modifier = Modifier.fillMaxWidth(),
-                    shape = RoundedCornerShape(12.dp),
+                    shape = InputShape,
                 )
                 OutlinedTextField(
                     value = address,
@@ -849,7 +851,7 @@ private fun AddServerDialog(
                     label = { Text(stringResource(R.string.settings_ip_domain)) },
                     singleLine = true,
                     modifier = Modifier.fillMaxWidth(),
-                    shape = RoundedCornerShape(12.dp),
+                    shape = InputShape,
                     isError = addressError,
                     supportingText = if (addressError) {{ Text(stringResource(R.string.settings_invalid_format)) }} else null,
                 )
@@ -859,7 +861,7 @@ private fun AddServerDialog(
                     label = { Text(stringResource(R.string.settings_port)) },
                     singleLine = true,
                     modifier = Modifier.fillMaxWidth(),
-                    shape = RoundedCornerShape(12.dp),
+                    shape = InputShape,
                     isError = portError,
                     supportingText = if (portError) {{ Text(stringResource(R.string.settings_port_range)) }} else null,
                 )
@@ -869,7 +871,7 @@ private fun AddServerDialog(
                     label = { Text(stringResource(R.string.settings_password_optional)) },
                     singleLine = true,
                     modifier = Modifier.fillMaxWidth(),
-                    shape = RoundedCornerShape(12.dp),
+                    shape = InputShape,
                     visualTransformation = if (password.isEmpty()) {
                         VisualTransformation.None
                     } else {
