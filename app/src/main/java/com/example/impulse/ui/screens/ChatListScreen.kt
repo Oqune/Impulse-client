@@ -47,14 +47,18 @@ fun ChatListScreen(
         Column(
             modifier = Modifier
                 .fillMaxSize()
-                .padding(horizontal = 20.dp, vertical = 24.dp)
+                .windowInsetsPadding(WindowInsets.statusBars.union(WindowInsets.displayCutout))
+                .padding(horizontal = 20.dp, vertical = 16.dp)
         ) {
             Text(
                 text = stringResource(R.string.chat_list_title),
                 style = MaterialTheme.typography.headlineMedium,
                 fontWeight = FontWeight.Bold,
+                color = MaterialTheme.colorScheme.onBackground,
                 textAlign = TextAlign.Center,
-                modifier = Modifier.fillMaxWidth()
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(top = 10.dp, bottom = 4.dp)
             )
 
             Spacer(Modifier.height(16.dp))

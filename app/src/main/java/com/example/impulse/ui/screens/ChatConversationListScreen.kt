@@ -42,25 +42,28 @@ fun ChatConversationListScreen(
         Column(
             modifier = Modifier
                 .fillMaxSize()
-                .statusBarsPadding()
+                .windowInsetsPadding(WindowInsets.statusBars.union(WindowInsets.displayCutout))
+                .padding(top = 8.dp)
         ) {
             Row(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .padding(horizontal = 8.dp, vertical = 8.dp),
+                    .padding(horizontal = 8.dp, vertical = 6.dp),
                 verticalAlignment = Alignment.CenterVertically
             ) {
                 IconButton(onClick = onBack) {
                     Icon(
                         imageVector = Icons.AutoMirrored.Filled.ArrowBack,
-                        contentDescription = stringResource(R.string.common_back)
+                        contentDescription = stringResource(R.string.common_back),
+                        tint = MaterialTheme.colorScheme.onBackground
                     )
                 }
                 Column(modifier = Modifier.weight(1f)) {
                     Text(
                         text = server.name,
                         style = MaterialTheme.typography.titleMedium,
-                        fontWeight = FontWeight.Bold
+                        fontWeight = FontWeight.Bold,
+                        color = MaterialTheme.colorScheme.onBackground
                     )
                     Text(
                         text = server.ipAddress,

@@ -587,7 +587,8 @@ fun ChatScreen(
                     Surface(
                         modifier = Modifier
                             .fillMaxWidth()
-                            .statusBarsPadding(),
+                            .windowInsetsPadding(WindowInsets.statusBars.union(WindowInsets.displayCutout))
+                            .padding(top = 6.dp),
                         color = Color.Transparent,
                         contentColor = MaterialTheme.colorScheme.onSurface,
                         shadowElevation = 0.dp
@@ -595,7 +596,7 @@ fun ChatScreen(
                         Row(
                             modifier = Modifier
                                 .fillMaxWidth()
-                                .padding(horizontal = 8.dp, vertical = 8.dp),
+                                .padding(horizontal = 8.dp, vertical = 6.dp),
                             verticalAlignment = Alignment.CenterVertically
                         ) {
                             IconButton(onClick = { onBack() }) {

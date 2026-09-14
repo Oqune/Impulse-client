@@ -4,10 +4,12 @@ import android.app.Activity
 import android.graphics.drawable.ColorDrawable
 import android.os.Build
 import androidx.compose.foundation.isSystemInDarkTheme
+import androidx.compose.material3.LocalContentColor
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.dynamicDarkColorScheme
 import androidx.compose.material3.dynamicLightColorScheme
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.SideEffect
 import androidx.compose.runtime.remember
 import androidx.compose.ui.graphics.toArgb
@@ -68,6 +70,10 @@ fun ImpulseTheme(
         typography = getTypography(ThemeSettings.fontScale),
         shapes = ImpulseShapes,
     ) {
-        content()
+        CompositionLocalProvider(
+            LocalContentColor provides colorScheme.onBackground
+        ) {
+            content()
+        }
     }
 }

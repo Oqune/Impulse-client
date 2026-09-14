@@ -3,6 +3,7 @@ package com.example.impulse.ui.theme
 import androidx.compose.material3.darkColorScheme
 import androidx.compose.material3.lightColorScheme
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.luminance
 
 enum class ThemePreset(
     val displayName: String,
@@ -118,75 +119,90 @@ private fun dark(
     secondary: Color = primary.copy(alpha = 0.75f),
     tertiary: Color = primary.copy(alpha = 0.6f),
     error: Color = Color(0xFFEF9A9A),
-) = ColorSchemeColors(
-    primary = primary, onPrimary = bg,
-    primaryContainer = primary.copy(alpha = 0.18f), onPrimaryContainer = primary.copy(alpha = 0.9f),
-    secondary = secondary, onSecondary = bg,
-    secondaryContainer = secondary.copy(alpha = 0.15f), onSecondaryContainer = secondary.copy(alpha = 0.85f),
-    tertiary = tertiary, onTertiary = bg,
-    tertiaryContainer = tertiary.copy(alpha = 0.12f), onTertiaryContainer = tertiary.copy(alpha = 0.8f),
-    error = error, onError = Color(0xFF3D0000),
-    errorContainer = Color(0xFF6B1A1A), onErrorContainer = Color(0xFFFFCDD2),
-    background = bg, onBackground = primary.copy(alpha = 0.88f),
-    surface = bg.lighten(0.02f), onSurface = primary.copy(alpha = 0.88f),
-    surfaceVariant = bg.lighten(0.06f), onSurfaceVariant = primary.copy(alpha = 0.55f),
-    surfaceContainer = bg.lighten(0.04f), surfaceContainerHigh = bg.lighten(0.07f),
-    surfaceContainerHighest = bg.lighten(0.10f),
-    outline = primary.copy(alpha = 0.28f), outlineVariant = primary.copy(alpha = 0.12f),
-    scrim = Color.Black,
-    inverseSurface = primary.copy(alpha = 0.88f), inverseOnSurface = bg,
-    inversePrimary = primary.copy(alpha = 0.7f),
-)
+): ColorSchemeColors {
+    val onPrimaryColor = if (primary.luminance() > 0.60f) Color(0xFF121212) else Color.White
+    val onSecondaryColor = if (secondary.luminance() > 0.60f) Color(0xFF121212) else Color.White
+    val onTertiaryColor = if (tertiary.luminance() > 0.60f) Color(0xFF121212) else Color.White
+    return ColorSchemeColors(
+        primary = primary, onPrimary = onPrimaryColor,
+        primaryContainer = primary.copy(alpha = 0.18f), onPrimaryContainer = Color.White,
+        secondary = secondary, onSecondary = onSecondaryColor,
+        secondaryContainer = secondary.copy(alpha = 0.15f), onSecondaryContainer = Color.White,
+        tertiary = tertiary, onTertiary = onTertiaryColor,
+        tertiaryContainer = tertiary.copy(alpha = 0.12f), onTertiaryContainer = Color.White,
+        error = error, onError = Color.White,
+        errorContainer = Color(0xFF6B1A1A), onErrorContainer = Color(0xFFFFCDD2),
+        background = bg, onBackground = Color(0xFFE8E8ED),
+        surface = bg.lighten(0.04f), onSurface = Color(0xFFE8E8ED),
+        surfaceVariant = bg.lighten(0.08f), onSurfaceVariant = Color(0xFFA2A2AC),
+        surfaceContainer = bg.lighten(0.05f), surfaceContainerHigh = bg.lighten(0.09f),
+        surfaceContainerHighest = bg.lighten(0.13f),
+        outline = primary.copy(alpha = 0.35f), outlineVariant = Color(0xFF2E2E36),
+        scrim = Color.Black,
+        inverseSurface = Color(0xFFE8E8ED), inverseOnSurface = Color(0xFF121215),
+        inversePrimary = primary.copy(alpha = 0.7f),
+    )
+}
 
 private fun oled(
     primary: Color,
     secondary: Color = primary.copy(alpha = 0.75f),
     tertiary: Color = primary.copy(alpha = 0.6f),
     error: Color = Color(0xFFEF9A9A),
-) = ColorSchemeColors(
-    primary = primary, onPrimary = Color.Black,
-    primaryContainer = primary.copy(alpha = 0.14f), onPrimaryContainer = primary.copy(alpha = 0.9f),
-    secondary = secondary, onSecondary = Color.Black,
-    secondaryContainer = secondary.copy(alpha = 0.12f), onSecondaryContainer = secondary.copy(alpha = 0.85f),
-    tertiary = tertiary, onTertiary = Color.Black,
-    tertiaryContainer = tertiary.copy(alpha = 0.10f), onTertiaryContainer = primary.copy(alpha = 0.8f),
-    error = error, onError = Color(0xFF3D0000),
-    errorContainer = Color(0xFF5C1515), onErrorContainer = Color(0xFFFFCDD2),
-    background = Color.Black, onSurface = Color(0xFFE2E2E2),
-    surface = Color.Black, onBackground = Color(0xFFE2E2E2),
-    surfaceVariant = Color(0xFF080808), onSurfaceVariant = Color(0xFF949494),
-    surfaceContainer = Color(0xFF050505), surfaceContainerHigh = Color(0xFF0D0D0D),
-    surfaceContainerHighest = Color(0xFF151515),
-    outline = primary.copy(alpha = 0.20f), outlineVariant = Color(0xFF1E1E20),
-    scrim = Color.Black,
-    inverseSurface = primary.copy(alpha = 0.82f), inverseOnSurface = Color.Black,
-    inversePrimary = primary.copy(alpha = 0.65f),
-)
+): ColorSchemeColors {
+    val onPrimaryColor = if (primary.luminance() > 0.60f) Color(0xFF121212) else Color.White
+    val onSecondaryColor = if (secondary.luminance() > 0.60f) Color(0xFF121212) else Color.White
+    val onTertiaryColor = if (tertiary.luminance() > 0.60f) Color(0xFF121212) else Color.White
+    return ColorSchemeColors(
+        primary = primary, onPrimary = onPrimaryColor,
+        primaryContainer = primary.copy(alpha = 0.16f), onPrimaryContainer = Color.White,
+        secondary = secondary, onSecondary = onSecondaryColor,
+        secondaryContainer = secondary.copy(alpha = 0.14f), onSecondaryContainer = Color.White,
+        tertiary = tertiary, onTertiary = onTertiaryColor,
+        tertiaryContainer = tertiary.copy(alpha = 0.12f), onTertiaryContainer = Color.White,
+        error = error, onError = Color.White,
+        errorContainer = Color(0xFF5C1515), onErrorContainer = Color(0xFFFFCDD2),
+        background = Color.Black, onSurface = Color(0xFFE8E8ED),
+        surface = Color.Black, onBackground = Color(0xFFE8E8ED),
+        surfaceVariant = Color(0xFF121214), onSurfaceVariant = Color(0xFFA2A2AC),
+        surfaceContainer = Color(0xFF0A0A0C), surfaceContainerHigh = Color(0xFF141418),
+        surfaceContainerHighest = Color(0xFF1C1C22),
+        outline = primary.copy(alpha = 0.30f), outlineVariant = Color(0xFF282830),
+        scrim = Color.Black,
+        inverseSurface = Color(0xFFE8E8ED), inverseOnSurface = Color(0xFF121214),
+        inversePrimary = primary.copy(alpha = 0.65f),
+    )
+}
 
 private fun ultraContrast(
     primary: Color,
     secondary: Color = primary.copy(alpha = 0.85f),
     tertiary: Color = primary.copy(alpha = 0.70f),
     error: Color = Color(0xFFFF8A80),
-) = ColorSchemeColors(
-    primary = primary, onPrimary = Color.Black,
-    primaryContainer = primary.copy(alpha = 0.28f), onPrimaryContainer = Color.White,
-    secondary = secondary, onSecondary = Color.Black,
-    secondaryContainer = secondary.copy(alpha = 0.22f), onSecondaryContainer = Color.White,
-    tertiary = tertiary, onTertiary = Color.Black,
-    tertiaryContainer = tertiary.copy(alpha = 0.18f), onTertiaryContainer = Color.White,
-    error = error, onError = Color.Black,
-    errorContainer = Color(0xFF8B0000), onErrorContainer = Color.White,
-    background = Color.Black, onBackground = Color.White,
-    surface = Color(0xFF101014), onSurface = Color.White,
-    surfaceVariant = Color(0xFF18181F), onSurfaceVariant = Color(0xFFF2F2F7),
-    surfaceContainer = Color(0xFF16161C), surfaceContainerHigh = Color(0xFF22222A),
-    surfaceContainerHighest = Color(0xFF30303A),
-    outline = Color(0xFF8E8E93), outlineVariant = Color(0xFF636366),
-    scrim = Color.Black,
-    inverseSurface = Color.White, inverseOnSurface = Color.Black,
-    inversePrimary = primary,
-)
+): ColorSchemeColors {
+    val onPrimaryColor = if (primary.luminance() > 0.60f) Color.Black else Color.White
+    val onSecondaryColor = if (secondary.luminance() > 0.60f) Color.Black else Color.White
+    val onTertiaryColor = if (tertiary.luminance() > 0.60f) Color.Black else Color.White
+    return ColorSchemeColors(
+        primary = primary, onPrimary = onPrimaryColor,
+        primaryContainer = primary.copy(alpha = 0.28f), onPrimaryContainer = Color.White,
+        secondary = secondary, onSecondary = onSecondaryColor,
+        secondaryContainer = secondary.copy(alpha = 0.22f), onSecondaryContainer = Color.White,
+        tertiary = tertiary, onTertiary = onTertiaryColor,
+        tertiaryContainer = tertiary.copy(alpha = 0.18f), onTertiaryContainer = Color.White,
+        error = error, onError = Color.White,
+        errorContainer = Color(0xFF8B0000), onErrorContainer = Color.White,
+        background = Color.Black, onBackground = Color.White,
+        surface = Color(0xFF101014), onSurface = Color.White,
+        surfaceVariant = Color(0xFF18181F), onSurfaceVariant = Color(0xFFF2F2F7),
+        surfaceContainer = Color(0xFF16161C), surfaceContainerHigh = Color(0xFF22222A),
+        surfaceContainerHighest = Color(0xFF30303A),
+        outline = Color(0xFF8E8E93), outlineVariant = Color(0xFF636366),
+        scrim = Color.Black,
+        inverseSurface = Color.White, inverseOnSurface = Color.Black,
+        inversePrimary = primary,
+    )
+}
 
 private fun Color.lighten(fraction: Float): Color {
     val r = red + (1f - red) * fraction

@@ -105,15 +105,16 @@ fun HomeScreen(
         Column(
             modifier = Modifier
                 .fillMaxSize()
+                .windowInsetsPadding(WindowInsets.statusBars.union(WindowInsets.displayCutout))
                 .verticalScroll(scrollState)
-                .padding(start = 20.dp, end = 20.dp, top = 20.dp, bottom = 88.dp),
+                .padding(start = 20.dp, end = 20.dp, top = 16.dp, bottom = 88.dp),
             verticalArrangement = Arrangement.spacedBy(16.dp),
             horizontalAlignment = Alignment.CenterHorizontally,
         ) {
             // ── Header (Kinetic Title with per-letter electric jitter & chrome shimmer sweep) ──
             Column(
                 horizontalAlignment = Alignment.CenterHorizontally,
-                modifier = Modifier.padding(top = 16.dp, bottom = 4.dp)
+                modifier = Modifier.padding(top = 12.dp, bottom = 4.dp)
             ) {
                 val titleText = stringResource(R.string.app_name)
                 val density = LocalDensity.current.density
@@ -225,6 +226,7 @@ fun HomeScreen(
                             text = clientName,
                             style = MaterialTheme.typography.titleMedium,
                             fontWeight = FontWeight.SemiBold,
+                            color = MaterialTheme.colorScheme.onSurface,
                             maxLines = 1,
                             overflow = TextOverflow.Ellipsis,
                         )

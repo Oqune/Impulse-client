@@ -544,7 +544,11 @@ private fun ServerExpandableSettings(
                 )
                 Spacer(Modifier.width(10.dp))
                 Column(modifier = Modifier.weight(1f)) {
-                    Text(stringResource(R.string.settings_conn_and_display), style = MaterialTheme.typography.bodyMedium)
+                    Text(
+                        text = stringResource(R.string.settings_conn_and_display),
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = MaterialTheme.colorScheme.onSurface
+                    )
                     Text(
                         when {
                             connectionState == ConnectionState.READY -> stringResource(R.string.settings_conn_status_connected)
@@ -781,6 +785,7 @@ private fun SettingsMainContent(
                 text = stringResource(R.string.settings_title),
                 style = MaterialTheme.typography.headlineMedium,
                 fontWeight = FontWeight.Bold,
+                color = MaterialTheme.colorScheme.onBackground,
                 textAlign = androidx.compose.ui.text.style.TextAlign.Center,
                 modifier = Modifier.fillMaxWidth()
             )
