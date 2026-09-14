@@ -1,9 +1,13 @@
 package com.example.impulse.ui.screens
 
 import androidx.activity.compose.BackHandler
+import androidx.compose.animation.AnimatedContent
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.expandVertically
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
 import androidx.compose.animation.shrinkVertically
+import androidx.compose.animation.togetherWith
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
@@ -106,58 +110,73 @@ fun SettingsScreen(
                 )
             }
         ) { padding ->
-            when (currentSection) {
-                SettingsSection.MAIN -> {
-                    SettingsMainContent(
-                        modifier = Modifier
-                            .fillMaxSize()
-                            .padding(padding),
-                        onNavigateToServer = { currentSection = SettingsSection.SERVER },
-                        onNavigateToUser = { currentSection = SettingsSection.USER },
-                        onNavigateToApp = { currentSection = SettingsSection.APP },
-                    )
-                }
-                SettingsSection.SERVER -> {
-                    DecorativeBackground(
-                        modifier = Modifier
-                            .fillMaxSize()
-                            .padding(padding),
-                    ) {
-                    ServerListContent(
-                        modifier = Modifier.fillMaxSize(),
-                        availableServers = availableServers,
-                        clientName = clientName,
-                        connectionManager = connectionManager,
-                        onVisibilityChanged = onVisibilityChanged,
-                        certRefreshTrigger = certRefreshTrigger,
-                        onServerDeleted = onServerDeleted,
-                        onScanQr = onScanQr,
-                        onServerUpdated = onServerUpdated,
-                    )
+            val reduceMotion = com.example.impulse.util.isReduceMotionEnabled(context)
+            androidx.compose.animation.AnimatedContent(
+                targetState = currentSection,
+                transitionSpec = {
+                    if (reduceMotion) {
+                        androidx.compose.animation.fadeIn(androidx.compose.animation.core.tween(180)) togetherWith
+                            androidx.compose.animation.fadeOut(androidx.compose.animation.core.tween(140))
+                    } else {
+                        val isForward = initialState == SettingsSection.MAIN
+                        subpageSlideTransition(forward = isForward)
                     }
-                }
-                SettingsSection.USER -> {
-                    DecorativeBackground(
-                        modifier = Modifier
-                            .fillMaxSize()
-                            .padding(padding),
-                    ) {
-                    UserSettingsContent(
-                        modifier = Modifier.fillMaxSize(),
-                        clientName = clientName,
-                        onClientNameChange = onClientNameChange
-                    )
+                },
+                label = "settings_subpage_anim"
+            ) { section ->
+                when (section) {
+                    SettingsSection.MAIN -> {
+                        SettingsMainContent(
+                            modifier = Modifier
+                                .fillMaxSize()
+                                .padding(padding),
+                            onNavigateToServer = { currentSection = SettingsSection.SERVER },
+                            onNavigateToUser = { currentSection = SettingsSection.USER },
+                            onNavigateToApp = { currentSection = SettingsSection.APP },
+                        )
                     }
-                }
-                SettingsSection.APP -> {
-                    DecorativeBackground(
-                        modifier = Modifier
-                            .fillMaxSize()
-                            .padding(padding),
-                    ) {
-                    AppSettingsContent(
-                        modifier = Modifier.fillMaxSize(),
-                    )
+                    SettingsSection.SERVER -> {
+                        DecorativeBackground(
+                            modifier = Modifier
+                                .fillMaxSize()
+                                .padding(padding),
+                        ) {
+                            ServerListContent(
+                                modifier = Modifier.fillMaxSize(),
+                                availableServers = availableServers,
+                                clientName = clientName,
+                                connectionManager = connectionManager,
+                                onVisibilityChanged = onVisibilityChanged,
+                                certRefreshTrigger = certRefreshTrigger,
+                                onServerDeleted = onServerDeleted,
+                                onScanQr = onScanQr,
+                                onServerUpdated = onServerUpdated,
+                            )
+                        }
+                    }
+                    SettingsSection.USER -> {
+                        DecorativeBackground(
+                            modifier = Modifier
+                                .fillMaxSize()
+                                .padding(padding),
+                        ) {
+                            UserSettingsContent(
+                                modifier = Modifier.fillMaxSize(),
+                                clientName = clientName,
+                                onClientNameChange = onClientNameChange
+                            )
+                        }
+                    }
+                    SettingsSection.APP -> {
+                        DecorativeBackground(
+                            modifier = Modifier
+                                .fillMaxSize()
+                                .padding(padding),
+                        ) {
+                            AppSettingsContent(
+                                modifier = Modifier.fillMaxSize(),
+                            )
+                        }
                     }
                 }
             }
@@ -199,7 +218,7 @@ private fun ServerListContent(
     LazyColumn(
         modifier = modifier.padding(horizontal = 16.dp),
         verticalArrangement = Arrangement.spacedBy(8.dp),
-        contentPadding = PaddingValues(vertical = 12.dp)
+        contentPadding = PaddingValues(top = 12.dp, bottom = 88.dp)
     ) {
         items(availableServers, key = { it.id }) { server ->
             val status = serverStates[server.id]
@@ -210,6 +229,9 @@ private fun ServerListContent(
             )
             val hasError = status?.state == ConnectionState.ERROR
             val isExpanded = expandedServerId == server.id
+            var isVisible by remember(server.id) {
+                mutableStateOf(serverPreferences.isServerVisible(server.id))
+            }
 
             Card(
                 modifier = Modifier.fillMaxWidth(),
@@ -220,14 +242,14 @@ private fun ServerListContent(
                 elevation = CardDefaults.cardElevation(defaultElevation = 0.dp)
             ) {
                 Column {
-                    // Server header — tap to expand
+                    // Server header — tap to expand, with quick actions
                     Row(
                         modifier = Modifier
                             .fillMaxWidth()
                             .clickable {
                                 expandedServerId = if (isExpanded) null else server.id
                             }
-                            .padding(16.dp),
+                            .padding(horizontal = 16.dp, vertical = 12.dp),
                         verticalAlignment = Alignment.CenterVertically
                     ) {
                         StatusDot(
@@ -257,11 +279,59 @@ private fun ServerListContent(
                             )
                         }
 
+                        // One-tap connect / disconnect
+                        IconButton(
+                            onClick = {
+                                if (isConnected || isConnecting) {
+                                    connectionManager?.disconnect(server.id)
+                                } else {
+                                    val nameToUse = clientName.ifBlank {
+                                        connectionManager?.getController(server)?.clientName?.ifBlank {
+                                            serverPreferences.getClientName().ifBlank {
+                                                com.example.impulse.util.NameGenerator.generate()
+                                            }
+                                        } ?: serverPreferences.getClientName().ifBlank {
+                                            com.example.impulse.util.NameGenerator.generate()
+                                        }
+                                    }
+                                    connectionManager?.connect(server, nameToUse)
+                                }
+                            },
+                            modifier = Modifier.size(36.dp)
+                        ) {
+                            Icon(
+                                imageVector = if (isConnected || isConnecting) Icons.Default.LinkOff else Icons.Default.Link,
+                                contentDescription = if (isConnected || isConnecting) stringResource(R.string.chat_disconnect) else stringResource(R.string.chat_connect),
+                                tint = if (isConnected || isConnecting) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.primary,
+                                modifier = Modifier.size(20.dp)
+                            )
+                        }
+
+                        // Immediate visibility toggle in chats
+                        IconButton(
+                            onClick = {
+                                val next = !isVisible
+                                isVisible = next
+                                serverPreferences.setServerVisible(server.id, next)
+                                onVisibilityChanged()
+                            },
+                            modifier = Modifier.size(36.dp)
+                        ) {
+                            Icon(
+                                imageVector = if (isVisible) Icons.Default.Visibility else Icons.Default.VisibilityOff,
+                                contentDescription = stringResource(R.string.settings_show_in_chats),
+                                tint = if (isVisible) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.outline,
+                                modifier = Modifier.size(20.dp)
+                            )
+                        }
+
+                        Spacer(Modifier.width(4.dp))
+
                         Icon(
                             if (isExpanded) Icons.Default.KeyboardArrowUp else Icons.Default.KeyboardArrowDown,
                             contentDescription = null,
                             tint = MaterialTheme.colorScheme.onSurfaceVariant,
-                            modifier = Modifier.size(18.dp)
+                            modifier = Modifier.size(20.dp)
                         )
                     }
 
@@ -276,7 +346,11 @@ private fun ServerListContent(
                             clientName = clientName,
                             connectionManager = connectionManager,
                             serverPreferences = serverPreferences,
-                            onVisibilityChanged = onVisibilityChanged,
+                            isServerVisible = isVisible,
+                            onVisibilityChanged = {
+                                isVisible = serverPreferences.isServerVisible(server.id)
+                                onVisibilityChanged()
+                            },
                             certRefreshTrigger = certRefreshTrigger,
                             onServerDeleted = onServerDeleted,
                             onScanQr = onScanQr,
@@ -296,6 +370,7 @@ private fun ServerExpandableSettings(
     clientName: String = "",
     connectionManager: ConnectionManager?,
     serverPreferences: ServerPreferences,
+    isServerVisible: Boolean,
     onVisibilityChanged: () -> Unit,
     certRefreshTrigger: Int = 0,
     onServerDeleted: (ServerConfig) -> Unit,
@@ -312,9 +387,6 @@ private fun ServerExpandableSettings(
     }
     var autoReconnect by remember(server.id) {
         mutableStateOf(serverPreferences.getServerAutoReconnect(server.id))
-    }
-    var isServerVisible by remember(server.id) {
-        mutableStateOf(serverPreferences.isServerVisible(server.id))
     }
 
     val isCustom = !server.id.startsWith("prod_") && !server.id.startsWith("local_")
@@ -556,7 +628,6 @@ private fun ServerExpandableSettings(
                         description = stringResource(R.string.settings_show_in_chats_desc),
                         checked = isServerVisible,
                         onCheckedChange = { enabled ->
-                            isServerVisible = enabled
                             serverPreferences.setServerVisible(server.id, enabled)
                             onVisibilityChanged()
                         }
@@ -700,7 +771,7 @@ private fun SettingsMainContent(
         Column(
             modifier = Modifier
                 .fillMaxWidth()
-                .padding(horizontal = 20.dp, vertical = 24.dp)
+                .padding(start = 20.dp, end = 20.dp, top = 24.dp, bottom = 88.dp)
                 .verticalScroll(rememberScrollState()),
             horizontalAlignment = Alignment.CenterHorizontally,
             verticalArrangement = Arrangement.spacedBy(14.dp)
@@ -716,18 +787,21 @@ private fun SettingsMainContent(
 
             ImpulseMenuCard(
                 title = stringResource(R.string.settings_servers),
+                subtitle = "LAN relays, latency, TLS certs",
                 icon = Icons.Default.Build,
                 onClick = onNavigateToServer
             )
 
             ImpulseMenuCard(
                 title = stringResource(R.string.settings_user),
+                subtitle = "Cryptographic passport, keys, export",
                 icon = Icons.Default.Person,
                 onClick = onNavigateToUser
             )
 
             ImpulseMenuCard(
                 title = stringResource(R.string.settings_app),
+                subtitle = "Theme, OLED, biometrics, language",
                 icon = Icons.Default.Settings,
                 onClick = onNavigateToApp
             )

@@ -17,7 +17,9 @@ import androidx.compose.runtime.getValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.graphics.luminance
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.unit.dp
 import com.example.impulse.util.isReduceMotionEnabled
 
 /**
@@ -54,8 +56,8 @@ fun DecorativeBackground(
             label = "drift"
         )
         val p by transition.animateFloat(
-            initialValue = 0.20f,
-            targetValue = 0.35f,
+            initialValue = 0.18f,
+            targetValue = 0.32f,
             animationSpec = infiniteRepeatable(
                 animation = tween(4000, easing = FastOutSlowInEasing),
                 repeatMode = RepeatMode.Reverse
@@ -64,15 +66,20 @@ fun DecorativeBackground(
         )
         d to p
     } else {
-        0f to 0.25f
+        0f to 0.22f
     }
 
     Box(modifier = modifier) {
         Canvas(modifier = Modifier.fillMaxSize()) {
             drawRect(color = backgroundColor)
 
-            val gridSpacing = 40f
+            val gridSpacing = 28.dp.toPx()
             val scrolledOffset = drift * gridSpacing
+            val normalRadius = 1.0.dp.toPx()
+            val accentRadius = 1.6.dp.toPx()
+
+            val isDark = backgroundColor.luminance() < 0.5f
+            val baseDotAlpha = if (isDark) 0.18f else 0.12f
 
             for (x in 0..(size.width / gridSpacing).toInt()) {
                 for (y in 0..(size.height / gridSpacing).toInt()) {
@@ -81,8 +88,8 @@ fun DecorativeBackground(
                     if (px <= size.width) {
                         val isAccent = x % 4 == 0 && y % 4 == 0
                         drawCircle(
-                            color = if (isAccent) accentColor.copy(alpha = pulse) else gridColor.copy(alpha = 0.20f),
-                            radius = if (isAccent) 2.8f else 1.8f,
+                            color = if (isAccent) accentColor.copy(alpha = pulse) else gridColor.copy(alpha = baseDotAlpha),
+                            radius = if (isAccent) accentRadius else normalRadius,
                             center = Offset(px, py)
                         )
                     }

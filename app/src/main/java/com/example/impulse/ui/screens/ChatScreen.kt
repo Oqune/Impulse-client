@@ -7,6 +7,7 @@ import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.scale
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.rememberLazyListState
@@ -122,6 +123,9 @@ fun ChatMessageItem(message: ChatMessage) {
                                 style = MaterialTheme.typography.labelSmall,
                                 fontWeight = FontWeight.Medium,
                                 color = getSenderColor(messageType, isOwn, message.sender).copy(alpha = 0.85f),
+                                maxLines = 1,
+                                overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis,
+                                modifier = Modifier.weight(1f, fill = false),
                             )
                             if (message.senderFingerprint.isNotEmpty()) {
                                 Surface(
@@ -329,6 +333,16 @@ fun MessageInputArea(
                 )
             )
 
+            val haptic = androidx.compose.ui.platform.LocalHapticFeedback.current
+            val sendScale by androidx.compose.animation.core.animateFloatAsState(
+                targetValue = if (canSend) 1.05f else 0.92f,
+                animationSpec = androidx.compose.animation.core.spring(
+                    dampingRatio = androidx.compose.animation.core.Spring.DampingRatioMediumBouncy,
+                    stiffness = androidx.compose.animation.core.Spring.StiffnessMedium
+                ),
+                label = "send_scale"
+            )
+
             // Circular send button: primary when sendable, muted otherwise,
             // no shadow.
             val sendBg by animateColorAsState(
@@ -342,8 +356,17 @@ fun MessageInputArea(
                 label = "send_fg"
             )
             FloatingActionButton(
-                onClick = onSendClick,
-                modifier = Modifier.size(40.dp),
+                onClick = {
+                    if (canSend) {
+                        runCatching {
+                            haptic.performHapticFeedback(androidx.compose.ui.hapticfeedback.HapticFeedbackType.TextHandleMove)
+                        }
+                        onSendClick()
+                    }
+                },
+                modifier = Modifier
+                    .size(40.dp)
+                    .scale(sendScale),
                 containerColor = sendBg,
                 contentColor = sendFg,
                 elevation = FloatingActionButtonDefaults.elevation(defaultElevation = 0.dp, pressedElevation = 0.dp)
@@ -351,7 +374,7 @@ fun MessageInputArea(
                 Icon(
                     imageVector = Icons.AutoMirrored.Filled.Send,
                     contentDescription = stringResource(R.string.chat_send),
-                    modifier = Modifier.size(20.dp)
+                    modifier = Modifier.size(19.dp)
                 )
             }
         }
@@ -472,17 +495,6 @@ fun ChatScreen(
     // Display title for a DM: the peer's name once known, else a short id.
     var conversationTitle by remember { mutableStateOf<String?>(null) }
     val savedTitle = stringResource(R.string.chat_saved_title)
-    LaunchedEffect(conversationId) {
-        if (conversationId != "group") {
-            val fp = conversationId.removePrefix("dm:")
-            val own = chatController.ownFingerprint()
-            if (own.isNotEmpty() && fp == own) {
-                conversationTitle = savedTitle
-            } else {
-                conversationTitle = chatController.peerDisplayName(selectedServer.id, fp)
-            }
-        }
-    }
     // Key the ViewModel by server + conversation so DMs are isolated from the
     // group feed (Bug: "incoming DMs showed in the group chat").
     val viewModel: com.example.impulse.ui.ChatViewModel = viewModel(
@@ -505,6 +517,19 @@ fun ChatScreen(
                 timestampMillis = dm.timestamp,
                 messageType = MessageType.CONTENT
             )
+        }
+    }
+
+    val peerNamesMap by chatController.peerNames.collectAsState()
+    LaunchedEffect(conversationId, peerNamesMap, messages.size) {
+        if (conversationId != "group") {
+            val fp = conversationId.removePrefix("dm:")
+            val own = chatController.ownFingerprint()
+            if (own.isNotEmpty() && fp == own) {
+                conversationTitle = savedTitle
+            } else {
+                conversationTitle = chatController.peerDisplayName(selectedServer.id, fp)
+            }
         }
     }
 

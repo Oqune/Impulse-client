@@ -81,9 +81,11 @@ fun ChatListScreen(
                     )
                 }
             } else {
+                val haptic = androidx.compose.ui.platform.LocalHapticFeedback.current
                 LazyColumn(
                     modifier = Modifier.weight(1f),
-                    verticalArrangement = Arrangement.spacedBy(8.dp)
+                    contentPadding = PaddingValues(bottom = 88.dp),
+                    verticalArrangement = Arrangement.spacedBy(10.dp)
                 ) {
                     items(visibleServers, key = { it.id }) { server ->
                         val status = serverStates[server.id]
@@ -96,61 +98,82 @@ fun ChatListScreen(
                         )
                         val hasError = status?.state == ConnectionState.ERROR
 
-                        Card(
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .clickable { onServerSelected(server) },
-                            shape = CardShape,
-                            colors = CardDefaults.cardColors(
-                                containerColor = if (isConnected)
-                                    MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.3f)
-                                else
-                                    MaterialTheme.colorScheme.surfaceContainer
-                            ),
-                            elevation = CardDefaults.cardElevation(defaultElevation = 0.dp)
-                        ) {
-                            Row(
+                        Box(modifier = Modifier.animateItem()) {
+                            Card(
                                 modifier = Modifier
                                     .fillMaxWidth()
-                                    .padding(16.dp),
-                                verticalAlignment = Alignment.CenterVertically
-                            ) {
-                                StatusDot(
-                                    color = when {
-                                        isConnected -> MaterialTheme.colorScheme.primary
-                                        isConnecting -> MaterialTheme.colorScheme.tertiary
-                                        hasError -> MaterialTheme.colorScheme.error
-                                        else -> MaterialTheme.colorScheme.outline
+                                    .clickable {
+                                        runCatching {
+                                            haptic.performHapticFeedback(androidx.compose.ui.hapticfeedback.HapticFeedbackType.TextHandleMove)
+                                        }
+                                        onServerSelected(server)
                                     },
-                                    size = 10.dp,
-                                )
-
-                                Spacer(Modifier.width(12.dp))
-
-                                Column(modifier = Modifier.weight(1f)) {
-                                    Text(
-                                        text = server.name,
-                                        style = MaterialTheme.typography.bodyLarge,
-                                        fontWeight = FontWeight.Medium,
-                                        maxLines = 1,
-                                        overflow = TextOverflow.Ellipsis
+                                shape = CardShape,
+                                colors = CardDefaults.cardColors(
+                                    containerColor = if (isConnected)
+                                        MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.22f)
+                                    else
+                                        MaterialTheme.colorScheme.surfaceContainer
+                                ),
+                                border = if (isConnected) {
+                                    androidx.compose.foundation.BorderStroke(
+                                        0.5.dp,
+                                        MaterialTheme.colorScheme.primary.copy(alpha = 0.35f)
                                     )
-                                    Text(
-                                        text = server.ipAddress,
-                                        style = MaterialTheme.typography.bodySmall,
-                                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                                        maxLines = 1
+                                } else null,
+                                elevation = CardDefaults.cardElevation(defaultElevation = 0.dp)
+                            ) {
+                                Row(
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .padding(16.dp),
+                                    verticalAlignment = Alignment.CenterVertically
+                                ) {
+                                    StatusDot(
+                                        color = when {
+                                            isConnected -> MaterialTheme.colorScheme.primary
+                                            isConnecting -> MaterialTheme.colorScheme.tertiary
+                                            hasError -> MaterialTheme.colorScheme.error
+                                            else -> MaterialTheme.colorScheme.outline
+                                        },
+                                        size = 10.dp,
+                                    )
+
+                                    Spacer(Modifier.width(14.dp))
+
+                                    Column(modifier = Modifier.weight(1f)) {
+                                        Text(
+                                            text = server.name,
+                                            style = MaterialTheme.typography.titleMedium,
+                                            fontWeight = FontWeight.SemiBold,
+                                            maxLines = 1,
+                                            overflow = TextOverflow.Ellipsis
+                                        )
+                                        Text(
+                                            text = server.ipAddress,
+                                            style = MaterialTheme.typography.bodySmall,
+                                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                            maxLines = 1
+                                        )
+                                    }
+
+                                    Spacer(Modifier.width(8.dp))
+
+                                    if (isConnected) {
+                                        ShieldBadge(
+                                            text = "ONLINE",
+                                            color = MaterialTheme.colorScheme.primary,
+                                            modifier = Modifier.padding(end = 4.dp)
+                                        )
+                                    }
+
+                                    Icon(
+                                        Icons.AutoMirrored.Filled.KeyboardArrowRight,
+                                        contentDescription = stringResource(R.string.chat_list_open_chat),
+                                        tint = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.7f),
+                                        modifier = Modifier.size(22.dp)
                                     )
                                 }
-
-                                Spacer(Modifier.width(8.dp))
-
-                                Icon(
-                                    Icons.AutoMirrored.Filled.KeyboardArrowRight,
-                                    contentDescription = stringResource(R.string.chat_list_open_chat),
-                                    tint = MaterialTheme.colorScheme.onSurfaceVariant,
-                                    modifier = Modifier.size(24.dp)
-                                )
                             }
                         }
                     }

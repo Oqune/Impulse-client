@@ -40,6 +40,21 @@ class ChatController(private val context: Context) {
     private val certManager = TrustedCertManager(context)
     private val repo = MessageRepository(context)
     private val outboxPrefs = context.getSharedPreferences("impulse_outbox", Context.MODE_PRIVATE)
+    private val peerPrefs = context.getSharedPreferences("impulse_peer_names", Context.MODE_PRIVATE)
+
+    private val _peerNames = MutableStateFlow<Map<String, String>>(emptyMap())
+    val peerNames: StateFlow<Map<String, String>> = _peerNames.asStateFlow()
+
+    init {
+        val initial = mutableMapOf<String, String>()
+        for ((k, v) in peerPrefs.all) {
+            if (v is String && v.isNotBlank()) {
+                val fp = k.substringAfterLast("_", k)
+                initial[fp] = v
+            }
+        }
+        _peerNames.value = initial
+    }
 
     private val lock = Any()
 
@@ -48,6 +63,23 @@ class ChatController(private val context: Context) {
         private set
     @Volatile var clientName: String = ""
         private set
+
+    fun updateClientName(newName: String) {
+        val trimmed = newName.trim()
+        if (trimmed.isNotEmpty() && trimmed != clientName) {
+            clientName = trimmed
+            LogManager.i(TAG, "Updated clientName to '$trimmed'")
+        }
+    }
+
+    private fun recordPeerName(serverId: String, fingerprint: String, name: String) {
+        if (fingerprint.isBlank() || name.isBlank()) return
+        peerPrefs.edit()
+            .putString("${serverId}_$fingerprint", name)
+            .putString(fingerprint, name)
+            .apply()
+        _peerNames.value = _peerNames.value + (fingerprint to name)
+    }
 
     private lateinit var keyManager: SecureKeyManager
     private lateinit var keyRepo: PublicKeyRepository
@@ -579,13 +611,20 @@ class ChatController(private val context: Context) {
         return ok
     }
 
-    /** Known peers for this server (fingerprint -> short label). */
+    /** Known peers for this server (fingerprint -> display name or short label). */
     suspend fun knownPeers(serverId: String): List<Pair<String, String>> {
         // Build the repository on demand — `keyRepo` is only initialized after
         // connect(), and opening the chat list must not crash for a server that
         // has never connected (Bug: "UninitializedPropertyAccessException").
         val repo = com.example.impulse.data.PublicKeyRepository(context)
-        return repo.getKnownPeers(serverId)
+        val peers = repo.getKnownPeers(serverId)
+        return peers.map { (fp, _) ->
+            val name = _peerNames.value[fp]
+                ?: peerPrefs.getString("${serverId}_$fp", null)
+                ?: peerPrefs.getString(fp, null)
+                ?: "…${fp.take(6)}"
+            fp to name
+        }
     }
 
     /** The local user's own fingerprint (used to label the Saved/Favorites chat). */
@@ -597,14 +636,27 @@ class ChatController(private val context: Context) {
         }
 
     /**
-     * Best-effort display name for a peer fingerprint: the most recent message's
-     * sender name in that DM conversation, else a short fingerprint label.
+     * Best-effort display name for a peer fingerprint: cached verified name,
+     * else the most recent incoming message's sender name in that DM, else a
+     * short fingerprint label. NEVER returns own user's nickname.
      */
     suspend fun peerDisplayName(serverId: String, fingerprint: String): String {
         if (fingerprint.isEmpty()) return ""
+        _peerNames.value[fingerprint]?.let { return it }
+        val persisted = peerPrefs.getString("${serverId}_$fingerprint", null)
+            ?: peerPrefs.getString(fingerprint, null)
+        if (!persisted.isNullOrBlank()) {
+            _peerNames.value = _peerNames.value + (fingerprint to persisted)
+            return persisted
+        }
         val conversation = "dm:$fingerprint"
-        val latest = repo.loadForConversation(serverId, conversation).lastOrNull()
-        return latest?.sender?.takeIf { it.isNotBlank() } ?: "…${fingerprint.take(6)}"
+        val latestPeerMsg = repo.loadForConversation(serverId, conversation)
+            .lastOrNull { !it.isOwn && it.sender.isNotBlank() }
+        if (latestPeerMsg != null) {
+            recordPeerName(serverId, fingerprint, latestPeerMsg.sender)
+            return latestPeerMsg.sender
+        }
+        return "…${fingerprint.take(6)}"
     }
 
     private suspend fun flushOutbox() {
@@ -778,7 +830,7 @@ class ChatController(private val context: Context) {
                     accepted = true
                     innerBytes.fill(0)
 
-                    val isOwn = env.sender == clientName
+                    val isOwn = senderFingerprint == ownFingerprint
                     val realId = frame.serverMsgId
                     val ts = if (frame.timestamp != 0L) frame.timestamp else System.currentTimeMillis()
 
@@ -897,6 +949,10 @@ class ChatController(private val context: Context) {
                 conversationId = conversationId
             )
         )
+
+        if (!isOwn && env.sender.isNotBlank()) {
+            recordPeerName(serverId, senderFingerprint, env.sender)
+        }
 
         val msg = DecryptedMessage(realId, env.sender, senderFingerprint.take(8), env.content, isOwn, ts, conversationId)
         synchronized(listeners) { listeners.forEach { it(msg) } }
@@ -1038,7 +1094,7 @@ class ChatController(private val context: Context) {
                     val senderFingerprint = result.senderFingerprint
                     val env = result.env
                     val sender = env.sender
-                    val isOwn = sender == clientName
+                    val isOwn = senderFingerprint == ownFingerprint()
                     LogManager.d(TAG, "onSyncResponse: msgId=${m.id} sender='$sender' isOwn=$isOwn dm=${env.dm.take(8)}")
 
                     val dsaPub = keyRepo.getDsaPublicKey(serverId, senderFingerprint)

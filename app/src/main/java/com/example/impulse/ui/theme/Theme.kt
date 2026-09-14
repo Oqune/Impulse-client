@@ -52,6 +52,10 @@ fun ImpulseTheme(
             val window = (view.context as Activity).window
             val bg = colorScheme.background
             window.setBackgroundDrawable(ColorDrawable(bg.toArgb()))
+            @Suppress("DEPRECATION")
+            window.navigationBarColor = if (darkTheme) android.graphics.Color.BLACK else bg.toArgb()
+            @Suppress("DEPRECATION")
+            window.statusBarColor = bg.toArgb()
             WindowCompat.getInsetsController(window, view).apply {
                 isAppearanceLightStatusBars = !darkTheme
                 isAppearanceLightNavigationBars = !darkTheme

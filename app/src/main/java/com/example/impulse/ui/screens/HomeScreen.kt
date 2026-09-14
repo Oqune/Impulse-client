@@ -15,12 +15,27 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.foundation.Canvas
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
+import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.Path
+import androidx.compose.ui.graphics.PathEffect
+import androidx.compose.ui.graphics.StrokeCap
+import androidx.compose.ui.graphics.StrokeJoin
+import androidx.compose.ui.graphics.drawscope.Stroke
+import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.draw.drawWithContent
+import androidx.compose.ui.graphics.BlendMode
+import androidx.compose.ui.graphics.CompositingStrategy
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -52,139 +67,147 @@ fun HomeScreen(
     val errorCount = visibleServers.count { serverStates[it.id]?.state == ConnectionState.ERROR }
     val totalCount = visibleServers.size
 
-    // Title gradient animation
-    // Respect reduced-motion: keep a static gradient (no shimmer sweep) when
-    // the system animator scale is 0 (Bug: "infinite animations ignore
-    // reduced-motion setting").
     val reduceMotion = com.example.impulse.util.isReduceMotionEnabled(context)
 
-    val (bgShift, shimmerSweep) = if (!reduceMotion) {
-        val infiniteTransition = rememberInfiniteTransition(label = "title_grad")
+    // Title kinetic animations: individual letter electric micro-jitter & metallic chrome shimmer
+    val (shimmerSweep, jitterPhase) = if (!reduceMotion) {
+        val infiniteTransition = rememberInfiniteTransition(label = "title_kinetic")
 
-        // Background gradient: super slow, ~14s
-        val bgDuration = remember { 14000 + (-500..500).random() }
-        val bg by infiniteTransition.animateFloat(
-            initialValue = 0f, targetValue = 1f,
-            animationSpec = infiniteRepeatable(
-                animation = tween(bgDuration, easing = LinearEasing),
-                repeatMode = RepeatMode.Restart
-            ), label = "bg_shift"
-        )
-
-        // Shimmer sweep: fast (~2.5s pass) but rare (~14s pause), so it flashes
-        // quickly yet doesn't draw the eye constantly.
-        val shimmerDuration = remember { 2500 + (-300..300).random() }
+        // Shimmer sweep: fast (1300ms) with a 2400ms pause, appearing actively every 3.7s
         val shimmer by infiniteTransition.animateFloat(
             initialValue = 0f, targetValue = 1f,
             animationSpec = infiniteRepeatable(
-                animation = tween(shimmerDuration, easing = LinearEasing, delayMillis = 14000),
+                animation = tween(1300, easing = FastOutSlowInEasing, delayMillis = 2400),
                 repeatMode = RepeatMode.Restart
             ), label = "shimmer_sweep"
         )
-        bg to shimmer
+
+        // Kinetic electric micro-jitter phase for individual letters
+        val jPhase by infiniteTransition.animateFloat(
+            initialValue = 0f,
+            targetValue = (2 * Math.PI).toFloat(),
+            animationSpec = infiniteRepeatable(
+                animation = tween(1600, easing = LinearEasing),
+                repeatMode = RepeatMode.Restart
+            ),
+            label = "letter_jitter_phase"
+        )
+
+        TitleAnimations(shimmer, jPhase)
     } else {
-        // Reduced motion: static gradient, no shimmer.
-        0.5f to -1f
+        TitleAnimations(-1f, 0f)
     }
 
     val primaryColor = MaterialTheme.colorScheme.primary
 
-    // Logo gradient: primary → slightly shifted primary. On light theme this
-    // stays vivid (no dark/black tint — the old sin-based shift could darken).
-    val bgBrush = remember(bgShift, primaryColor) {
-        val phase = bgShift * 360f
-        val sin = kotlin.math.sin(Math.toRadians(phase.toDouble())).toFloat()
-        val shifted = androidx.compose.ui.graphics.Color(
-            red = (primaryColor.red * (1f + sin * 0.10f)).coerceIn(0f, 1f),
-            green = (primaryColor.green * (1f + sin * 0.10f)).coerceIn(0f, 1f),
-            blue = (primaryColor.blue * (1f + sin * 0.10f)).coerceIn(0f, 1f),
-            alpha = 1f
-        )
-        Brush.linearGradient(
-            colors = listOf(primaryColor, shifted),
-            start = androidx.compose.ui.geometry.Offset(0f, 0f),
-            end = androidx.compose.ui.geometry.Offset(700f, 0f)
-        )
-    }
-
-    // Fast, bright sweep that passes quickly but appears rarely. Uses a light
-    // highlight derived from primary (never black in light theme).
-    val shimmerBrush = remember(shimmerSweep, primaryColor) {
-        val x = shimmerSweep * 1200f
-        Brush.linearGradient(
-            colors = listOf(
-                Color.Transparent,
-                primaryColor.copy(alpha = 0.15f),
-                androidx.compose.ui.graphics.Color.White.copy(alpha = 0.5f),
-                primaryColor.copy(alpha = 0.15f),
-                Color.Transparent,
-            ),
-            start = androidx.compose.ui.geometry.Offset(x - 300f, 0f),
-            end = androidx.compose.ui.geometry.Offset(x, 0f)
-        )
-    }
-
+    val scrollState = rememberScrollState()
     DecorativeBackground(modifier = modifier) {
         Column(
             modifier = Modifier
                 .fillMaxSize()
-                .padding(horizontal = 20.dp, vertical = 24.dp),
+                .verticalScroll(scrollState)
+                .padding(start = 20.dp, end = 20.dp, top = 20.dp, bottom = 88.dp),
+            verticalArrangement = Arrangement.spacedBy(16.dp),
             horizontalAlignment = Alignment.CenterHorizontally,
         ) {
-            Spacer(Modifier.weight(1f))
-
+            // ── Header (Kinetic Title with per-letter electric jitter & chrome shimmer sweep) ──
             Column(
-                verticalArrangement = Arrangement.spacedBy(16.dp),
                 horizontalAlignment = Alignment.CenterHorizontally,
+                modifier = Modifier.padding(top = 16.dp, bottom = 4.dp)
             ) {
-            // ── Header ──
-            Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                Box(contentAlignment = Alignment.Center) {
-                    // Background gradient layer
-                    Text(
-                        text = stringResource(R.string.app_name),
-                        style = androidx.compose.ui.text.TextStyle(
-                            brush = bgBrush,
-                            fontSize = 44.sp,
-                            fontWeight = FontWeight.Black,
-                            textAlign = TextAlign.Center,
-                            fontFamily = MaterialTheme.typography.headlineLarge.fontFamily,
-                            letterSpacing = MaterialTheme.typography.headlineLarge.letterSpacing,
-                        ),
-                        textAlign = TextAlign.Center,
-                    )
-                    // Shimmer sweep on top
-                    Text(
-                        text = stringResource(R.string.app_name),
-                        style = androidx.compose.ui.text.TextStyle(
-                            brush = shimmerBrush,
-                            fontSize = 44.sp,
-                            fontWeight = FontWeight.Black,
-                            textAlign = TextAlign.Center,
-                            fontFamily = MaterialTheme.typography.headlineLarge.fontFamily,
-                            letterSpacing = MaterialTheme.typography.headlineLarge.letterSpacing,
-                        ),
-                        textAlign = TextAlign.Center,
-                    )
+                val titleText = stringResource(R.string.app_name)
+                val density = LocalDensity.current.density
+
+                Row(
+                    horizontalArrangement = Arrangement.spacedBy(3.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                    modifier = Modifier
+                        .graphicsLayer(compositingStrategy = CompositingStrategy.Offscreen)
+                        .drawWithContent {
+                            drawContent()
+                            if (shimmerSweep in 0f..1f) {
+                                val sweepPos = -size.width * 0.3f + shimmerSweep * (size.width * 1.6f)
+                                drawRect(
+                                    brush = Brush.linearGradient(
+                                        colors = listOf(
+                                            Color.Transparent,
+                                            primaryColor.copy(alpha = 0.20f),
+                                            Color.White.copy(alpha = 0.95f),
+                                            primaryColor.copy(alpha = 0.30f),
+                                            Color.Transparent,
+                                        ),
+                                        start = Offset(sweepPos - 70f, 0f),
+                                        end = Offset(sweepPos + 70f, 0f)
+                                    ),
+                                    blendMode = BlendMode.SrcAtop
+                                )
+                            }
+                        }
+                ) {
+                    titleText.forEachIndexed { index, char ->
+                        val letterY = if (!reduceMotion) {
+                            val p = jitterPhase + index * 1.05f
+                            (kotlin.math.sin(p.toDouble()) * 0.85 + kotlin.math.sin(p * 2.3) * 0.45).toFloat()
+                        } else 0f
+
+                        Text(
+                            text = char.toString(),
+                            style = androidx.compose.ui.text.TextStyle(
+                                color = primaryColor,
+                                fontSize = 38.sp,
+                                fontWeight = FontWeight.Black,
+                                fontFamily = JetBrainsMono,
+                            ),
+                            modifier = Modifier.graphicsLayer {
+                                translationY = letterY * density
+                            }
+                        )
+                    }
                 }
-                Spacer(Modifier.height(4.dp))
+
+                Spacer(Modifier.height(6.dp))
+
                 Text(
                     text = stringResource(R.string.home_subtitle),
                     style = MaterialTheme.typography.bodySmall,
+                    fontFamily = JetBrainsMono,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                     textAlign = TextAlign.Center,
+                    letterSpacing = 0.5.sp,
                 )
             }
 
-            // ── User card ──
-            ImpulseCard {
+            // ── User card (Crypto-Passport with one-tap copy) ──
+            val haptic = androidx.compose.ui.platform.LocalHapticFeedback.current
+            var copiedPassport by remember { mutableStateOf(false) }
+
+            LaunchedEffect(copiedPassport) {
+                if (copiedPassport) {
+                    kotlinx.coroutines.delay(1800)
+                    copiedPassport = false
+                }
+            }
+
+            ImpulseCard(
+                onClick = {
+                    if (pubKeyHash.isNotBlank()) {
+                        val clipboard = context.getSystemService(android.content.Context.CLIPBOARD_SERVICE) as? android.content.ClipboardManager
+                        val clip = android.content.ClipData.newPlainText("Impulse KEM Fingerprint", pubKeyHash)
+                        clipboard?.setPrimaryClip(clip)
+                        runCatching {
+                            haptic.performHapticFeedback(androidx.compose.ui.hapticfeedback.HapticFeedbackType.LongPress)
+                        }
+                        copiedPassport = true
+                    }
+                }
+            ) {
                 Row(
                     modifier = Modifier.fillMaxWidth(),
                     verticalAlignment = Alignment.CenterVertically,
                 ) {
                     Box(
                         modifier = Modifier
-                            .size(44.dp)
+                            .size(46.dp)
                             .clip(CircleShape)
                             .background(MaterialTheme.colorScheme.primaryContainer),
                         contentAlignment = Alignment.Center,
@@ -192,30 +215,120 @@ fun HomeScreen(
                         Text(
                             text = clientName.take(1).uppercase(),
                             style = MaterialTheme.typography.titleMedium,
+                            fontWeight = FontWeight.Bold,
                             color = MaterialTheme.colorScheme.onPrimaryContainer,
                         )
                     }
                     Spacer(Modifier.width(12.dp))
-                    Column {
+                    Column(modifier = Modifier.weight(1f)) {
                         Text(
                             text = clientName,
-                            style = MaterialTheme.typography.bodyLarge,
+                            style = MaterialTheme.typography.titleMedium,
                             fontWeight = FontWeight.SemiBold,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis,
                         )
                         if (pubKeyHash.isNotEmpty()) {
-                            Text(
-                                text = pubKeyHash,
-                                style = MaterialTheme.typography.labelSmall,
-                                fontFamily = FontFamily.Monospace,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                            )
+                            Row(
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.spacedBy(4.dp),
+                                modifier = Modifier.padding(top = 2.dp)
+                            ) {
+                                Surface(
+                                    shape = RoundedCornerShape(4.dp),
+                                    color = MaterialTheme.colorScheme.primary.copy(alpha = 0.12f)
+                                ) {
+                                    Text(
+                                        text = "…${pubKeyHash.take(8)}",
+                                        fontFamily = FontFamily.Monospace,
+                                        fontSize = 11.sp,
+                                        fontWeight = FontWeight.Medium,
+                                        color = MaterialTheme.colorScheme.primary,
+                                        modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)
+                                    )
+                                }
+                                Text(
+                                    text = if (copiedPassport) "✓ copied" else "tap to copy",
+                                    style = MaterialTheme.typography.labelSmall,
+                                    fontSize = 10.sp,
+                                    color = if (copiedPassport) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.7f),
+                                )
+                            }
                         }
                     }
+                    ShieldBadge(
+                        text = "PQ-ID",
+                        color = MaterialTheme.colorScheme.primary
+                    )
                 }
             }
 
-            // ── Server stats — minimal inline row ──
+            // ── Tactical Tunnel & Server stats ──
+            val anyConnected = onlineCount > 0
+            val anyConnecting = visibleServers.any {
+                serverStates[it.id]?.state in listOf(
+                    ConnectionState.CONNECTING, ConnectionState.CONNECTED,
+                    ConnectionState.AUTHENTICATING, ConnectionState.AUTHENTICATED
+                )
+            }
+
+            // Pulse animation for tunnel ring when connecting or live
+            val infiniteTransition = rememberInfiniteTransition(label = "tunnel_pulse")
+            val pulseAlpha by if (!reduceMotion && (anyConnecting || anyConnected)) {
+                infiniteTransition.animateFloat(
+                    initialValue = 0.25f,
+                    targetValue = 0.85f,
+                    animationSpec = infiniteRepeatable(
+                        animation = tween(if (anyConnecting) 700 else 2200, easing = FastOutSlowInEasing),
+                        repeatMode = RepeatMode.Reverse
+                    ),
+                    label = "pulse_alpha"
+                )
+            } else {
+                remember { mutableFloatStateOf(0.4f) }
+            }
+
             ImpulseCard {
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(bottom = 12.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Box(
+                        modifier = Modifier
+                            .size(12.dp)
+                            .clip(CircleShape)
+                            .background(
+                                when {
+                                    anyConnected -> MaterialTheme.colorScheme.primary.copy(alpha = pulseAlpha)
+                                    anyConnecting -> MaterialTheme.colorScheme.tertiary.copy(alpha = pulseAlpha)
+                                    errorCount > 0 -> MaterialTheme.colorScheme.error
+                                    else -> MaterialTheme.colorScheme.outline
+                                }
+                            )
+                    )
+                    Spacer(Modifier.width(8.dp))
+                    Text(
+                        text = when {
+                            anyConnected -> "SECURE TUNNEL ACTIVE (QUIC)"
+                            anyConnecting -> "HANDSHAKE IN PROGRESS…"
+                            errorCount > 0 -> "TUNNEL DEGRADED"
+                            else -> "TUNNEL STANDBY"
+                        },
+                        style = MaterialTheme.typography.labelSmall,
+                        fontFamily = FontFamily.Monospace,
+                        fontWeight = FontWeight.Bold,
+                        letterSpacing = 1.sp,
+                        color = when {
+                            anyConnected -> MaterialTheme.colorScheme.primary
+                            anyConnecting -> MaterialTheme.colorScheme.tertiary
+                            errorCount > 0 -> MaterialTheme.colorScheme.error
+                            else -> MaterialTheme.colorScheme.onSurfaceVariant
+                        }
+                    )
+                }
+
                 Row(
                     modifier = Modifier.fillMaxWidth(),
                     horizontalArrangement = Arrangement.SpaceEvenly,
@@ -227,7 +340,12 @@ fun HomeScreen(
                     }
                 }
 
-                Spacer(Modifier.height(12.dp))
+                Spacer(Modifier.height(14.dp))
+                HorizontalDivider(
+                    color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.35f),
+                    thickness = 0.5.dp
+                )
+                Spacer(Modifier.height(10.dp))
 
                 visibleServers.forEach { server ->
                     ServerStatusRow(
@@ -244,6 +362,9 @@ fun HomeScreen(
             ) {
                 OutlinedButton(
                     onClick = {
+                        runCatching {
+                            haptic.performHapticFeedback(androidx.compose.ui.hapticfeedback.HapticFeedbackType.TextHandleMove)
+                        }
                         visibleServers.forEach { server ->
                             val st = serverStates[server.id]?.state
                             if (st == null || st == ConnectionState.DISCONNECTED || st == ConnectionState.ERROR) {
@@ -337,10 +458,6 @@ fun HomeScreen(
                     }
                 }
             }
-
-            } // inner Column
-
-            Spacer(Modifier.weight(1f))
         }
     }
 }
@@ -365,3 +482,151 @@ private fun MiniStat(
         )
     }
 }
+
+private data class TitleAnimations(
+    val shimmerSweep: Float,
+    val jitterPhase: Float
+)
+
+/**
+ * Bespoke Quantum Impulse Emblem:
+ * - Outer cryptographic hexagon with glowing aura
+ * - Inner dashed quantum lattice
+ * - Dynamic high-frequency Impulse waveform spike with pulse nodes
+ * - Active chrome/silver shimmer sweep reflection
+ */
+@Composable
+private fun ImpulseEmblem(
+    modifier: Modifier = Modifier,
+    shimmerSweep: Float = -1f,
+    primaryColor: Color = MaterialTheme.colorScheme.primary,
+    accentColor: Color = MaterialTheme.colorScheme.tertiary
+) {
+    Canvas(modifier = modifier) {
+        val w = size.width
+        val h = size.height
+        val cx = w / 2f
+        val cy = h / 2f
+        val radius = minOf(w, h) * 0.44f
+
+        // 1. Outer Quantum Hexagon
+        val hexPath = Path()
+        for (i in 0..5) {
+            val angleRad = Math.toRadians((60.0 * i - 30.0)).toFloat()
+            val x = cx + radius * kotlin.math.cos(angleRad)
+            val y = cy + radius * kotlin.math.sin(angleRad)
+            if (i == 0) hexPath.moveTo(x, y) else hexPath.lineTo(x, y)
+        }
+        hexPath.close()
+
+        // Hexagon background aura glow
+        drawPath(
+            path = hexPath,
+            brush = Brush.radialGradient(
+                colors = listOf(primaryColor.copy(alpha = 0.20f), Color.Transparent),
+                center = Offset(cx, cy),
+                radius = radius * 1.15f
+            )
+        )
+
+        // Hexagon outer border
+        drawPath(
+            path = hexPath,
+            brush = Brush.linearGradient(
+                colors = listOf(primaryColor, accentColor),
+                start = Offset(cx - radius, cy - radius),
+                end = Offset(cx + radius, cy + radius)
+            ),
+            style = Stroke(width = 2.4.dp.toPx(), cap = StrokeCap.Round, join = StrokeJoin.Round)
+        )
+
+        // 2. Inner Quantum Sub-Lattice (smaller concentric hexagon with dash effect)
+        val innerRadius = radius * 0.68f
+        val innerHexPath = Path()
+        for (i in 0..5) {
+            val angleRad = Math.toRadians((60.0 * i - 30.0)).toFloat()
+            val x = cx + innerRadius * kotlin.math.cos(angleRad)
+            val y = cy + innerRadius * kotlin.math.sin(angleRad)
+            if (i == 0) innerHexPath.moveTo(x, y) else innerHexPath.lineTo(x, y)
+        }
+        innerHexPath.close()
+
+        drawPath(
+            path = innerHexPath,
+            color = primaryColor.copy(alpha = 0.35f),
+            style = Stroke(
+                width = 1.2.dp.toPx(),
+                pathEffect = PathEffect.dashPathEffect(floatArrayOf(10f, 10f), 0f)
+            )
+        )
+
+        // 3. Central Dynamic Impulse Wave: "—\/\/\—" cutting through the center
+        val wavePath = Path()
+        val startX = cx - radius * 0.82f
+        val endX = cx + radius * 0.82f
+        val step = (endX - startX) / 8f
+
+        wavePath.moveTo(startX, cy)
+        wavePath.lineTo(startX + step * 2f, cy)
+        wavePath.lineTo(startX + step * 3f, cy - radius * 0.42f)
+        wavePath.lineTo(startX + step * 4f, cy + radius * 0.50f)
+        wavePath.lineTo(startX + step * 5f, cy - radius * 0.28f)
+        wavePath.lineTo(startX + step * 6f, cy)
+        wavePath.lineTo(endX, cy)
+
+        // Glow behind the impulse wave
+        drawPath(
+            path = wavePath,
+            color = primaryColor.copy(alpha = 0.40f),
+            style = Stroke(width = 6.dp.toPx(), cap = StrokeCap.Round, join = StrokeJoin.Round)
+        )
+
+        // Sharp precision impulse line
+        drawPath(
+            path = wavePath,
+            brush = Brush.horizontalGradient(
+                colors = listOf(primaryColor, Color.White, accentColor),
+                startX = startX,
+                endX = endX
+            ),
+            style = Stroke(width = 2.8.dp.toPx(), cap = StrokeCap.Round, join = StrokeJoin.Round)
+        )
+
+        // Core Quantum Pulse Nodes at vertices and impulse peaks
+        drawCircle(
+            color = Color.White,
+            radius = 3.dp.toPx(),
+            center = Offset(startX + step * 4f, cy + radius * 0.50f)
+        )
+        drawCircle(
+            color = Color.White,
+            radius = 3.dp.toPx(),
+            center = Offset(startX + step * 3f, cy - radius * 0.42f)
+        )
+
+        // 4. Shimmer Gleam Reflection on Emblem
+        if (shimmerSweep in 0f..1f) {
+            val sweepX = (startX - 100f) + shimmerSweep * ((endX - startX) + 200f)
+            val sheenBrush = Brush.linearGradient(
+                colors = listOf(
+                    Color.Transparent,
+                    Color.White.copy(alpha = 0.70f),
+                    Color.Transparent
+                ),
+                start = Offset(sweepX - 35f, cy - radius),
+                end = Offset(sweepX + 35f, cy + radius)
+            )
+            drawPath(
+                path = hexPath,
+                brush = sheenBrush,
+                style = Stroke(width = 3.4.dp.toPx())
+            )
+            drawPath(
+                path = wavePath,
+                brush = sheenBrush,
+                style = Stroke(width = 3.8.dp.toPx(), cap = StrokeCap.Round)
+            )
+        }
+    }
+}
+

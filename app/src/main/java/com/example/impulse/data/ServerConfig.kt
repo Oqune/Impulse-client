@@ -42,23 +42,14 @@ data class ServerConfig(
     companion object {
         val production = ServerConfig(
             id = "prod_001",
-            name = "Production",
-            ipAddress = "192.168.2.50",
+            name = "Main Relay",
+            ipAddress = "88.83.201.154",
             port = 4433,
-            description = "Основной продакшн сервер",
-            password = ""
-        )
-
-        val local = ServerConfig(
-            id = "local_001",
-            name = "Local",
-            ipAddress = "127.0.0.1",
-            port = 4433,
-            description = "Локальный сервер разработки",
+            description = "Основной сервер Impulse",
             password = ""
         )
 
         val defaultServer = production
-        val builtInServers = listOf(production, local)
+        val builtInServers = listOf(production)
     }
 }

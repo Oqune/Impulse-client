@@ -51,7 +51,7 @@ class E2EConversationPipelineTest {
         val dsaPublicKey: ByteArray
     )
 
-    class VirtualPeer(val name: String) {
+    class VirtualPeer(var name: String) {
         private val kemKeyPair = PqcCrypto.generateKeyPair()
         private val dsaKeyPair = PqcCrypto.generateMlDsa65KeyPair()
 
@@ -204,7 +204,7 @@ class E2EConversationPipelineTest {
 
             val env = Protocol.parseInnerEnvelope(innerBytes) ?: return false
 
-            val isOwn = env.sender == name
+            val isOwn = senderFp == fingerprint
             val dsaPub = if (isOwn) dsaPub else knownPeers[senderFp]?.dsaPublicKey
                 ?: return false // missing sender DSA key
 
@@ -571,5 +571,48 @@ class E2EConversationPipelineTest {
         val accepted = bob.onReceiveData(tamperedFrame)
         assertFalse("Tampered ciphertext must fail GCM decryption or signature check", accepted)
         assertEquals(0, bob.receivedMessages.size)
+    }
+
+    @Test
+    fun testNicknameChangeAndPeerResolution() {
+        val relay = VirtualRelay()
+        val alice = VirtualPeer("Alice")
+        val bob = VirtualPeer("Bob")
+        val charlie = VirtualPeer("Charlie")
+
+        relay.registerPeer(alice)
+        relay.registerPeer(bob)
+        relay.registerPeer(charlie)
+
+        // 1. Alice changes her nickname to "AliceNew"
+        alice.name = "AliceNew"
+        val aliceFrame = alice.sendDirectMessage("Hello Charlie from AliceNew", charlie.fingerprint)
+        relay.broadcast(alice, aliceFrame)
+
+        // On Charlie's side:
+        val charlieMsg = charlie.receivedMessages.last()
+        assertEquals("Hello Charlie from AliceNew", charlieMsg.content)
+        assertEquals("AliceNew", charlieMsg.senderName)
+        assertEquals(alice.fingerprint, charlieMsg.senderFingerprint)
+        assertFalse("Message from Alice to Charlie must not be marked isOwn on Charlie", charlieMsg.isOwn)
+        assertEquals("dm:${alice.fingerprint}", charlieMsg.conversationId)
+
+        // On Alice's side:
+        val aliceEcho = alice.receivedMessages.last()
+        assertTrue("Message sent by Alice must be marked isOwn on Alice", aliceEcho.isOwn)
+        assertEquals("dm:${charlie.fingerprint}", aliceEcho.conversationId)
+
+        // 2. Bob changes his nickname to "Charlie" (name collision / identical name)
+        bob.name = "Charlie"
+        val bobFrame = bob.sendDirectMessage("Impersonation test", charlie.fingerprint)
+        relay.broadcast(bob, bobFrame)
+
+        val impersonationMsg = charlie.receivedMessages.last()
+        assertEquals("Impersonation test", impersonationMsg.content)
+        assertEquals("Charlie", impersonationMsg.senderName)
+        // MUST NOT be marked isOwn because fingerprint doesn't match Charlie!
+        assertFalse("Even with identical senderName, isOwn must be false when fingerprint differs", impersonationMsg.isOwn)
+        assertEquals(bob.fingerprint, impersonationMsg.senderFingerprint)
+        assertEquals("dm:${bob.fingerprint}", impersonationMsg.conversationId)
     }
 }

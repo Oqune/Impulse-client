@@ -4,6 +4,7 @@ import androidx.activity.compose.BackHandler
 import androidx.compose.animation.*
 import androidx.compose.animation.core.FastOutSlowInEasing
 import androidx.compose.animation.core.tween
+import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
@@ -18,6 +19,7 @@ import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.scale
 import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
@@ -75,7 +77,13 @@ fun MainScreen() {
         val savedClientName = serverPreferences.getClientName()
 
         availableServers = ServerConfig.builtInServers + customServers
-        if (savedServer != null) selectedServerId = savedServer.id
+        if (savedServer != null && availableServers.any { it.id == savedServer.id }) {
+            selectedServerId = savedServer.id
+        } else {
+            val fallback = availableServers.firstOrNull() ?: ServerConfig.defaultServer
+            selectedServerId = fallback.id
+            serverPreferences.saveSelectedServer(fallback)
+        }
         clientName = savedClientName.ifBlank { NameGenerator.generate() }
 
         for (server in availableServers) {
@@ -93,6 +101,8 @@ fun MainScreen() {
         }
     }
 
+    val haptic = androidx.compose.ui.platform.LocalHapticFeedback.current
+
     val navItems = listOf(
         Triple(Icons.Default.Home, stringResource(R.string.nav_home), 0),
         Triple(Icons.AutoMirrored.Filled.List, stringResource(R.string.nav_chats), 1),
@@ -100,133 +110,183 @@ fun MainScreen() {
     )
 
     Box(modifier = Modifier.fillMaxSize().background(MaterialTheme.colorScheme.background)) {
-        // Main content
-        Scaffold(
-            bottomBar = {
-                Surface(
+        // Main content — extends full screen under floating dock
+        val reduceMotion = com.example.impulse.util.isReduceMotionEnabled(context)
+        AnimatedContent(
+            targetState = selectedItem,
+            transitionSpec = {
+                if (reduceMotion) {
+                    fadeIn(tween(180)) togetherWith fadeOut(tween(140))
+                } else {
+                    directionalSlideTransition(targetState > initialState)
+                }
+            },
+            modifier = Modifier.fillMaxSize(),
+            label = "tab_directional_slide"
+        ) { tab ->
+            when (tab) {
+                0 -> HomeScreen(
+                    clientName = clientName,
+                    availableServers = availableServers,
+                    connectionManager = connectionManager,
+                    modifier = Modifier.fillMaxSize()
+                )
+                1 -> ChatListScreen(
+                    connectionManager = connectionManager,
+                    availableServers = availableServers,
+                    clientName = clientName,
+                    onServerSelected = { server ->
+                        chatsServerId = server.id
+                        selectedServerId = server.id
+                    },
+                    visibilityRefreshTrigger = visibilityRefreshTrigger,
+                    modifier = Modifier.fillMaxSize()
+                )
+                2 -> SettingsScreen(
+                    selectedServer = selectedServer,
+                    onServerSelected = { newServer ->
+                        selectedServerId = newServer.id
+                        ServerPreferences(context).saveSelectedServer(newServer)
+                        val customServers = ServerPreferences(context).getCustomServers()
+                        availableServers = ServerConfig.builtInServers + customServers
+                    },
+                    onServerUpdated = { updatedServer ->
+                        val customServers = ServerPreferences(context).getCustomServers()
+                        availableServers = ServerConfig.builtInServers + customServers
+                        connectionManager.updateServerConfig(updatedServer)
+                        if (selectedServerId == updatedServer.id) selectedServerId = updatedServer.id
+                    },
+                    clientName = clientName,
+                    onClientNameChange = { newName ->
+                        clientName = newName
+                        ServerPreferences(context).saveClientName(newName)
+                        connectionManager.updateClientName(newName)
+                    },
+                    availableServers = availableServers,
+                    onServerAdded = { newServer ->
+                        ServerPreferences(context).addCustomServer(newServer)
+                        val customServers = ServerPreferences(context).getCustomServers()
+                        availableServers = ServerConfig.builtInServers + customServers
+                    },
+                    onServerDeleted = { deletedServer ->
+                        val customServers = ServerPreferences(context).getCustomServers()
+                        availableServers = ServerConfig.builtInServers + customServers
+                        if (selectedServerId == deletedServer.id) {
+                            val fallback = availableServers.firstOrNull() ?: ServerConfig.defaultServer
+                            selectedServerId = fallback.id
+                            ServerPreferences(context).saveSelectedServer(fallback)
+                        }
+                    },
+                    onVisibilityChanged = { visibilityRefreshTrigger++ },
+                    certRefreshTrigger = certRefreshTrigger,
+                    connectionManager = connectionManager,
+                    onScanQr = { server -> qrScanServerId = server.id },
+                    modifier = Modifier.fillMaxSize()
+                )
+            }
+        }
+
+        // Floating pill dock bar
+        Box(
+            modifier = Modifier
+                .align(Alignment.BottomCenter)
+                .fillMaxWidth()
+                .navigationBarsPadding()
+                .padding(start = 20.dp, end = 20.dp, top = 4.dp, bottom = 10.dp),
+            contentAlignment = Alignment.Center
+        ) {
+            Surface(
+                shape = RoundedCornerShape(28.dp),
+                color = MaterialTheme.colorScheme.surface.copy(alpha = 0.92f),
+                border = BorderStroke(
+                    1.dp,
+                    MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.30f)
+                ),
+                tonalElevation = 0.dp,
+                shadowElevation = 0.dp,
+                modifier = Modifier.fillMaxWidth()
+            ) {
+                Row(
                     modifier = Modifier
                         .fillMaxWidth()
-                        .navigationBarsPadding(),
-                    color = MaterialTheme.colorScheme.surface,
-                    tonalElevation = 3.dp,
-                    shadowElevation = 8.dp,
+                        .height(58.dp)
+                        .padding(horizontal = 12.dp, vertical = 4.dp),
+                    horizontalArrangement = Arrangement.SpaceAround,
+                    verticalAlignment = Alignment.CenterVertically,
                 ) {
-                    Row(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .height(64.dp)
-                            .padding(horizontal = 16.dp, vertical = 6.dp),
-                        horizontalArrangement = Arrangement.SpaceAround,
-                        verticalAlignment = Alignment.CenterVertically,
-                    ) {
-                        val navSelectedColor = MaterialTheme.colorScheme.primary
-                        val navUnselectedColor = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.6f)
-                        navItems.forEach { (icon, label, index) ->
-                            val isSelected = selectedItem == index
-                            Box(
-                                modifier = Modifier
-                                    .weight(1f)
-                                    .fillMaxHeight()
-                                    .clip(RoundedCornerShape(14.dp))
-                                    .background(
-                                        if (isSelected) MaterialTheme.colorScheme.primary.copy(alpha = 0.12f)
-                                        else Color.Transparent
-                                    )
-                                    .clickable { selectedItem = index },
-                                contentAlignment = Alignment.Center,
-                            ) {
-                                Column(
-                                    horizontalAlignment = Alignment.CenterHorizontally,
-                                    verticalArrangement = Arrangement.Center,
-                                ) {
-                                    Icon(
-                                        icon,
-                                        contentDescription = label,
-                                        tint = if (isSelected) navSelectedColor else navUnselectedColor,
-                                        modifier = Modifier.size(22.dp),
-                                    )
-                                    if (isSelected) {
-                                        Spacer(Modifier.height(2.dp))
-                                        Box(
-                                            modifier = Modifier
-                                                .size(4.dp)
-                                                .clip(RoundedCornerShape(2.dp))
-                                                .background(MaterialTheme.colorScheme.primary)
-                                        )
+                    val navSelectedColor = MaterialTheme.colorScheme.primary
+                    val navUnselectedColor = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.6f)
+                    navItems.forEach { (icon, label, index) ->
+                        val isSelected = selectedItem == index
+                        val animWeight by androidx.compose.animation.core.animateFloatAsState(
+                            targetValue = if (isSelected) 1.25f else 1f,
+                            animationSpec = androidx.compose.animation.core.spring(
+                                dampingRatio = androidx.compose.animation.core.Spring.DampingRatioMediumBouncy,
+                                stiffness = androidx.compose.animation.core.Spring.StiffnessLow
+                            ),
+                            label = "nav_item_weight"
+                        )
+                        val animBgAlpha by androidx.compose.animation.core.animateFloatAsState(
+                            targetValue = if (isSelected) 0.14f else 0f,
+                            animationSpec = tween(220),
+                            label = "nav_bg_alpha"
+                        )
+                        val animIconScale by androidx.compose.animation.core.animateFloatAsState(
+                            targetValue = if (isSelected) 1.08f else 1f,
+                            animationSpec = androidx.compose.animation.core.spring(
+                                dampingRatio = androidx.compose.animation.core.Spring.DampingRatioMediumBouncy,
+                                stiffness = androidx.compose.animation.core.Spring.StiffnessMedium
+                            ),
+                            label = "nav_icon_scale"
+                        )
+
+                        Box(
+                            modifier = Modifier
+                                .weight(animWeight)
+                                .fillMaxHeight()
+                                .clip(RoundedCornerShape(20.dp))
+                                .background(MaterialTheme.colorScheme.primary.copy(alpha = animBgAlpha))
+                                .clickable {
+                                    if (selectedItem != index) {
+                                        runCatching {
+                                            haptic.performHapticFeedback(
+                                                androidx.compose.ui.hapticfeedback.HapticFeedbackType.TextHandleMove
+                                            )
+                                        }
+                                        selectedItem = index
                                     }
+                                },
+                            contentAlignment = Alignment.Center,
+                        ) {
+                            Column(
+                                horizontalAlignment = Alignment.CenterHorizontally,
+                                verticalArrangement = Arrangement.Center,
+                            ) {
+                                Icon(
+                                    icon,
+                                    contentDescription = label,
+                                    tint = if (isSelected) navSelectedColor else navUnselectedColor,
+                                    modifier = Modifier
+                                        .size(22.dp)
+                                        .scale(animIconScale),
+                                )
+                                Spacer(Modifier.height(3.dp))
+                                androidx.compose.animation.AnimatedVisibility(
+                                    visible = isSelected,
+                                    enter = fadeIn(tween(180)) + expandVertically(tween(180)),
+                                    exit = fadeOut(tween(140)) + shrinkVertically(tween(140)),
+                                ) {
+                                    Box(
+                                        modifier = Modifier
+                                            .width(16.dp)
+                                            .height(3.dp)
+                                            .clip(RoundedCornerShape(1.5.dp))
+                                            .background(MaterialTheme.colorScheme.primary)
+                                    )
                                 }
                             }
                         }
                     }
-                }
-            }
-        ) { innerPadding ->
-            Crossfade(
-                targetState = selectedItem,
-                animationSpec = tween(
-                    durationMillis = 280,
-                    easing = FastOutSlowInEasing,
-                ),
-                label = "tab_crossfade"
-            ) { tab ->
-                when (tab) {
-                    0 -> HomeScreen(
-                        clientName = clientName,
-                        availableServers = availableServers,
-                        connectionManager = connectionManager,
-                        modifier = Modifier.padding(innerPadding)
-                    )
-                    1 -> ChatListScreen(
-                        connectionManager = connectionManager,
-                        availableServers = availableServers,
-                        clientName = clientName,
-                        onServerSelected = { server ->
-                            chatsServerId = server.id
-                            selectedServerId = server.id
-                        },
-                        visibilityRefreshTrigger = visibilityRefreshTrigger,
-                        modifier = Modifier.padding(innerPadding)
-                    )
-                    2 -> SettingsScreen(
-                        selectedServer = selectedServer,
-                        onServerSelected = { newServer ->
-                            selectedServerId = newServer.id
-                            ServerPreferences(context).saveSelectedServer(newServer)
-                            val customServers = ServerPreferences(context).getCustomServers()
-                            availableServers = ServerConfig.builtInServers + customServers
-                        },
-                        onServerUpdated = { updatedServer ->
-                            val customServers = ServerPreferences(context).getCustomServers()
-                            availableServers = ServerConfig.builtInServers + customServers
-                            connectionManager.updateServerConfig(updatedServer)
-                            if (selectedServerId == updatedServer.id) selectedServerId = updatedServer.id
-                        },
-                        clientName = clientName,
-                        onClientNameChange = { newName ->
-                            clientName = newName
-                            ServerPreferences(context).saveClientName(newName)
-                        },
-                        availableServers = availableServers,
-                        onServerAdded = { newServer ->
-                            ServerPreferences(context).addCustomServer(newServer)
-                            val customServers = ServerPreferences(context).getCustomServers()
-                            availableServers = ServerConfig.builtInServers + customServers
-                        },
-                        onServerDeleted = { deletedServer ->
-                            val customServers = ServerPreferences(context).getCustomServers()
-                            availableServers = ServerConfig.builtInServers + customServers
-                            if (selectedServerId == deletedServer.id) {
-                                val fallback = availableServers.firstOrNull() ?: ServerConfig.defaultServer
-                                selectedServerId = fallback.id
-                                ServerPreferences(context).saveSelectedServer(fallback)
-                            }
-                        },
-                        onVisibilityChanged = { visibilityRefreshTrigger++ },
-                        certRefreshTrigger = certRefreshTrigger,
-                        connectionManager = connectionManager,
-                        onScanQr = { server -> qrScanServerId = server.id },
-                        modifier = Modifier.padding(bottom = innerPadding.calculateBottomPadding())
-                    )
                 }
             }
         }
@@ -275,6 +335,7 @@ fun MainScreen() {
                 var conversations by remember(server.id) {
                     mutableStateOf<List<String>>(listOf("group"))
                 }
+                val ctrlPeerNames by ctrl.peerNames.collectAsState()
                 var peerNames by remember(server.id) {
                     mutableStateOf<Map<String, String>>(emptyMap())
                 }
@@ -282,7 +343,7 @@ fun MainScreen() {
                 LaunchedEffect(server.id) {
                     runCatching {
                         val known = ctrl.knownPeers(server.id)
-                        peerNames = known.associate { (fp, _) -> fp to fp }
+                        peerNames = known.associate { (fp, name) -> fp to name }
                     }
                 }
                 // Live conversation list: group + known peers + every conversation
@@ -297,7 +358,7 @@ fun MainScreen() {
                     }
                 }
                 // Resolve display names once known (from a received message).
-                LaunchedEffect(conversations, ownFp) {
+                LaunchedEffect(conversations, ownFp, ctrlPeerNames) {
                     val resolved = mutableMapOf<String, String>()
                     for (conv in conversations) {
                         val fp = conv.removePrefix("dm:")

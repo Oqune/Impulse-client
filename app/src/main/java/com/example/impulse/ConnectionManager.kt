@@ -80,6 +80,15 @@ class ConnectionManager private constructor(private val context: Context) {
     }
 
     @Synchronized
+    fun updateClientName(newName: String) {
+        val trimmed = newName.trim()
+        if (trimmed.isNotEmpty()) {
+            controllers.values.forEach { it.updateClientName(trimmed) }
+            LogManager.i(TAG, "Propagated clientName='$trimmed' to ${controllers.size} controllers")
+        }
+    }
+
+    @Synchronized
     fun disconnect(serverId: String) {
         controllers[serverId]?.disconnect()
         LogManager.i(TAG, "Disconnected from server=$serverId")

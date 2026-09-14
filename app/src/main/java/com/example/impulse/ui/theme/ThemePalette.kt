@@ -152,12 +152,12 @@ private fun oled(
     tertiaryContainer = tertiary.copy(alpha = 0.10f), onTertiaryContainer = primary.copy(alpha = 0.8f),
     error = error, onError = Color(0xFF3D0000),
     errorContainer = Color(0xFF5C1515), onErrorContainer = Color(0xFFFFCDD2),
-    background = Color.Black, onSurface = Color(0xFFEDEDED),
-    surface = Color.Black, onBackground = Color(0xFFEDEDED),
-    surfaceVariant = Color(0xFF070707), onSurfaceVariant = Color(0xFF9E9E9E),
-    surfaceContainer = Color(0xFF040404), surfaceContainerHigh = Color(0xFF0A0A0A),
-    surfaceContainerHighest = Color(0xFF121212),
-    outline = primary.copy(alpha = 0.22f), outlineVariant = primary.copy(alpha = 0.22f),
+    background = Color.Black, onSurface = Color(0xFFE2E2E2),
+    surface = Color.Black, onBackground = Color(0xFFE2E2E2),
+    surfaceVariant = Color(0xFF080808), onSurfaceVariant = Color(0xFF949494),
+    surfaceContainer = Color(0xFF050505), surfaceContainerHigh = Color(0xFF0D0D0D),
+    surfaceContainerHighest = Color(0xFF151515),
+    outline = primary.copy(alpha = 0.20f), outlineVariant = Color(0xFF1E1E20),
     scrim = Color.Black,
     inverseSurface = primary.copy(alpha = 0.82f), inverseOnSurface = Color.Black,
     inversePrimary = primary.copy(alpha = 0.65f),
@@ -165,27 +165,27 @@ private fun oled(
 
 private fun ultraContrast(
     primary: Color,
-    secondary: Color = primary.copy(alpha = 0.8f),
-    tertiary: Color = primary.copy(alpha = 0.65f),
+    secondary: Color = primary.copy(alpha = 0.85f),
+    tertiary: Color = primary.copy(alpha = 0.70f),
     error: Color = Color(0xFFFF8A80),
 ) = ColorSchemeColors(
     primary = primary, onPrimary = Color.Black,
-    primaryContainer = primary.copy(alpha = 0.22f), onPrimaryContainer = Color.White,
+    primaryContainer = primary.copy(alpha = 0.28f), onPrimaryContainer = Color.White,
     secondary = secondary, onSecondary = Color.Black,
-    secondaryContainer = secondary.copy(alpha = 0.18f), onSecondaryContainer = Color.White,
+    secondaryContainer = secondary.copy(alpha = 0.22f), onSecondaryContainer = Color.White,
     tertiary = tertiary, onTertiary = Color.Black,
-    tertiaryContainer = tertiary.copy(alpha = 0.15f), onTertiaryContainer = Color.White,
+    tertiaryContainer = tertiary.copy(alpha = 0.18f), onTertiaryContainer = Color.White,
     error = error, onError = Color.Black,
     errorContainer = Color(0xFF8B0000), onErrorContainer = Color.White,
     background = Color.Black, onBackground = Color.White,
-    surface = Color.Black, onSurface = Color.White,
-    surfaceVariant = Color(0xFF0A0A0A), onSurfaceVariant = Color(0xFFE0E0E0),
-    surfaceContainer = Color(0xFF050505), surfaceContainerHigh = Color(0xFF101010),
-    surfaceContainerHighest = Color(0xFF1A1A1A),
-    outline = Color(0xFF666666), outlineVariant = Color(0xFF555555),
+    surface = Color(0xFF101014), onSurface = Color.White,
+    surfaceVariant = Color(0xFF18181F), onSurfaceVariant = Color(0xFFF2F2F7),
+    surfaceContainer = Color(0xFF16161C), surfaceContainerHigh = Color(0xFF22222A),
+    surfaceContainerHighest = Color(0xFF30303A),
+    outline = Color(0xFF8E8E93), outlineVariant = Color(0xFF636366),
     scrim = Color.Black,
     inverseSurface = Color.White, inverseOnSurface = Color.Black,
-    inversePrimary = primary.copy(alpha = 0.7f),
+    inversePrimary = primary,
 )
 
 private fun Color.lighten(fraction: Float): Color {
@@ -240,9 +240,9 @@ fun generatePaletteFromHue(hue: Float, isDark: Boolean): PaletteTriple {
     // OLED: slightly darker cards on pure black
     val oledPrimary = hslToColor(shiftedHue, 0.90f, 0.55f)
 
-    // Ultra contrast: max saturation
-    val ucPrimary = hslToColor(shiftedHue, 0.95f, 0.60f)
-    val ucLightPrimary = hslToColor(shiftedHue, 0.80f, 0.32f)
+    // Ultra contrast: max saturation & stark contrast
+    val ucPrimary = hslToColor(shiftedHue, 1.0f, 0.65f)
+    val ucLightPrimary = hslToColor(shiftedHue, 0.95f, 0.28f)
 
     return PaletteTriple(
         dark = dark(darkPrimary, darkBg),
@@ -281,25 +281,25 @@ private fun light(primary: Color, bg: Color) = ColorSchemeColors(
 
 private fun lightUltraContrast(
     primary: Color,
-    secondary: Color = primary.copy(alpha = 0.8f),
-    tertiary: Color = primary.copy(alpha = 0.65f),
+    secondary: Color = primary.copy(alpha = 0.85f),
+    tertiary: Color = primary.copy(alpha = 0.70f),
     error: Color = Color(0xFFD32F2F),
 ) = ColorSchemeColors(
     primary = primary, onPrimary = Color.White,
-    primaryContainer = primary.copy(alpha = 0.15f), onPrimaryContainer = primary,
+    primaryContainer = primary.copy(alpha = 0.18f), onPrimaryContainer = primary,
     secondary = secondary, onSecondary = Color.White,
-    secondaryContainer = secondary.copy(alpha = 0.12f), onSecondaryContainer = secondary,
+    secondaryContainer = secondary.copy(alpha = 0.14f), onSecondaryContainer = secondary,
     tertiary = tertiary, onTertiary = Color.White,
-    tertiaryContainer = tertiary.copy(alpha = 0.10f), onTertiaryContainer = tertiary,
+    tertiaryContainer = tertiary.copy(alpha = 0.12f), onTertiaryContainer = secondary,
     error = error, onError = Color.White,
     errorContainer = Color(0xFFFFCDD2), onErrorContainer = Color(0xFF3D0000),
     background = Color.White, onBackground = Color.Black,
     surface = Color.White, onSurface = Color.Black,
-    surfaceVariant = Color(0xFFF5F5F5), onSurfaceVariant = Color(0xFF1A1A1A),
-    surfaceContainer = Color(0xFFFAFAFA), surfaceContainerHigh = Color(0xFFF0F0F0),
-    surfaceContainerHighest = Color(0xFFE8E8E8),
-    outline = Color(0xFF333333), outlineVariant = Color(0xFF999999),
+    surfaceVariant = Color(0xFFE8E9ED), onSurfaceVariant = Color(0xFF1C1C1E),
+    surfaceContainer = Color(0xFFF0F0F3), surfaceContainerHigh = Color(0xFFE2E4E8),
+    surfaceContainerHighest = Color(0xFFD4D6DC),
+    outline = Color(0xFF1C1C1E), outlineVariant = Color(0xFF48484A),
     scrim = Color.Black,
-    inverseSurface = Color(0xFF1A1A1A), inverseOnSurface = Color.White,
-    inversePrimary = primary.copy(alpha = 0.7f),
+    inverseSurface = Color(0xFF1C1C1E), inverseOnSurface = Color.White,
+    inversePrimary = primary,
 )

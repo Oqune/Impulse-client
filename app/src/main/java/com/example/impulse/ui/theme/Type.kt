@@ -9,7 +9,9 @@ import androidx.compose.ui.unit.sp
 import com.example.impulse.R
 
 val JetBrainsMono = FontFamily(Font(R.font.jetbrains_mono))
-val Orbitron = FontFamily(Font(R.font.orbitron))
+// Orbitron lacks Cyrillic glyphs which caused Russian text to fall back to generic system font while English used Orbitron.
+// Unifying brand header typography on JetBrainsMono provides 100% harmonious Latin + Cyrillic glyphs across all Android devices.
+val Orbitron = JetBrainsMono
 
 enum class FontSize(val scale: Float, val displayName: String) {
     SMALL(0.85f, "Маленький"),
@@ -19,31 +21,27 @@ enum class FontSize(val scale: Float, val displayName: String) {
 
 fun getTypography(scale: Float = 1.0f): Typography {
     val s = scale.coerceIn(0.8f, 1.4f)
-    // Keep the branded monospace/Orbitron fonts on modern devices (API 31+);
-    // on older hardware fall back to the system font, which renders cleanly
-    // without the ragged mono-glyph artifacts (Bug: "fonts render badly on old
-    // phones").
-    val modern = android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.S
     val bodyFont = FontFamily.Default
-    val titleFont = if (modern) JetBrainsMono else FontFamily.Default
+    val brandHeaderFont = JetBrainsMono
+    val titleFont = JetBrainsMono
 
     return Typography(
         displayLarge = TextStyle(
-            fontFamily = Orbitron,
+            fontFamily = brandHeaderFont,
             fontWeight = FontWeight.Bold,
             fontSize = scaledFontSize(57.sp, s),
             lineHeight = scaledFontSize(64.sp, s),
             letterSpacing = (-1).sp,
         ),
         displayMedium = TextStyle(
-            fontFamily = Orbitron,
+            fontFamily = brandHeaderFont,
             fontWeight = FontWeight.Bold,
             fontSize = scaledFontSize(45.sp, s),
             lineHeight = scaledFontSize(52.sp, s),
             letterSpacing = (-0.5).sp,
         ),
         displaySmall = TextStyle(
-            fontFamily = Orbitron,
+            fontFamily = brandHeaderFont,
             fontWeight = FontWeight.Bold,
             fontSize = scaledFontSize(36.sp, s),
             lineHeight = scaledFontSize(44.sp, s),
@@ -51,14 +49,14 @@ fun getTypography(scale: Float = 1.0f): Typography {
         ),
 
         headlineLarge = TextStyle(
-            fontFamily = Orbitron,
+            fontFamily = brandHeaderFont,
             fontWeight = FontWeight.SemiBold,
             fontSize = scaledFontSize(32.sp, s),
             lineHeight = scaledFontSize(40.sp, s),
             letterSpacing = 0.sp,
         ),
         headlineMedium = TextStyle(
-            fontFamily = Orbitron,
+            fontFamily = brandHeaderFont,
             fontWeight = FontWeight.SemiBold,
             fontSize = scaledFontSize(28.sp, s),
             lineHeight = scaledFontSize(36.sp, s),
