@@ -894,9 +894,9 @@ class ChatController(private val context: Context) {
             return
         }
 
-        // Clock skew validation: reject messages outside the 72h TTL window
+        // Clock skew validation: reject messages outside the 4-day (96h) TTL + overlap window
         if (env.clientTs != 0L) {
-            val maxClockSkewMs = 72 * 3600 * 1000L
+            val maxClockSkewMs = 4 * 24 * 3600 * 1000L // 96h (72h message TTL + 24h grace overlap)
             val skew = kotlin.math.abs(System.currentTimeMillis() - env.clientTs)
             if (skew > maxClockSkewMs) {
                 LogManager.w(TAG, "REJECT msg $realId from ${env.sender}: clock skew exceeded ($skew ms)")
