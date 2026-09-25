@@ -9,7 +9,7 @@ import androidx.fragment.app.FragmentActivity
 
 class BiometricHelper(private val context: Context) {
 
-    fun isBiometricAvailable(): Boolean {
+    fun isHardwareAvailable(): Boolean {
         val biometricManager = BiometricManager.from(context)
         val authenticators = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
             BiometricManager.Authenticators.BIOMETRIC_STRONG or
@@ -17,9 +17,11 @@ class BiometricHelper(private val context: Context) {
         } else {
             BiometricManager.Authenticators.BIOMETRIC_STRONG
         }
-        val hardwareOk = biometricManager.canAuthenticate(authenticators) == BiometricManager.BIOMETRIC_SUCCESS
-        if (!hardwareOk) return false
+        return biometricManager.canAuthenticate(authenticators) == BiometricManager.BIOMETRIC_SUCCESS
+    }
 
+    fun isBiometricAvailable(): Boolean {
+        if (!isHardwareAvailable()) return false
         val settingsEnabled = com.example.impulse.data.ServerPreferences(context).getBiometricEnabled()
         return settingsEnabled
     }

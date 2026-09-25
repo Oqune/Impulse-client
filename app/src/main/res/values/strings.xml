@@ -142,7 +142,15 @@
     <string name="app_settings_scale">Scale</string>
     <string name="app_settings_security">Security</string>
     <string name="app_settings_biometric">Biometric lock</string>
-    <string name="app_settings_biometric_desc">Fingerprint/face on launch</string>
+    <string name="app_settings_biometric_desc">Fingerprint or face verification on launch</string>
+    <string name="app_settings_biometric_warning_title">Disable Biometric Lock</string>
+    <string name="app_settings_biometric_warning_msg">Disabling biometric protection allows anyone with physical access to your unlocked device to open the messenger and view conversations without verification. Disable protection?</string>
+    <string name="app_settings_biometric_disable_confirm">Disable</string>
+    <string name="app_settings_allow_screenshots">Allow screenshots</string>
+    <string name="app_settings_allow_screenshots_desc">Disable system FLAG_SECURE protection</string>
+    <string name="app_settings_allow_screenshots_warning_title">Security Warning</string>
+    <string name="app_settings_allow_screenshots_warning_msg">Allowing screenshots disables FLAG_SECURE protection. Third-party apps with screen recording permissions, screenshot tools, and the Android recents menu will be able to capture and display plaintext chat messages. Allow screenshots?</string>
+    <string name="app_settings_allow_screenshots_confirm">Allow</string>
     <string name="app_settings_debug">Debug</string>
     <string name="app_settings_send_logs">Send logs</string>
     <string name="app_settings_diagnostics">Diagnostics: %1$s KB</string>

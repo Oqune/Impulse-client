@@ -65,6 +65,10 @@ fun AppSettingsContent(
     }
 
     var biometricEnabled by remember { mutableStateOf(serverPreferences.getBiometricEnabled()) }
+    var allowScreenshots by remember { mutableStateOf(serverPreferences.getAllowScreenshots()) }
+    var showScreenshotDialog by remember { mutableStateOf(false) }
+    var showBiometricDisableDialog by remember { mutableStateOf(false) }
+    val biometricHelper = remember { com.example.impulse.util.BiometricHelper(context) }
 
     Column(
         modifier = modifier
@@ -625,9 +629,38 @@ fun AppSettingsContent(
                     title = stringResource(R.string.app_settings_biometric),
                     description = stringResource(R.string.app_settings_biometric_desc),
                     checked = biometricEnabled,
-                    onCheckedChange = {
-                        biometricEnabled = it
-                        serverPreferences.saveBiometricEnabled(it)
+                    onCheckedChange = { desired ->
+                        if (!desired) {
+                            showBiometricDisableDialog = true
+                        } else {
+                            if (biometricHelper.isHardwareAvailable()) {
+                                biometricEnabled = true
+                                serverPreferences.saveBiometricEnabled(true)
+                            } else {
+                                Toast.makeText(
+                                    context,
+                                    context.getString(R.string.biometric_unavailable),
+                                    Toast.LENGTH_SHORT
+                                ).show()
+                            }
+                        }
+                    }
+                )
+
+                Spacer(Modifier.height(12.dp))
+
+                ImpulseToggle(
+                    title = stringResource(R.string.app_settings_allow_screenshots),
+                    description = stringResource(R.string.app_settings_allow_screenshots_desc),
+                    checked = allowScreenshots,
+                    onCheckedChange = { desired ->
+                        if (desired) {
+                            showScreenshotDialog = true
+                        } else {
+                            allowScreenshots = false
+                            serverPreferences.saveAllowScreenshots(false)
+                            (context as? com.example.impulse.MainActivity)?.applyScreenshotProtection(false)
+                        }
                     }
                 )
             }
@@ -671,6 +704,93 @@ fun AppSettingsContent(
                 )
             }
         }
+    }
+
+    if (showScreenshotDialog) {
+        AlertDialog(
+            onDismissRequest = { showScreenshotDialog = false },
+            title = {
+                Text(
+                    text = stringResource(R.string.app_settings_allow_screenshots_warning_title),
+                    style = MaterialTheme.typography.titleMedium,
+                    fontWeight = FontWeight.Bold,
+                    color = MaterialTheme.colorScheme.error
+                )
+            },
+            text = {
+                Text(
+                    text = stringResource(R.string.app_settings_allow_screenshots_warning_msg),
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+            },
+            confirmButton = {
+                TextButton(
+                    onClick = {
+                        showScreenshotDialog = false
+                        allowScreenshots = true
+                        serverPreferences.saveAllowScreenshots(true)
+                        (context as? com.example.impulse.MainActivity)?.applyScreenshotProtection(true)
+                    }
+                ) {
+                    Text(
+                        text = stringResource(R.string.app_settings_allow_screenshots_confirm),
+                        color = MaterialTheme.colorScheme.error,
+                        fontWeight = FontWeight.Bold
+                    )
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { showScreenshotDialog = false }) {
+                    Text(text = stringResource(R.string.common_cancel))
+                }
+            },
+            shape = CardShape,
+            containerColor = MaterialTheme.colorScheme.surfaceContainerHigh
+        )
+    }
+
+    if (showBiometricDisableDialog) {
+        AlertDialog(
+            onDismissRequest = { showBiometricDisableDialog = false },
+            title = {
+                Text(
+                    text = stringResource(R.string.app_settings_biometric_warning_title),
+                    style = MaterialTheme.typography.titleMedium,
+                    fontWeight = FontWeight.Bold,
+                    color = MaterialTheme.colorScheme.error
+                )
+            },
+            text = {
+                Text(
+                    text = stringResource(R.string.app_settings_biometric_warning_msg),
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+            },
+            confirmButton = {
+                TextButton(
+                    onClick = {
+                        showBiometricDisableDialog = false
+                        biometricEnabled = false
+                        serverPreferences.saveBiometricEnabled(false)
+                    }
+                ) {
+                    Text(
+                        text = stringResource(R.string.app_settings_biometric_disable_confirm),
+                        color = MaterialTheme.colorScheme.error,
+                        fontWeight = FontWeight.Bold
+                    )
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { showBiometricDisableDialog = false }) {
+                    Text(text = stringResource(R.string.common_cancel))
+                }
+            },
+            shape = CardShape,
+            containerColor = MaterialTheme.colorScheme.surfaceContainerHigh
+        )
     }
 }
 

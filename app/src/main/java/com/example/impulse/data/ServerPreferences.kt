@@ -21,6 +21,7 @@ class ServerPreferences(context: Context) {
         private const val SERVER_AUTO_CONNECT_PREFIX = "server_auto_connect_"
         private const val SERVER_AUTO_RECONNECT_PREFIX = "server_auto_reconnect_"
         private const val BIOMETRIC_ENABLED_KEY = "biometric_enabled"
+        private const val ALLOW_SCREENSHOTS_KEY = "allow_screenshots"
         private const val CLIENT_NAME_KEY = "client_name"
         private const val SECURE_PWD_PREFIX = "server_pwd_"
     }
@@ -129,6 +130,14 @@ class ServerPreferences(context: Context) {
 
     fun saveBiometricEnabled(enabled: Boolean) {
         prefs.edit().putBoolean(BIOMETRIC_ENABLED_KEY, enabled).apply()
+    }
+
+    fun getAllowScreenshots(): Boolean {
+        return prefs.getBoolean(ALLOW_SCREENSHOTS_KEY, false)
+    }
+
+    fun saveAllowScreenshots(allowed: Boolean) {
+        prefs.edit().putBoolean(ALLOW_SCREENSHOTS_KEY, allowed).apply()
     }
 
     fun getClientName(): String {

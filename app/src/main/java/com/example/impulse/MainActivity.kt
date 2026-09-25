@@ -46,10 +46,8 @@ class MainActivity : FragmentActivity() {
         super.onCreate(savedInstanceState)
 
         enableEdgeToEdge()
-        window.setFlags(
-            android.view.WindowManager.LayoutParams.FLAG_SECURE,
-            android.view.WindowManager.LayoutParams.FLAG_SECURE
-        )
+        val serverPreferences = ServerPreferences(applicationContext)
+        applyScreenshotProtection(serverPreferences.getAllowScreenshots())
 
         val themePreferences = ThemePreferences(applicationContext)
         ThemeSettings.initialize(themePreferences)
@@ -57,7 +55,7 @@ class MainActivity : FragmentActivity() {
         setContent {
             ImpulseTheme {
                 val isUnlocked = androidx.compose.runtime.saveable.rememberSaveable { mutableStateOf(false) }
-                val biometricHelper = com.example.impulse.util.BiometricHelper(applicationContext)
+                val biometricHelper = remember { com.example.impulse.util.BiometricHelper(applicationContext) }
 
                 if (isUnlocked.value.not() && biometricHelper.isBiometricAvailable()) {
                     BiometricLockScreen(
@@ -67,6 +65,17 @@ class MainActivity : FragmentActivity() {
                     MainScreen()
                 }
             }
+        }
+    }
+
+    fun applyScreenshotProtection(allowScreenshots: Boolean) {
+        if (allowScreenshots) {
+            window.clearFlags(android.view.WindowManager.LayoutParams.FLAG_SECURE)
+        } else {
+            window.setFlags(
+                android.view.WindowManager.LayoutParams.FLAG_SECURE,
+                android.view.WindowManager.LayoutParams.FLAG_SECURE
+            )
         }
     }
 
