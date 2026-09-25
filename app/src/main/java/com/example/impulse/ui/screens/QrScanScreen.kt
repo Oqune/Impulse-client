@@ -103,8 +103,9 @@ fun QrScanScreen(
         if (!hasCameraPermission) permissionLauncher.launch(Manifest.permission.CAMERA)
     }
 
-    Scaffold(
-        topBar = {
+    DecorativeBackground(modifier = Modifier.fillMaxSize()) {
+        Scaffold(
+            topBar = {
             TopAppBar(
                 title = { },
                 navigationIcon = {
@@ -381,6 +382,7 @@ fun QrScanScreen(
         )
     }
 }
+}
 
 @Composable
 private fun ManualEntryDialog(
@@ -394,6 +396,8 @@ private fun ManualEntryDialog(
 ) {
     AlertDialog(
         onDismissRequest = onDismiss,
+        shape = CardShape,
+        containerColor = MaterialTheme.colorScheme.surfaceContainerHigh,
         title = { Text(stringResource(R.string.qr_manual_title)) },
         text = {
             Column {

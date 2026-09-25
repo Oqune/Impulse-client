@@ -834,6 +834,8 @@ private fun AddServerDialog(
 
     AlertDialog(
         onDismissRequest = onDismiss,
+        shape = CardShape,
+        containerColor = MaterialTheme.colorScheme.surfaceContainerHigh,
         title = { Text(stringResource(R.string.dialog_new_server)) },
         text = {
             Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -902,6 +904,5 @@ private fun AddServerDialog(
         dismissButton = {
             TextButton(onClick = onDismiss) { Text(stringResource(R.string.common_cancel)) }
         },
-        shape = RoundedCornerShape(16.dp),
     )
 }

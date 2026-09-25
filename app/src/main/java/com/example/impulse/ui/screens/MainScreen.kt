@@ -187,15 +187,21 @@ fun MainScreen() {
             }
         }
 
-        // Floating pill dock bar
-        Box(
-            modifier = Modifier
-                .align(Alignment.BottomCenter)
-                .fillMaxWidth()
-                .navigationBarsPadding()
-                .padding(start = 20.dp, end = 20.dp, top = 4.dp, bottom = 10.dp),
-            contentAlignment = Alignment.Center
+        // Floating pill dock bar (hidden when full-screen overlays are active)
+        val hasOverlay = activeChatServerId != null || chatsServerId != null || qrScanServerId != null
+        AnimatedVisibility(
+            visible = !hasOverlay,
+            enter = fadeIn(tween(180)) + slideInVertically(tween(180)) { it / 2 },
+            exit = fadeOut(tween(140)) + slideOutVertically(tween(140)) { it / 2 },
+            modifier = Modifier.align(Alignment.BottomCenter)
         ) {
+            Box(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .navigationBarsPadding()
+                    .padding(start = 20.dp, end = 20.dp, top = 4.dp, bottom = 10.dp),
+                contentAlignment = Alignment.Center
+            ) {
             Surface(
                 shape = CircleShape,
                 color = MaterialTheme.colorScheme.surface.copy(alpha = 0.92f),
@@ -272,6 +278,7 @@ fun MainScreen() {
                 }
             }
         }
+        }
 
         // Chat overlay (slides in from right)
         AnimatedVisibility(
@@ -284,7 +291,10 @@ fun MainScreen() {
                 animationSpec = tween(250),
                 targetOffsetX = { it }
             ) + fadeOut(tween(200)),
-            modifier = Modifier.fillMaxSize().zIndex(3f)
+            modifier = Modifier
+                .fillMaxSize()
+                .zIndex(3f)
+                .background(MaterialTheme.colorScheme.background)
         ) {
             activeChatServer?.let { server ->
                 ChatScreen(
@@ -309,7 +319,10 @@ fun MainScreen() {
                 animationSpec = tween(250),
                 targetOffsetX = { it }
             ) + fadeOut(tween(200)),
-            modifier = Modifier.fillMaxSize().zIndex(2.5f)
+            modifier = Modifier
+                .fillMaxSize()
+                .zIndex(2.5f)
+                .background(MaterialTheme.colorScheme.background)
         ) {
             chatsServer?.let { server ->
                 val ctrl = remember(server.id) { connectionManager.getController(server) }
@@ -379,7 +392,10 @@ fun MainScreen() {
                 animationSpec = tween(250),
                 targetOffsetY = { it }
             ) + fadeOut(tween(200)),
-            modifier = Modifier.fillMaxSize().zIndex(4f)
+            modifier = Modifier
+                .fillMaxSize()
+                .zIndex(4f)
+                .background(MaterialTheme.colorScheme.background)
         ) {
             qrScanServer?.let { server ->
                 val certManager = remember { com.example.impulse.security.TrustedCertManager(context) }

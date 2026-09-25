@@ -694,6 +694,8 @@ fun ChatScreen(
                 if (showClearHistoryDialog) {
                     AlertDialog(
                         onDismissRequest = { showClearHistoryDialog = false },
+                        shape = CardShape,
+                        containerColor = MaterialTheme.colorScheme.surfaceContainerHigh,
                         title = { Text(stringResource(R.string.chat_clear_history_title)) },
                         text = { Text(stringResource(R.string.chat_clear_history_message)) },
                         confirmButton = {

@@ -296,7 +296,8 @@ fun UserSettingsContent(
 
         AlertDialog(
             onDismissRequest = { showNameDialog = false },
-            containerColor = MaterialTheme.colorScheme.surface,
+            shape = CardShape,
+            containerColor = MaterialTheme.colorScheme.surfaceContainerHigh,
             tonalElevation = 0.dp,
             title = { Text(stringResource(R.string.user_change_name_title)) },
             text = {
@@ -360,6 +361,8 @@ fun UserSettingsContent(
     if (showResetKeysDialog) {
         AlertDialog(
             onDismissRequest = { showResetKeysDialog = false },
+            shape = CardShape,
+            containerColor = MaterialTheme.colorScheme.surfaceContainerHigh,
             icon = {
                 Icon(
                     Icons.Default.Warning,
@@ -411,6 +414,7 @@ fun UserSettingsContent(
                 exportedPassword = null
             },
             shape = CardShape,
+            containerColor = MaterialTheme.colorScheme.surfaceContainerHigh,
             icon = {
                 Icon(
                     Icons.Default.Warning,
@@ -482,6 +486,7 @@ fun UserSettingsContent(
                 importPassword = ""
             },
             shape = CardShape,
+            containerColor = MaterialTheme.colorScheme.surfaceContainerHigh,
             icon = {
                 Icon(
                     Icons.Default.FileDownload,

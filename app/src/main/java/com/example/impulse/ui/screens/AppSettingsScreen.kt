@@ -441,7 +441,10 @@ fun AppSettingsContent(
                     }
                     DropdownMenu(
                         expanded = expanded,
-                        onDismissRequest = { expanded = false }
+                        onDismissRequest = { expanded = false },
+                        shape = CardShape,
+                        containerColor = MaterialTheme.colorScheme.surfaceContainerHigh,
+                        border = BorderStroke(StandardBorderWidth, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.4f)),
                     ) {
                         languages.forEach { (code, labelRes) ->
                             DropdownMenuItem(
