@@ -22,7 +22,7 @@ fun ImpulseTheme(
     content: @Composable () -> Unit
 ) {
     val isSystemDark = isSystemInDarkTheme()
-    remember(isSystemDark) { ThemeSettings.setSystemDark(isSystemDark) }
+    SideEffect { ThemeSettings.setSystemDark(isSystemDark) }
 
     val darkTheme = when (ThemeSettings.themeMode) {
         ThemeMode.LIGHT -> false

@@ -98,6 +98,11 @@ android {
         // wire format without Robolectric.
         unitTests.isReturnDefaultValues = true
     }
+    lint {
+        abortOnError = true
+        checkReleaseBuilds = false
+        warning += "LocalContextGetResourceValueCall"
+    }
 }
 
 // Force cached transitive versions so the project builds fully offline.

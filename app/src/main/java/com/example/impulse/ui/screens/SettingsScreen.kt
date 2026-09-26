@@ -25,6 +25,7 @@ import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
@@ -492,8 +493,9 @@ private fun ServerExpandableSettings(
                                             fontSize = 10.sp,
                                             color = MaterialTheme.colorScheme.onSurfaceVariant,
                                         )
+                                        val locale = LocalConfiguration.current.locales[0]
                                         Text(
-                                            stringResource(R.string.settings_cert_added, java.text.SimpleDateFormat("dd.MM.yy HH:mm", java.util.Locale.getDefault()).format(java.util.Date(info.issuedAt))),
+                                            stringResource(R.string.settings_cert_added, java.text.SimpleDateFormat("dd.MM.yy HH:mm", locale).format(java.util.Date(info.issuedAt))),
                                             style = MaterialTheme.typography.labelSmall,
                                             fontSize = 10.sp,
                                             color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.85f),
