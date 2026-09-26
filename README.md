@@ -41,7 +41,7 @@
 - **TOFU certificate pinning:** QR scan (`impulse-cert:<sha256>`), stored in an encrypted `SecureStorage` (Android Keystore + AES-256-GCM); up to two hashes (current + next) are kept for seamless certificate rotation.
 - **Encrypted local history:** Room DB where each message body is encrypted with AES-256-GCM before being written; automatic **72-hour TTL** cleanup.
 - **Jetpack Compose (Material 3) UI:** Pure OLED dark mode, responsive layout, automatic reconnect with exponential backoff, foreground service, and boot-time reconnect.
-- **Secure key export/import:** PBKDF2 + AES-256-GCM for moving your ML-KEM identity across devices, with a fresh ML-DSA key generated on import.
+- **Secure key export/import:** Argon2id + AES-256-GCM for moving your ML-KEM identity across devices, with a fresh ML-DSA key generated on import.
 - **Interface & Security:** Light / Dark / System themes and optional biometric app lock.
 
 ## Binary protocol (opcodes `0x11`–`0x34`)
