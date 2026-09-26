@@ -25,7 +25,7 @@
 
 | Layer | Technology | Details |
 | :--- | :--- | :--- |
-| **Transport** | WebTransport / QUIC | HTTP/3 streams and datagrams over UDP port 4433 |
+| **Transport** | WebTransport / QUIC | HTTP/3 streams over UDP 4433, IPv4/IPv6 Dual-Stack, RFC 3986, mDNS |
 | **Key Encapsulation** | ML-KEM-768 | NIST FIPS 203 (Kyber-768) per-recipient encryption |
 | **Digital Signatures** | ML-DSA-65 | NIST FIPS 204 (Dilithium3) PQ message authentication |
 | **Symmetric Encryption** | AES-256-GCM | Authenticated encryption with ephemeral IVs |
@@ -36,7 +36,7 @@
 
 ## Features
 
-- **WebTransport transport:** Android 9+ support, replacing WebSocket entirely with HTTP/3 datagrams and streams.
+- **Universal WebTransport (IPv4/IPv6 Dual-Stack):** Android 9+ support with RFC 3986 endpoint parsing (IPv4, `[IPv6]:port`, link-local `[fe80::1%wlan0]:port`, and mDNS `impulse.local:4433`).
 - **Post-quantum E2EE:** Per-Recipient KEM Wrapping — each message is individually encrypted for every recipient using **ML-KEM-768** encapsulation. The sender encrypts the message with **AES-256-GCM** and signs it with **ML-DSA-65 (Dilithium3)** so receivers authenticate the sender with PQ security.
 - **TOFU certificate pinning:** QR scan (`impulse-cert:<sha256>`), stored in an encrypted `SecureStorage` (Android Keystore + AES-256-GCM); up to two hashes (current + next) are kept for seamless certificate rotation.
 - **Encrypted local history:** Room DB where each message body is encrypted with AES-256-GCM before being written; automatic **72-hour TTL** cleanup.

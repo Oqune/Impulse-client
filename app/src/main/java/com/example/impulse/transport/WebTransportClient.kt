@@ -69,11 +69,26 @@ class WebTransportClient(
 
     fun connect(url: String) {
         intentionalClose.set(false)
-        val uri = URI(url)
+        val cleanUrl = url.trim()
+        val withoutScheme = cleanUrl.removePrefix("https://").removePrefix("http://")
+        val endpoint = withoutScheme.substringBefore('/')
+        val path = if (withoutScheme.contains('/')) "/" + withoutScheme.substringAfter('/') else "/"
+
+        val (host, port) = try {
+            com.example.impulse.data.parseServerEndpoint(endpoint, defaultPort = 4433)
+        } catch (_: Exception) {
+            try {
+                val uri = URI(url)
+                Pair(uri.host ?: endpoint, if (uri.port > 0) uri.port else 4433)
+            } catch (_: Exception) {
+                Pair(endpoint, 4433)
+            }
+        }
+
         synchronized(lock) {
-            currentHost = uri.host
-            if (uri.port > 0) currentPort = uri.port
-            currentPath = uri.path.ifEmpty { "/" }
+            currentHost = host
+            currentPort = port
+            currentPath = path.ifEmpty { "/" }
         }
         LogManager.i(TAG, "connect() url=$url host=$currentHost port=$currentPort path=$currentPath")
         startConnectTimeout()
@@ -203,16 +218,22 @@ class WebTransportClient(
                     idleTimeout = 120.seconds,
                     keepAliveInterval = 15.seconds,
                 )
+                val targetHost = resolveTargetHost(currentHost)
                 withHttp3Connection(
-                    hostname = currentHost,
+                    hostname = targetHost,
                     port = currentPort,
                     quicOptions = quicOptions,
                     timeout = 300.seconds,
                     webTransport = WebTransportOptions(maxSessions = 1),
                 ) {
                     LogManager.i(TAG, "HTTP/3 connection established, opening WebTransport session...")
+                    val authority = if (currentHost.contains(":") && !currentHost.startsWith("[")) {
+                        "[$currentHost]:$currentPort"
+                    } else {
+                        "$currentHost:$currentPort"
+                    }
                     val wtSession = connectWebTransport(
-                        authority = currentHost,
+                        authority = authority,
                         path = currentPath,
                     )
                     LogManager.i(TAG, "WebTransport session opened, opening bidirectional stream...")
@@ -425,6 +446,26 @@ Protocol.OP_NEW_CERT_HASH -> {
     private fun setState(s: ConnectionState) {
         _state.value = s
         onState(s)
+    }
+
+    /**
+     * Resolves a hostname with Happy Eyeballs / Dual-Stack preference (preferring IPv6 if available).
+     * If the host is already an IPv4 or IPv6 address literal, it is returned directly without DNS lookup.
+     */
+    private fun resolveTargetHost(host: String): String {
+        if (com.example.impulse.data.isValidIpv4(host) || com.example.impulse.data.isValidIpv6(host)) {
+            return host
+        }
+        return try {
+            val addrs = java.net.InetAddress.getAllByName(host)
+            val preferred = addrs.firstOrNull { it is java.net.Inet6Address } ?: addrs.firstOrNull()
+            val resolved = preferred?.hostAddress?.substringBefore('%') ?: host
+            LogManager.i(TAG, "DNS resolved $host -> $resolved (candidates=${addrs.size})")
+            resolved
+        } catch (e: Exception) {
+            LogManager.w(TAG, "DNS resolution failed for $host (${e.message}), using hostname directly")
+            host
+        }
     }
 
     companion object {

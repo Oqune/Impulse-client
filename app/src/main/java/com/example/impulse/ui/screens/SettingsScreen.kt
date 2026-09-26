@@ -38,6 +38,8 @@ import androidx.compose.ui.unit.sp
 import androidx.compose.foundation.text.KeyboardOptions
 import com.example.impulse.ConnectionManager
 import com.example.impulse.data.ServerConfig
+import com.example.impulse.data.isValidHost
+import com.example.impulse.data.parseServerEndpoint
 import com.example.impulse.data.ServerPreferences
 import com.example.impulse.transport.ConnectionState
 import androidx.compose.ui.res.stringResource
@@ -720,14 +722,20 @@ private fun ServerExpandableSettings(
                         )
                         OutlinedButton(
                             onClick = {
-                                val portInt = editPort.toIntOrNull()
-                                addressError = editAddress.isBlank()
-                                portError = portInt == null || portInt !in 1..65535
+                                val parsedResult = try {
+                                    val defaultP = editPort.toIntOrNull() ?: 4433
+                                    parseServerEndpoint(editAddress.trim(), defaultP)
+                                } catch (_: Exception) {
+                                    null
+                                }
+                                val (parsedHost, parsedPort) = parsedResult ?: Pair("", 0)
+                                addressError = parsedResult == null || !isValidHost(parsedHost)
+                                portError = parsedPort !in 1..65535
                                 if (!addressError && !portError && editName.isNotBlank()) {
                                     val updated = server.copy(
                                         name = editName.trim(),
-                                        ipAddress = editAddress.trim(),
-                                        port = portInt!!,
+                                        ipAddress = parsedHost,
+                                        port = parsedPort,
                                         password = editPassword.trim()
                                     )
                                     serverPreferences.updateCustomServer(updated)
@@ -887,14 +895,20 @@ private fun AddServerDialog(
         },
         confirmButton = {
             TextButton(onClick = {
-                val portInt = port.toIntOrNull()
-                addressError = address.isBlank()
-                portError = portInt == null || portInt !in 1..65535
+                val parsedResult = try {
+                    val defaultP = port.toIntOrNull() ?: 4433
+                    parseServerEndpoint(address.trim(), defaultP)
+                } catch (_: Exception) {
+                    null
+                }
+                val (parsedHost, parsedPort) = parsedResult ?: Pair("", 0)
+                addressError = parsedResult == null || !isValidHost(parsedHost)
+                portError = parsedPort !in 1..65535
                 if (!addressError && !portError && name.isNotBlank()) {
                     onAdd(ServerConfig(
                         name = name.trim(),
-                        ipAddress = address.trim(),
-                        port = portInt!!,
+                        ipAddress = parsedHost,
+                        port = parsedPort,
                         description = "",
                         password = password.trim(),
                     ))
