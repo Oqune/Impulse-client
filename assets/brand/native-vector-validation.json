@@ -1,0 +1,12 @@
+{
+  "segments": 36,
+  "path_characters": 1756,
+  "maximum_fit_error_units": 0.030857369412987067,
+  "sampled_hausdorff_error_units": 0.03070172544573028,
+  "tip": [
+    103,
+    -3
+  ],
+  "maximum_displacement_at_288dp": 0.02694076407862832,
+  "purpose": "Compact native Android vector; full SVG and colour bitmaps retain the exact master."
+}

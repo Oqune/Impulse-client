@@ -11,10 +11,12 @@ tags:
   - quic
 status: production-ready-hardening
 version: "Client v3.2.0 / Server v3.1.0 (Protocol v3)"
-updated: 2026-09-26
+updated: 2026-10-08
 ---
 
 # Impulse — Post-Quantum E2EE LAN Messenger
+
+> **2026-10-08 — Identity V18:** общий оптический знак внедрён в launcher/adaptive/themed icons, splash и Home клиента, Windows EXE icon / TUI / Linux packaging сервера и README-шапки обоих репозиториев. Динамические UI-цвета клиента сохранены. Client: 127 tests, assembleDebug/lintDebug; Server: 126 passed / 2 expected ignored, build/clippy. Проверены готовые APK/PE, safe zone и TUI snapshot. Live Android launch не выполнялся (нет device/AVD). См. [[docs/specs/2026-10-08-brand-identity-integration]] и [[docs/audit/2026-10-08-brand-identity-integration]].
 
 > **О проекте:** Децентрализованный сквозно-шифрованный LAN-мессенджер на базе протокола WebTransport (QUIC) с аппаратной устойчивостью к квантовым компьютерам.  
 > **Инженерный регламент и видение:** Разработка ведётся в соответствии с [[AI_MANIFESTO|Манифестом AI-Assisted Engineering]], [[docs/VISION|Документом видения (Vision & Roadmap)]] и [[docs/SYSTEM_REGISTRY|Единым каноническим реестром системных параметров]] по строгой методологии **Spec-First** и **Test-Gated**.

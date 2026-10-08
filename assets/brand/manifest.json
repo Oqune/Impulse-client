@@ -1,0 +1,18 @@
+{
+  "identity": "V18",
+  "primary_frame": "graphite",
+  "files": {
+    "cobalt.svg": "66310416106459ead8d942808756d16e02b4abcf8c81b3acd72cedfe1db145c9",
+    "geometry.json": "7eb20fb0168dbba431cb05d3f7bf36813266dda1d23e22562f4d63754b79b6eb",
+    "icon-256.png": "cd39d20de25ad4ce007bbeb121fb8db7871f54189f725182c18f1c3d8a9fce64",
+    "icon.png": "374d4f2776f9969ab1050e64288073f31ef977cb709166a661b84dbb2915e972",
+    "icon.svg": "90181a42e13ad410555fac62fe07714d5f4896e98059bc844649b1ae506d4c89",
+    "mark.png": "104cae93225e866ae8828af9f061c16e4c63af360036f4d3bf1f9b1b51e2deea",
+    "mark.svg": "8b05e56ffd04afd4d4287e81527a0381d90f47715779f044a2c54e2b93736d79",
+    "native-vector-validation.json": "acba0d0cef4cda7577565b293be5493d29381b5b4150d6dcc14a7effd7566812",
+    "readme-banner.png": "d7f87463670c8037b71f3f9c79c1781cd254b6c62422b4d3dbcd3b68622231b2",
+    "readme-banner.svg": "f2d616e825337eb6beb7cfd0c036038ab9128da6aced5161a4daa8e07807fb93",
+    "social-card.png": "8b43219bea02dc8be7af317ac85eaa75bca84518d604c321a3966d3af08e71e1",
+    "social-card.svg": "91bc1189978f08adfaf2224ce713c06bbe33e33224840dc306aabf46bbb7fb97"
+  }
+}

@@ -2,6 +2,7 @@
 <resources>
     <!-- App -->
     <string name="app_name">Impulse</string>
+    <string name="impulse_logo_description">Логотип Impulse</string>
 
     <!-- Common -->
     <string name="common_ok">OK</string>

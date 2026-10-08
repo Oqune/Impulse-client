@@ -1,5 +1,7 @@
 <div align="center">
 
+<img src="assets/brand/readme-banner.png" alt="Impulse Client" width="100%">
+
 # Impulse Client
 
 **Post-Quantum End-to-End Encrypted Sovereign LAN Messenger**
