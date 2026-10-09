@@ -6,4 +6,4 @@ Keep the daemon's required Java major at 21, remove the IDE-specific vendor and 
 
 Validation: testDebugUnitTest locally with the installed Java 21; publish the fix on the existing PR and check the GitHub build, including release APK assembly.
 
-Local testDebugUnitTest and assembleDebug passed after removing the vendor pin (127 existing unit tests). The GitHub run will validate the Linux Temurin path.
+Local testDebugUnitTest and assembleDebug passed after removing the vendor pin (127 existing unit tests). GitHub run 37827161094 passed using Linux Temurin 21, including unit tests and release APK assembly.

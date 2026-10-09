@@ -16,9 +16,11 @@ updated: 2026-10-08
 
 # Impulse — Post-Quantum E2EE LAN Messenger
 
+> **2026-10-09 — Branding validation:** Client PR #1 и Server PR #2 опубликованы, проверки CI кода проходят. Новый знак проверен на launcher, splash и Home отдельного Android API 36 AVD в обеих темах. Защита скриншотов восстановлена; эмулятор выключен. Master и GitHub social preview пока не обновлены. См. [[docs/audit/2026-10-09-brand-live-validation]].
+
 > **2026-10-08 — GitHub validation:** опубликована ветка идентичности V18 и открыт PR. В CI устранена привязка Gradle daemon к JetBrains Java и нерабочим Foojay URLs: требуется Java 21 любого установленного vendor, как в Android Studio и setup-java. Локальные testDebugUnitTest/assembleDebug проходят. См. [[docs/specs/2026-10-08-ci-toolchain-portability]].
 
-> **2026-10-08 — Identity V18:** общий оптический знак внедрён в launcher/adaptive/themed icons, splash и Home клиента, Windows EXE icon / TUI / Linux packaging сервера и README-шапки обоих репозиториев. Динамические UI-цвета клиента сохранены. Client: 127 tests, assembleDebug/lintDebug; Server: 126 passed / 2 expected ignored, build/clippy. Проверены готовые APK/PE, safe zone и TUI snapshot. Live Android launch не выполнялся (нет device/AVD). См. [[docs/specs/2026-10-08-brand-identity-integration]] и [[docs/audit/2026-10-08-brand-identity-integration]].
+> **2026-10-08 — Identity V18:** общий оптический знак внедрён в launcher/adaptive/themed icons, splash и Home клиента, Windows EXE icon / TUI / Linux packaging сервера и README-шапки обоих репозиториев. Динамические UI-цвета клиента сохранены. Client: 127 tests, assembleDebug/lintDebug; Server: 126 passed / 2 expected ignored, build/clippy. Проверены готовые APK/PE, safe zone и TUI snapshot. 09.10.2026 launcher/splash/Home проверены на Android API 36 AVD, включая светлую/тёмную тему; защита скриншотов восстановлена, эмулятор выключен. См. [[docs/specs/2026-10-08-brand-identity-integration]] и [[docs/audit/2026-10-08-brand-identity-integration]].
 
 > **О проекте:** Децентрализованный сквозно-шифрованный LAN-мессенджер на базе протокола WebTransport (QUIC) с аппаратной устойчивостью к квантовым компьютерам.  
 > **Инженерный регламент и видение:** Разработка ведётся в соответствии с [[AI_MANIFESTO|Манифестом AI-Assisted Engineering]], [[docs/VISION|Документом видения (Vision & Roadmap)]] и [[docs/SYSTEM_REGISTRY|Единым каноническим реестром системных параметров]] по строгой методологии **Spec-First** и **Test-Gated**.
