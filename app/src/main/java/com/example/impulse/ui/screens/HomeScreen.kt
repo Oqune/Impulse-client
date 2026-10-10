@@ -15,17 +15,11 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
-import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.graphics.Path
-import androidx.compose.ui.graphics.PathEffect
-import androidx.compose.ui.graphics.StrokeCap
-import androidx.compose.ui.graphics.StrokeJoin
-import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.draw.drawWithContent
 import androidx.compose.ui.graphics.BlendMode
@@ -45,6 +39,7 @@ import com.example.impulse.data.ServerConfig
 import com.example.impulse.data.ServerPreferences
 import com.example.impulse.transport.ConnectionState
 import com.example.impulse.ui.theme.*
+import com.example.impulse.ui.components.ImpulseLogo
 
 @Composable
 fun HomeScreen(
@@ -116,6 +111,8 @@ fun HomeScreen(
                 horizontalAlignment = Alignment.CenterHorizontally,
                 modifier = Modifier.padding(top = 12.dp, bottom = 4.dp)
             ) {
+                ImpulseLogo(modifier = Modifier.size(96.dp))
+                Spacer(Modifier.height(8.dp))
                 val titleText = stringResource(R.string.app_name)
                 val density = LocalDensity.current.density
 
@@ -473,146 +470,3 @@ private data class TitleAnimations(
     val shimmerSweep: Float,
     val jitterPhase: Float
 )
-
-/**
- * Bespoke Quantum Impulse Emblem:
- * - Outer cryptographic hexagon with glowing aura
- * - Inner dashed quantum lattice
- * - Dynamic high-frequency Impulse waveform spike with pulse nodes
- * - Active chrome/silver shimmer sweep reflection
- */
-@Composable
-private fun ImpulseEmblem(
-    modifier: Modifier = Modifier,
-    shimmerSweep: Float = -1f,
-    primaryColor: Color = MaterialTheme.colorScheme.primary,
-    accentColor: Color = MaterialTheme.colorScheme.tertiary
-) {
-    Canvas(modifier = modifier) {
-        val w = size.width
-        val h = size.height
-        val cx = w / 2f
-        val cy = h / 2f
-        val radius = minOf(w, h) * 0.44f
-
-        // 1. Outer Quantum Hexagon
-        val hexPath = Path()
-        for (i in 0..5) {
-            val angleRad = Math.toRadians((60.0 * i - 30.0)).toFloat()
-            val x = cx + radius * kotlin.math.cos(angleRad)
-            val y = cy + radius * kotlin.math.sin(angleRad)
-            if (i == 0) hexPath.moveTo(x, y) else hexPath.lineTo(x, y)
-        }
-        hexPath.close()
-
-        // Hexagon background aura glow
-        drawPath(
-            path = hexPath,
-            brush = Brush.radialGradient(
-                colors = listOf(primaryColor.copy(alpha = 0.20f), Color.Transparent),
-                center = Offset(cx, cy),
-                radius = radius * 1.15f
-            )
-        )
-
-        // Hexagon outer border
-        drawPath(
-            path = hexPath,
-            brush = Brush.linearGradient(
-                colors = listOf(primaryColor, accentColor),
-                start = Offset(cx - radius, cy - radius),
-                end = Offset(cx + radius, cy + radius)
-            ),
-            style = Stroke(width = 2.4.dp.toPx(), cap = StrokeCap.Round, join = StrokeJoin.Round)
-        )
-
-        // 2. Inner Quantum Sub-Lattice (smaller concentric hexagon with dash effect)
-        val innerRadius = radius * 0.68f
-        val innerHexPath = Path()
-        for (i in 0..5) {
-            val angleRad = Math.toRadians((60.0 * i - 30.0)).toFloat()
-            val x = cx + innerRadius * kotlin.math.cos(angleRad)
-            val y = cy + innerRadius * kotlin.math.sin(angleRad)
-            if (i == 0) innerHexPath.moveTo(x, y) else innerHexPath.lineTo(x, y)
-        }
-        innerHexPath.close()
-
-        drawPath(
-            path = innerHexPath,
-            color = primaryColor.copy(alpha = 0.35f),
-            style = Stroke(
-                width = 1.2.dp.toPx(),
-                pathEffect = PathEffect.dashPathEffect(floatArrayOf(10f, 10f), 0f)
-            )
-        )
-
-        // 3. Central Dynamic Impulse Wave: "—\/\/\—" cutting through the center
-        val wavePath = Path()
-        val startX = cx - radius * 0.82f
-        val endX = cx + radius * 0.82f
-        val step = (endX - startX) / 8f
-
-        wavePath.moveTo(startX, cy)
-        wavePath.lineTo(startX + step * 2f, cy)
-        wavePath.lineTo(startX + step * 3f, cy - radius * 0.42f)
-        wavePath.lineTo(startX + step * 4f, cy + radius * 0.50f)
-        wavePath.lineTo(startX + step * 5f, cy - radius * 0.28f)
-        wavePath.lineTo(startX + step * 6f, cy)
-        wavePath.lineTo(endX, cy)
-
-        // Glow behind the impulse wave
-        drawPath(
-            path = wavePath,
-            color = primaryColor.copy(alpha = 0.40f),
-            style = Stroke(width = 6.dp.toPx(), cap = StrokeCap.Round, join = StrokeJoin.Round)
-        )
-
-        // Sharp precision impulse line
-        drawPath(
-            path = wavePath,
-            brush = Brush.horizontalGradient(
-                colors = listOf(primaryColor, Color.White, accentColor),
-                startX = startX,
-                endX = endX
-            ),
-            style = Stroke(width = 2.8.dp.toPx(), cap = StrokeCap.Round, join = StrokeJoin.Round)
-        )
-
-        // Core Quantum Pulse Nodes at vertices and impulse peaks
-        drawCircle(
-            color = Color.White,
-            radius = 3.dp.toPx(),
-            center = Offset(startX + step * 4f, cy + radius * 0.50f)
-        )
-        drawCircle(
-            color = Color.White,
-            radius = 3.dp.toPx(),
-            center = Offset(startX + step * 3f, cy - radius * 0.42f)
-        )
-
-        // 4. Shimmer Gleam Reflection on Emblem
-        if (shimmerSweep in 0f..1f) {
-            val sweepX = (startX - 100f) + shimmerSweep * ((endX - startX) + 200f)
-            val sheenBrush = Brush.linearGradient(
-                colors = listOf(
-                    Color.Transparent,
-                    Color.White.copy(alpha = 0.70f),
-                    Color.Transparent
-                ),
-                start = Offset(sweepX - 35f, cy - radius),
-                end = Offset(sweepX + 35f, cy + radius)
-            )
-            drawPath(
-                path = hexPath,
-                brush = sheenBrush,
-                style = Stroke(width = 3.4.dp.toPx())
-            )
-            drawPath(
-                path = wavePath,
-                brush = sheenBrush,
-                style = Stroke(width = 3.8.dp.toPx(), cap = StrokeCap.Round)
-            )
-        }
-    }
-}
-

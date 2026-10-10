@@ -1,5 +1,7 @@
 <div align="center">
 
+<img src="assets/brand/readme-banner.png" alt="Impulse Client" width="100%">
+
 # Impulse Client
 
 **Постквантовый сквозно-шифрованный суверенный LAN-мессенджер**

@@ -4,7 +4,7 @@
     <style name="Theme.Impulse" parent="android:Theme.Material.NoActionBar">
         <item name="android:windowSplashScreenBackground">@color/splash_background_dark</item>
         <item name="android:windowSplashScreenIconBackgroundColor">@android:color/transparent</item>
-        <item name="android:windowSplashScreenAnimatedIcon">@mipmap/ic_launcher</item>
+        <item name="android:windowSplashScreenAnimatedIcon">@drawable/ic_impulse_splash</item>
         <item name="android:windowSplashScreenBrandingImage">@android:color/transparent</item>
     </style>
 </resources>
