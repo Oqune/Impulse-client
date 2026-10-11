@@ -11,13 +11,13 @@
 [![Kotlin](https://img.shields.io/badge/Kotlin-2.0%2B-7F52FF?logo=kotlin&logoColor=white)](https://kotlinlang.org)
 [![Platform](https://img.shields.io/badge/Platform-Android%209%2B-3DDC84?logo=android&logoColor=white)](https://www.android.com)
 [![Transport](https://img.shields.io/badge/Transport-WebTransport%20%2F%20QUIC-00E5FF)](https://developer.android.com/reference/android/net/http/WebTransport)
-[![PQC](https://img.shields.io/badge/Crypto-ML--KEM--768%20%7C%20ML--DSA--65-22c55e)](https://csrc.nist.gov/pubs/fips/203/final)
+[![PQC](https://img.shields.io/badge/Crypto-ML--KEM--768%20%7C%20Dilithium3-22c55e)](https://csrc.nist.gov/pubs/fips/203/final)
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 [![Release](https://img.shields.io/github/v/release/Oqune/Impulse-client?label=latest&color=7928CA)](https://github.com/Oqune/Impulse-client/releases)
 
 </div>
 
-> **Суверенность и эфемерность:** Минималистичный, автономный LAN-клиент чата для Android. Непрозрачный Zero-Knowledge релей, инкапсуляция общих ключей для каждого получателя (ML-KEM-768), постквантовые подписи Dilithium (ML-DSA-65) и аппаратная изоляция ключей.
+> **Статус прототипа:** Исследовательский клиент автономного обмена сообщениями в изолированных сетях. Он не сертифицирован и не подтверждён для критической инфраструктуры или высоконадёжной эксплуатации. Тела сообщений зашифрованы, но внешние идентификаторы маршрутизации и сетевые метаданные видимы; релей рассылает пакеты подключённым клиентам. Для ML-KEM-768 используется API Kyber Bouncy Castle; подписи выполняются Dilithium3 без заявления соответствия ML-DSA-65 / FIPS 204.
 >
 > Работает в паре с [сервером Impulse](https://github.com/Oqune/Impulse-server/).
 
@@ -28,22 +28,22 @@
 | Уровень | Технология | Описание |
 | :--- | :--- | :--- |
 | **Транспорт** | WebTransport / QUIC | Стримы HTTP/3 поверх UDP-порта 4433, IPv4/IPv6 Dual-Stack, RFC 3986, mDNS |
-| **Инкапсуляция ключей** | ML-KEM-768 | NIST FIPS 203 (Kyber-768) per-recipient шифрование |
-| **Электронная подпись** | ML-DSA-65 | NIST FIPS 204 (Dilithium3) постквантовая аттестация сообщений |
+| **Инкапсуляция ключей** | ML-KEM-768 | Набор параметров ML-KEM-768 через alias Kyber в BC 1.84; сертификация не заявляется |
+| **Электронная подпись** | Dilithium3 | Алгоритм JCA Bouncy Castle; соответствие ML-DSA-65 / FIPS 204 не заявляется |
 | **Симметричное шифрование** | AES-256-GCM | Аутентифицированное шифрование с эфемерными IV |
 | **Модель доверия** | TOFU Fingerprinting | Закрепление SHA-256 сертификата сервера через QR-код |
-| **Локальное хранилище** | Зашифрованная Room DB | AES-256-GCM шифрование тел сообщений с автоочисткой по TTL 72 ч |
+| **Локальное хранилище** | Room DB | Тела сообщений зашифрованы AES-256-GCM; метаданные БД не шифруются целиком; очистка по TTL 72 ч |
 
 ---
 
 ## Возможности
 
 - **Универсальный WebTransport (IPv4/IPv6 Dual-Stack):** поддержка Android 9+ с парсингом эндпоинтов по стандарту RFC 3986 (IPv4, `[IPv6]:port`, link-local `[fe80::1%wlan0]:port` и mDNS `impulse.local:4433`).
-- **Постквантовое E2EE:** Per-Recipient KEM Wrapping — каждое сообщение шифруется отдельно для каждого получателя через **ML-KEM-768**, шифруется **AES-256-GCM** и подписывается **ML-DSA-65 (Dilithium3)**.
+- **Шифрование сообщений:** записи для получателей используют API Kyber с параметрами ML-KEM-768 и тела AES-256-GCM. Подписи используют Dilithium3; соответствие ML-DSA-65 / FIPS 204 не заявляется.
 - **Привязка сертификата (TOFU):** верификация через QR-скан (`impulse-cert:<sha256>`), хранение в зашифрованном `SecureStorage` (Android Keystore + AES-256-GCM); хранятся до двух хешей (текущий + следующий) для бесшовной ротации.
 - **Зашифрованная история:** база данных Room, в которой каждое тело сообщения шифруется AES-256-GCM перед записью; автоматическая очистка по **TTL 72 часа**.
 - **Интерфейс на Jetpack Compose:** дизайн-система Material 3 (True OLED); авто-reconnect с экспоненциальной задержкой; foreground-сервис; переподключение после перезагрузки.
-- **Экспорт/импорт ключей:** криптографический экспорт через Argon2id + AES-256-GCM для переноса ML-KEM идентичности между устройствами (новый ML-DSA ключ генерируется при импорте).
+- **Экспорт/импорт ключей:** криптографический экспорт через Argon2id + AES-256-GCM для переноса ML-KEM идентичности между устройствами (новый ключ Dilithium3 генерируется при импорте).
 - **Оформление и защита:** светлая / тёмная / системная темы и опциональная биометрическая блокировка приложения.
 
 ## Бинарный протокол (опкоды `0x11`–`0x34`)
@@ -51,8 +51,10 @@
 Каждый кадр начинается с одного байта опкода. Опкоды структурированы по доменам:
 старший полубайт — категория (`0x1_` Auth, `0x2_` Session, `0x3_` Data & Relay), младший — действие.
 Кодирование полей — little-endian: `u8` (1 Б), `u32` (4 Б префикс длины), `u64` (8 Б), `bytes` (`u32` длина + raw).
-Сервер никогда не видит метаданные plaintext — отправитель, подпись и
-содержимое живут внутри AES-256-GCM `OP_DATA` payload.
+Релей получает зашифрованные тела сообщений, но видит внешние хэши ключей
+отправителей и идентификаторы получателей. Пакеты рассылаются подключённым
+клиентам; каждый клиент выбирает подходящие записи перед расшифрованием.
+Метаданные и связи между участниками этим не скрываются.
 
 | Опкод | Домен | Имя | Направление | Тело |
 |-------|-------|-----|-------------|------|
@@ -111,7 +113,7 @@ cd Impulse-client
 3. Откройте вкладку **QR** и отсканируйте серверный QR (`impulse-cert:<64-hex-sha256>`).
    Принимается только строгий payload `impulse-cert:<64 hex>`.
 4. Сервер может прислать *следующий* хеш сертификата (`OP_NEW_CERT_HASH`) для ротации.
-5. Публичные ключи ML-KEM-768 + ML-DSA-65 обмениваются атомарно через
+5. Публичные ключи ML-KEM-768 и Dilithium3 обмениваются атомарно через
    `OP_KEY_EXCHANGE_KEM_DSA` (0x31); когда ключи пиров закешированы — канал `READY`.
 6. **Аутентификация автоматическая** при подключении: сервер шлёт `OP_AUTH_CHALLENGE` (0x11),
    клиент отвечает `OP_AUTH` (0x12), и по `OP_AUTH_RESULT` (0x13) в течение 15 с канал
@@ -119,11 +121,11 @@ cd Impulse-client
 
 ## Заметки по реализации
 
-- **PQC** (ML-KEM-768 + ML-DSA-65) — из BouncyCastle (`bcprov-jdk18on`);
+- **PQC:** API Kyber Bouncy Castle 1.84 (параметры ML-KEM-768) и подписи Dilithium3 JCA; соответствие последних ML-DSA-65 / FIPS 204 не заявляется;
   на Android ART доступно только через выделенный `BouncyCastlePQCProvider`.
   См. `security/PqcCrypto.kt`.
 - **Per-Recipient KEM Wrapping**: каждое сообщение шифруется N раз (по получателю)
-  через ML-KEM-768; сервер только ретранслирует opaque bytes. Публичные ключи
+  через API Kyber; релей видит внешние идентификаторы маршрутизации и рассылает зашифрованные тела. Публичные ключи
   пиров кешируются в Room с TTL 72 часа.
 - **Безопасное хранилище** — самостоятельный `SecureStorage.kt` на Android Keystore +
   AES-256-GCM (без зависимостей Tink/Gson).
@@ -142,7 +144,7 @@ flowchart TD
     VM --> CC[ChatController]
     CC --> WT[WebTransportClient]
     WT -->|HTTPS/QUIC| SRV[(Impulse Server)]
-    CC --> CRYPTO[PqcCrypto: ML-KEM-768 + ML-DSA-65 + AES-256-GCM]
+    CC --> CRYPTO[PqcCrypto: ML-KEM-768 + Dilithium3 + AES-256-GCM]
     CC --> SKM[SecureKeyManager]
     CC --> CERT[TrustedCertManager: TOFU]
     CC --> REPO[MessageRepository → Room]
@@ -160,7 +162,7 @@ AUTHENTICATING → AUTHENTICATED → READY`; сбои уходят в `ERROR` с
 ./gradlew connectedAndroidTest   # instrumented: TrustedCertManager (TOFU), MessageDao (Room, TTL)
 ```
 
-Покрытие: ML-KEM/ML-DSA round-trips, отклонение подтасовок, TOFU-pinning,
+Покрытие: ML-KEM/Dilithium3 round-trips, отклонение подтасовок, TOFU-pinning,
 build/parse Per-Recipient blob, полный цикл протокола без сети.
 
 ## Лицензия

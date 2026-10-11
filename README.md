@@ -11,13 +11,13 @@
 [![Kotlin](https://img.shields.io/badge/Kotlin-2.0%2B-7F52FF?logo=kotlin&logoColor=white)](https://kotlinlang.org)
 [![Platform](https://img.shields.io/badge/Platform-Android%209%2B-3DDC84?logo=android&logoColor=white)](https://www.android.com)
 [![Transport](https://img.shields.io/badge/Transport-WebTransport%20%2F%20QUIC-00E5FF)](https://developer.android.com/reference/android/net/http/WebTransport)
-[![PQC](https://img.shields.io/badge/Crypto-ML--KEM--768%20%7C%20ML--DSA--65-22c55e)](https://csrc.nist.gov/pubs/fips/203/final)
+[![PQC](https://img.shields.io/badge/Crypto-ML--KEM--768%20%7C%20Dilithium3-22c55e)](https://csrc.nist.gov/pubs/fips/203/final)
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 [![Release](https://img.shields.io/github/v/release/Oqune/Impulse-client?label=latest&color=7928CA)](https://github.com/Oqune/Impulse-client/releases)
 
 </div>
 
-> **Sovereign & Ephemeral:** Minimal, self-hosted LAN chat client for Android. Zero-knowledge opaque relay, Per-Recipient post-quantum key encapsulation (ML-KEM-768), Dilithium digital signatures (ML-DSA-65), and hardware-isolated cryptographic key storage.
+> **Prototype status:** Research client for autonomous messaging in isolated networks. It is not certified or validated for critical-infrastructure/high-assurance production use. Message bodies are encrypted; routing identifiers and network metadata remain visible, and the relay broadcasts packets to connected clients. Bouncy Castle's Kyber API provides ML-KEM-768 parameters; signatures use Dilithium3 and are not claimed as ML-DSA-65 / FIPS 204.
 >
 > Pairs with [Impulse Server](https://github.com/Oqune/Impulse-server/).
 
@@ -28,22 +28,22 @@
 | Layer | Technology | Details |
 | :--- | :--- | :--- |
 | **Transport** | WebTransport / QUIC | HTTP/3 streams over UDP 4433, IPv4/IPv6 Dual-Stack, RFC 3986, mDNS |
-| **Key Encapsulation** | ML-KEM-768 | NIST FIPS 203 (Kyber-768) per-recipient encryption |
-| **Digital Signatures** | ML-DSA-65 | NIST FIPS 204 (Dilithium3) PQ message authentication |
+| **Key Encapsulation** | ML-KEM-768 | ML-KEM-768 parameter set through the BC 1.84 Kyber alias; no certification claim |
+| **Digital Signatures** | Dilithium3 | Bouncy Castle JCA algorithm; not claimed as ML-DSA-65 / FIPS 204 |
 | **Symmetric Encryption** | AES-256-GCM | Authenticated encryption with ephemeral IVs |
 | **Trust Model** | TOFU Fingerprinting | Pinned SHA-256 server certificate via QR scan |
-| **Local Storage** | Encrypted Room DB | AES-256-GCM encrypted bodies with 72h auto-shredding |
+| **Local Storage** | Room DB | AES-256-GCM encrypted message bodies; database metadata is not fully encrypted; 72h cleanup |
 
 ---
 
 ## Features
 
 - **Universal WebTransport (IPv4/IPv6 Dual-Stack):** Android 9+ support with RFC 3986 endpoint parsing (IPv4, `[IPv6]:port`, link-local `[fe80::1%wlan0]:port`, and mDNS `impulse.local:4433`).
-- **Post-quantum E2EE:** Per-Recipient KEM Wrapping — each message is individually encrypted for every recipient using **ML-KEM-768** encapsulation. The sender encrypts the message with **AES-256-GCM** and signs it with **ML-DSA-65 (Dilithium3)** so receivers authenticate the sender with PQ security.
+- **Encrypted messages:** Per-recipient entries use the Kyber API with ML-KEM-768 parameters and AES-256-GCM encrypted bodies. Signatures use Dilithium3; this implementation is not claimed as ML-DSA-65 / FIPS 204 conformant.
 - **TOFU certificate pinning:** QR scan (`impulse-cert:<sha256>`), stored in an encrypted `SecureStorage` (Android Keystore + AES-256-GCM); up to two hashes (current + next) are kept for seamless certificate rotation.
 - **Encrypted local history:** Room DB where each message body is encrypted with AES-256-GCM before being written; automatic **72-hour TTL** cleanup.
 - **Jetpack Compose (Material 3) UI:** Pure OLED dark mode, responsive layout, automatic reconnect with exponential backoff, foreground service, and boot-time reconnect.
-- **Secure key export/import:** Argon2id + AES-256-GCM for moving your ML-KEM identity across devices, with a fresh ML-DSA key generated on import.
+- **Secure key export/import:** Argon2id + AES-256-GCM for moving your ML-KEM identity across devices, with a fresh Dilithium3 key generated on import.
 - **Interface & Security:** Light / Dark / System themes and optional biometric app lock.
 
 ## Binary protocol (opcodes `0x11`–`0x34`)
@@ -51,8 +51,10 @@
 Every frame starts with a single opcode byte. Opcodes are domain-categorized:
 high nibble = category (`0x1_` Auth, `0x2_` Session, `0x3_` Data & Relay), low nibble = action.
 Field encoding is little-endian: `u8` (1 B), `u32` (4 B length prefix), `u64` (8 B), `bytes` (`u32` length + raw).
-The server never sees plaintext metadata — sender, signature and content live
-inside the AES-256-GCM `OP_DATA` payload.
+The relay receives encrypted message bodies, but outer sender-key hashes and
+recipient identifiers are visible. It broadcasts packets to connected clients;
+clients select matching recipient entries before decryption. This does not hide
+communication metadata or relationships.
 
 | Opcode | Domain | Name | Direction | Body |
 |--------|--------|------|-----------|------|
@@ -111,7 +113,7 @@ is requested on first QR scan. Signed release builds use the local
 3. Go to the **QR** tab and scan the server's QR (`impulse-cert:<64-hex-sha256>`).
    Only a strict `impulse-cert:<64 hex>` payload is accepted.
 4. The server may push a *next* cert hash (`OP_NEW_CERT_HASH`) for rotation.
-5. ML-KEM-768 + ML-DSA-65 public keys are exchanged atomically via
+5. ML-KEM-768 and Dilithium3 public keys are exchanged atomically via
    `OP_KEY_EXCHANGE_KEM_DSA` (0x31); once peer keys are cached the channel is `READY`.
 6. **Authentication is automatic** on connect: the server sends `OP_AUTH_CHALLENGE` (0x11),
    the client replies with `OP_AUTH` (0x12), and on `OP_AUTH_RESULT` (0x13) within 15 s the
@@ -119,11 +121,11 @@ is requested on first QR scan. Signed release builds use the local
 
 ## Implementation notes
 
-- **PQC** (ML-KEM-768 + ML-DSA-65) comes from BouncyCastle
+- **PQC:** Bouncy Castle 1.84 Kyber API (ML-KEM-768 parameters) and Dilithium3 JCA signatures; the latter is not claimed as ML-DSA-65 / FIPS 204
   (`bcprov-jdk18on`); on Android ART it is reachable only via the dedicated
   `BouncyCastlePQCProvider`. See `security/PqcCrypto.kt`.
 - **Per-Recipient KEM Wrapping**: each message is encrypted N times (once per
-  recipient) via ML-KEM-768; the server only relays opaque bytes. Peer public
+  recipient) via the Kyber API; the relay sees outer routing identifiers and broadcasts encrypted bodies. Peer public
   keys are cached in Room with a 72-hour TTL.
 - **Secure storage** is a self-contained `SecureStorage.kt` on Android Keystore +
   AES-256-GCM (no Tink/Gson dependency).
@@ -143,7 +145,7 @@ flowchart TD
     VM --> CC[ChatController]
     CC --> WT[WebTransportClient]
     WT -->|HTTPS/QUIC| SRV[(Impulse Server)]
-    CC --> CRYPTO[PqcCrypto: ML-KEM-768 + ML-DSA-65 + AES-256-GCM]
+    CC --> CRYPTO[PqcCrypto: ML-KEM-768 + Dilithium3 + AES-256-GCM]
     CC --> SKM[SecureKeyManager]
     CC --> CERT[TrustedCertManager: TOFU]
     CC --> REPO[MessageRepository → Room]
@@ -161,7 +163,7 @@ AUTHENTICATING → AUTHENTICATED → READY`; failures go to `ERROR` with auto-re
 ./gradlew connectedAndroidTest   # instrumented: TrustedCertManager (TOFU), MessageDao (Room, TTL)
 ```
 
-Coverage includes ML-KEM/ML-DSA round-trips, tamper rejection, TOFU pinning,
+Coverage includes ML-KEM/Dilithium3 round-trips, tamper rejection, TOFU pinning,
 Per-Recipient blob build/parse, and a full protocol cycle simulated without a network.
 
 ## License
