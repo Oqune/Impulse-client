@@ -4,10 +4,10 @@ import android.content.res.Configuration
 import android.os.Bundle
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
-import androidx.compose.runtime.mutableStateOf
-import androidx.compose.runtime.remember
+import androidx.compose.runtime.collectAsState
 import androidx.fragment.app.FragmentActivity
-import com.example.impulse.data.ServerConfig
+import androidx.lifecycle.ViewModel
+import androidx.lifecycle.ViewModelProvider
 import com.example.impulse.data.ServerPreferences
 import com.example.impulse.locale.LocalePreferences
 import com.example.impulse.locale.LocaleSettings
@@ -26,6 +26,9 @@ import java.util.Locale
  * [onStop] disconnects cleanly so no session lingers in the background.
  */
 class MainActivity : FragmentActivity() {
+    private lateinit var unlockState: MainActivityUnlockState
+    private lateinit var biometricHelper: com.example.impulse.util.BiometricHelper
+
     override fun attachBaseContext(newBase: android.content.Context) {
         val localePreferences = LocalePreferences(newBase)
         val lang = localePreferences.getSavedLanguage()
@@ -45,6 +48,9 @@ class MainActivity : FragmentActivity() {
 
         super.onCreate(savedInstanceState)
 
+        unlockState = ViewModelProvider(this)[MainActivityUnlockState::class.java]
+        biometricHelper = com.example.impulse.util.BiometricHelper(applicationContext)
+
         enableEdgeToEdge()
         val serverPreferences = ServerPreferences(applicationContext)
         applyScreenshotProtection(serverPreferences.getAllowScreenshots())
@@ -54,12 +60,23 @@ class MainActivity : FragmentActivity() {
 
         setContent {
             ImpulseTheme {
-                val isUnlocked = androidx.compose.runtime.saveable.rememberSaveable { mutableStateOf(false) }
-                val biometricHelper = remember { com.example.impulse.util.BiometricHelper(applicationContext) }
+                val isUnlocked = unlockState.isUnlocked.collectAsState().value
+                val isActivityStarted = unlockState.isActivityStarted.collectAsState().value
 
-                if (isUnlocked.value.not() && biometricHelper.isBiometricAvailable()) {
+                if (!isUnlocked && biometricHelper.isBiometricAvailable()) {
                     BiometricLockScreen(
-                        onUnlock = { isUnlocked.value = true }
+                        autoPrompt = isActivityStarted,
+                        onUnlock = {
+                            // A prompt result may arrive after Home/onStop.
+                            // It must not restore unlock state in the background.
+                            if (unlockState.isActivityStarted.value &&
+                                lifecycle.currentState.isAtLeast(androidx.lifecycle.Lifecycle.State.STARTED)) {
+                                unlockState.unlock()
+                                connectSelectedServer()
+                            } else {
+                                LogManager.i(TAG, "Ignoring authentication result while Activity is stopped")
+                            }
+                        }
                     )
                 } else {
                     MainScreen()
@@ -81,6 +98,15 @@ class MainActivity : FragmentActivity() {
 
     override fun onStart() {
         super.onStart()
+        unlockState.setActivityStarted(true)
+        if (biometricHelper.isBiometricAvailable() && !unlockState.isUnlocked.value) {
+            LogManager.i(TAG, "onStart: waiting for biometric unlock before connecting")
+            return
+        }
+        connectSelectedServer()
+    }
+
+    private fun connectSelectedServer() {
         // Reconnect to the selected server when the app comes to the foreground.
         try {
             val prefs = ServerPreferences(applicationContext)
@@ -113,6 +139,10 @@ class MainActivity : FragmentActivity() {
     }
 
     override fun onStop() {
+        unlockState.setActivityStarted(false)
+        if (!isChangingConfigurations && biometricHelper.isBiometricAvailable()) {
+            unlockState.lock()
+        }
         super.onStop()
         // Privacy: drop the connection when leaving the foreground. No session
         // persists in the background; no messages are delivered while hidden.
@@ -125,4 +155,16 @@ class MainActivity : FragmentActivity() {
     companion object {
         private const val TAG = "MainActivity"
     }
+}
+
+/** Retained across configuration changes, but not saved across process death. */
+internal class MainActivityUnlockState : ViewModel() {
+    private val _isUnlocked = kotlinx.coroutines.flow.MutableStateFlow(false)
+    val isUnlocked = _isUnlocked
+    private val _isActivityStarted = kotlinx.coroutines.flow.MutableStateFlow(false)
+    val isActivityStarted = _isActivityStarted
+
+    fun unlock() { _isUnlocked.value = true }
+    fun lock() { _isUnlocked.value = false }
+    fun setActivityStarted(started: Boolean) { _isActivityStarted.value = started }
 }

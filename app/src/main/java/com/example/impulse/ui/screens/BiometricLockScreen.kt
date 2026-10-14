@@ -18,6 +18,7 @@ import com.example.impulse.util.BiometricHelper
 @Composable
 fun BiometricLockScreen(
     onUnlock: () -> Unit,
+    autoPrompt: Boolean = true,
     modifier: Modifier = Modifier
 ) {
     val context = LocalContext.current
@@ -47,11 +48,11 @@ fun BiometricLockScreen(
         }
     }
 
-    LaunchedEffect(Unit) {
+    LaunchedEffect(autoPrompt) {
         val activity = context as? androidx.fragment.app.FragmentActivity
-        if (activity != null && biometricHelper.isBiometricAvailable()) {
+        if (autoPrompt && activity != null && biometricHelper.isBiometricAvailable()) {
             startAuthentication(activity)
-        } else {
+        } else if (autoPrompt) {
             errorMessage = context.getString(R.string.biometric_unavailable)
         }
     }
