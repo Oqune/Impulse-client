@@ -9,6 +9,109 @@ import org.junit.Test
 
 class ProtocolTest {
 
+    private fun authChallengeReader(
+        params: String? = null,
+        saltB64: String = "QBBijrqHObpW8aPHZViK3A"
+    ): Protocol.Reader {
+        val writer = Protocol.Writer()
+        writer.rawBytes(ByteArray(16) { it.toByte() })
+        writer.bytes(saltB64.toByteArray(Charsets.UTF_8))
+        if (params != null) writer.bytes(params.toByteArray(Charsets.UTF_8))
+        return Protocol.Reader(writer.toByteArray())
+    }
+
+    @Test
+    fun authChallenge_withoutOptionalTuple_usesServerCompatibleDefaults() {
+        val parsed = Protocol.parseAuthChallenge(authChallengeReader())
+
+        assertEquals(Protocol.ARGON2_MIN_MEMORY_KIB, parsed.argonMemKB)
+        assertEquals(Protocol.ARGON2_MIN_ITERATIONS, parsed.argonIterations)
+        assertEquals(Protocol.ARGON2_MIN_PARALLELISM, parsed.argonParallelism)
+    }
+
+    @Test
+    fun authChallenge_acceptsMinimumAndMaximumSupportedTuples() {
+        val minimum = Protocol.parseAuthChallenge(authChallengeReader("m=47104,t=3,p=1"))
+        assertEquals(47_104, minimum.argonMemKB)
+        assertEquals(3, minimum.argonIterations)
+        assertEquals(1, minimum.argonParallelism)
+
+        val maximum = Protocol.parseAuthChallenge(authChallengeReader("m=65536,t=6,p=2"))
+        assertEquals(65_536, maximum.argonMemKB)
+        assertEquals(6, maximum.argonIterations)
+        assertEquals(2, maximum.argonParallelism)
+    }
+
+    @Test
+    fun parsedChallengeSaltAndTupleDriveTheAuthProof() {
+        val salt = "QBBijrqHObpW8aPHZViK3A"
+        val challenge = Protocol.parseAuthChallenge(
+            authChallengeReader("m=49152,t=4,p=2", salt)
+        )
+        val password = "challenge-password"
+        val frame = Protocol.buildAuth(
+            password,
+            challenge.nonce,
+            challenge.saltB64,
+            challenge.argonMemKB,
+            challenge.argonIterations,
+            challenge.argonParallelism
+        )
+        val actualProof = Protocol.Reader(frame, 1).bytes()
+        val validKey = Protocol.argon2DeriveKey(password, salt, 49_152, 4, 2)
+        val validMac = javax.crypto.Mac.getInstance("HmacSHA256").apply {
+            init(javax.crypto.spec.SecretKeySpec(validKey, "HmacSHA256"))
+        }.doFinal(challenge.nonce)
+
+        assertArrayEquals("Auth proof must derive from the exact challenge tuple and salt", validMac, actualProof)
+
+        val wrongSaltKey = Protocol.argon2DeriveKey(password, "AQIDBAUGBwgJCgsMDQ4PEA==", 49_152, 4, 2)
+        val wrongSaltMac = javax.crypto.Mac.getInstance("HmacSHA256").apply {
+            init(javax.crypto.spec.SecretKeySpec(wrongSaltKey, "HmacSHA256"))
+        }.doFinal(challenge.nonce)
+        assertFalse("Wrong challenge salt must produce a different proof", actualProof.contentEquals(wrongSaltMac))
+
+        val wrongTupleKey = Protocol.argon2DeriveKey(password, salt, 47_104, 3, 1)
+        val wrongTupleMac = javax.crypto.Mac.getInstance("HmacSHA256").apply {
+            init(javax.crypto.spec.SecretKeySpec(wrongTupleKey, "HmacSHA256"))
+        }.doFinal(challenge.nonce)
+        assertFalse("Wrong challenge tuple must produce a different proof", actualProof.contentEquals(wrongTupleMac))
+    }
+
+    @Test
+    fun authChallenge_rejectsValuesOutsideResourceBounds() {
+        val outOfRange = listOf(
+            "m=65537,t=3,p=1",
+            "m=47104,t=7,p=1",
+            "m=47104,t=3,p=3",
+            "m=47103,t=3,p=1",
+            "m=47104,t=2,p=1",
+            "m=47104,t=3,p=0"
+        )
+
+        for (params in outOfRange) {
+            assertThrows("Expected rejection for $params", Protocol.ProtocolException::class.java) {
+                Protocol.parseAuthChallenge(authChallengeReader(params))
+            }
+        }
+    }
+
+    @Test
+    fun authChallenge_rejectsMalformedOrIncompleteTuple() {
+        val malformed = listOf(
+            "m=large,t=3,p=1",
+            "m=47104,t=3",
+            "m=47104,t=3,p=1,p=2",
+            "m=47104,t=3,p=1,x=7"
+        )
+
+        for (params in malformed) {
+            assertThrows("Expected rejection for $params", Protocol.ProtocolException::class.java) {
+                Protocol.parseAuthChallenge(authChallengeReader(params))
+            }
+        }
+    }
+
     @Test
     fun data_outbound_hasNoServerIdPrefix() {
         val payload = "secret message".toByteArray(Charsets.UTF_8)
@@ -370,5 +473,18 @@ class ProtocolTest {
             expectedBytes,
             derivedKey
         )
+    }
+
+    @Test
+    fun argon2DeriveKey_acceptsMaximumAdmittedTuple() {
+        val derivedKey = Protocol.argon2DeriveKey(
+            password = "admission-boundary",
+            saltB64 = "QBBijrqHObpW8aPHZViK3A",
+            memKB = 65_536,
+            iterations = 6,
+            parallelism = 2
+        )
+
+        assertEquals(32, derivedKey.size)
     }
 }

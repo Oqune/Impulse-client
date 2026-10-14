@@ -7,6 +7,20 @@ import org.junit.Test
 class EmulatorDetectorTest {
 
     @Test
+    fun packagedNativeAbisAreSupported() {
+        assertTrue(supportsNativeQuic(listOf("x86_64", "x86")))
+        assertTrue(supportsNativeQuic(listOf("arm64-v8a", "armeabi-v7a")))
+        assertTrue(supportsNativeQuic(listOf("armeabi-v7a")))
+    }
+
+    @Test
+    fun unshippedNativeAbisAreRejected() {
+        assertFalse(supportsNativeQuic(listOf("x86")))
+        assertFalse(supportsNativeQuic(listOf("unknown")))
+        assertFalse(supportsNativeQuic(emptyList()))
+    }
+
+    @Test
     fun realSamsungDeviceIsNotEmulator() {
         assertFalse(isEmulatorBuild("beyond1q", "SM-G973F", "samsung/beyond1q/beyond1q:12/SP1A.210812.016/G973FXXS9FVG1:user/release-keys"))
     }

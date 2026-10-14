@@ -72,7 +72,11 @@ class ChatViewModel(
         viewModelScope.launch {
             repository.observeConversation(server.id, conversationId)
                 .map { entities ->
-                    entities.mapNotNull { entity -> chatController.decryptEntity(entity) }
+                    buildList {
+                        for (entity in entities) {
+                            chatController.decryptEntity(entity)?.let(::add)
+                        }
+                    }
                 }
                 .flowOn(Dispatchers.Default)
                 .catch { e ->

@@ -23,7 +23,7 @@ import androidx.sqlite.db.SupportSQLiteDatabase
  * contain plaintext. This satisfies the "SQLite with encryption" requirement
  * without any native dependency, and the app now loads on 16 KB-page devices.
  */
-@Database(entities = [MessageEntity::class, PublicKeyEntity::class], version = 5, exportSchema = false)
+@Database(entities = [MessageEntity::class, PublicKeyEntity::class, SeenMessageNonceEntity::class], version = 6, exportSchema = false)
 abstract class MessageDatabase : RoomDatabase() {
     abstract fun messageDao(): MessageDao
     abstract fun publicKeyDao(): PublicKeyDao
@@ -75,6 +75,13 @@ abstract class MessageDatabase : RoomDatabase() {
             }
         }
 
+        internal val MIGRATION_5_6 = object : Migration(5, 6) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL("CREATE TABLE IF NOT EXISTS `seen_nonces` (`sender_fingerprint` TEXT NOT NULL, `nonce_hash` TEXT NOT NULL, `expires_at` INTEGER NOT NULL, PRIMARY KEY(`sender_fingerprint`, `nonce_hash`))")
+                db.execSQL("CREATE INDEX IF NOT EXISTS `index_seen_nonces_expires_at` ON `seen_nonces` (`expires_at`)")
+            }
+        }
+
         fun getInstance(context: Context): MessageDatabase {
             return INSTANCE ?: synchronized(this) {
                 INSTANCE ?: build(context).also { INSTANCE = it }
@@ -87,12 +94,7 @@ abstract class MessageDatabase : RoomDatabase() {
                 MessageDatabase::class.java,
                 DB_NAME
             )
-                .addMigrations(MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4, MIGRATION_4_5)
-                // Messages are ephemeral (72h TTL) and re-fetched from the server
-                // via Sync, so an irreconcilable schema difference should NEVER
-                // crash the app — rebuild the tables and resync instead
-                // (Bug: "Migration didn't properly handle: messages").
-                .fallbackToDestructiveMigration(dropAllTables = true)
+                .addMigrations(MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4, MIGRATION_4_5, MIGRATION_5_6)
                 .build()
         }
     }

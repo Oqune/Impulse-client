@@ -17,3 +17,7 @@ internal fun isEmulatorBuild(hardware: String, model: String, fingerprint: Strin
         model.contains("google_sdk", ignoreCase = true)
     return genericFingerprint && emulatorModel
 }
+
+/** Native QUIC is shipped for these ABIs, including x86_64 emulators. */
+internal fun supportsNativeQuic(abis: List<String>): Boolean =
+    abis.any { it in setOf("arm64-v8a", "armeabi-v7a", "x86_64") }

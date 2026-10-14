@@ -31,6 +31,26 @@ package com.example.impulse.transport
  */
 object Protocol {
 
+    // AuthChallenge is received before authentication, so its KDF parameters
+    // are untrusted resource requests. Keep the server's current default and
+    // OWASP floor while limiting pre-auth admission to 64 MiB, six passes,
+    // and two lanes; the server's current defaults remain 46 MiB / 3 / 1.
+    const val ARGON2_MIN_MEMORY_KIB = 47_104
+    const val ARGON2_MAX_MEMORY_KIB = 65_536
+    const val ARGON2_MIN_ITERATIONS = 3
+    const val ARGON2_MAX_ITERATIONS = 6
+    const val ARGON2_MIN_PARALLELISM = 1
+    const val ARGON2_MAX_PARALLELISM = 2
+
+    internal fun validateArgon2Parameters(memKB: Int, iterations: Int, parallelism: Int) {
+        if (memKB !in ARGON2_MIN_MEMORY_KIB..ARGON2_MAX_MEMORY_KIB ||
+            iterations !in ARGON2_MIN_ITERATIONS..ARGON2_MAX_ITERATIONS ||
+            parallelism !in ARGON2_MIN_PARALLELISM..ARGON2_MAX_PARALLELISM
+        ) {
+            throw ProtocolException("Argon2id parameters outside supported resource bounds")
+        }
+    }
+
     /**
      * Thrown when an inbound binary frame is malformed (truncated, wrong length
      * prefix, or exceeds a sane size bound). Callers (the transport read loop
@@ -242,6 +262,7 @@ object Protocol {
         iterations: Int = 3,
         parallelism: Int = 1
     ): ByteArray {
+        validateArgon2Parameters(memKB, iterations, parallelism)
         val saltBytes = if (saltB64.isNotEmpty()) {
             val decoded = base64Decode(saltB64)
             if (decoded.size < 16) {
@@ -255,9 +276,9 @@ object Protocol {
             org.bouncycastle.crypto.params.Argon2Parameters.ARGON2_id
         )
             .withSalt(saltBytes)
-            .withParallelism(parallelism.coerceAtLeast(1))
-            .withMemoryAsKB(memKB.coerceAtLeast(47104))
-            .withIterations(iterations.coerceAtLeast(3))
+            .withParallelism(parallelism)
+            .withMemoryAsKB(memKB)
+            .withIterations(iterations)
             .withVersion(0x13)
             .build()
         val generator = org.bouncycastle.crypto.generators.Argon2BytesGenerator()
@@ -451,22 +472,44 @@ object Protocol {
             ""
         }
         // Parse the m/t/p tag if present (old servers omit it → OWASP floor).
-        var mem = 47104
-        var iter = 3
-        var par = 1
+        var mem = ARGON2_MIN_MEMORY_KIB
+        var iter = ARGON2_MIN_ITERATIONS
+        var par = ARGON2_MIN_PARALLELISM
         if (r.remaining() > 0) {
             val tag = String(r.bytes(), Charsets.UTF_8)
+            var seenMemory = false
+            var seenIterations = false
+            var seenParallelism = false
+            if (tag.isBlank()) throw ProtocolException("AuthChallenge: empty Argon2 parameters")
             for (kv in tag.split(',')) {
                 val parts = kv.split('=')
-                if (parts.size == 2) {
-                    val (k, v) = parts
-                    when (k.trim()) {
-                        "m" -> mem = v.trim().toIntOrNull()?.coerceAtLeast(47104) ?: 47104
-                        "t" -> iter = v.trim().toIntOrNull()?.coerceAtLeast(3) ?: 3
-                        "p" -> par = v.trim().toIntOrNull()?.coerceAtLeast(1) ?: 1
+                if (parts.size != 2) throw ProtocolException("AuthChallenge: malformed Argon2 parameter")
+                val key = parts[0].trim()
+                val value = parts[1].trim().toIntOrNull()
+                    ?: throw ProtocolException("AuthChallenge: malformed Argon2 value")
+                when (key) {
+                    "m" -> {
+                        if (seenMemory) throw ProtocolException("AuthChallenge: duplicate Argon2 memory value")
+                        mem = value
+                        seenMemory = true
                     }
+                    "t" -> {
+                        if (seenIterations) throw ProtocolException("AuthChallenge: duplicate Argon2 iteration value")
+                        iter = value
+                        seenIterations = true
+                    }
+                    "p" -> {
+                        if (seenParallelism) throw ProtocolException("AuthChallenge: duplicate Argon2 parallelism value")
+                        par = value
+                        seenParallelism = true
+                    }
+                    else -> throw ProtocolException("AuthChallenge: unknown Argon2 parameter")
                 }
             }
+            if (!seenMemory || !seenIterations || !seenParallelism) {
+                throw ProtocolException("AuthChallenge: incomplete Argon2 parameter tuple")
+            }
+            validateArgon2Parameters(mem, iter, par)
         }
         return AuthChallengeFrame(nonce, saltB64, mem, iter, par)
     }

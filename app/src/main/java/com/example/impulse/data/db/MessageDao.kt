@@ -4,18 +4,56 @@ import androidx.room.Dao
 import androidx.room.Insert
 import androidx.room.OnConflictStrategy
 import androidx.room.Query
+import androidx.room.Transaction
 import kotlinx.coroutines.flow.Flow
 
 @Dao
 interface MessageDao {
 
     /**
-     * Inserts or replaces a message keyed by (server_id, server_msg_id). Used to
-     * replace an optimistic local copy (negative temp id) with the authoritative
-     * server-assigned row once the relay echoes the message.
+     * Inserts or replaces a message keyed by (server_id, server_msg_id).
+     * A negative local ID and a positive relay ID are distinct rows; callers
+     * explicitly remove optimistic placeholders after accepting a relay echo.
      */
     @Insert(onConflict = OnConflictStrategy.REPLACE)
     suspend fun upsert(message: MessageEntity): Long
+
+    @Insert(onConflict = OnConflictStrategy.IGNORE)
+    suspend fun insertReplayMarker(marker: SeenMessageNonceEntity): Long
+
+    @Query("DELETE FROM seen_nonces WHERE expires_at <= :now")
+    suspend fun deleteExpiredReplayMarkers(now: Long): Int
+
+    @Query("SELECT EXISTS(SELECT 1 FROM seen_nonces WHERE sender_fingerprint = :senderFingerprint AND nonce_hash = :nonceHash)")
+    suspend fun hasReplayMarker(senderFingerprint: String, nonceHash: String): Boolean
+
+    @Query("SELECT COUNT(*) FROM seen_nonces WHERE expires_at > :now")
+    suspend fun countLiveReplayMarkers(now: Long): Int
+
+    @Query("DELETE FROM seen_nonces WHERE expires_at <= :now")
+    suspend fun purgeExpiredReplayMarkers(now: Long): Int
+
+    /** Atomically claims the durable replay key and writes its encrypted message. */
+    @Transaction
+    suspend fun upsertWithReplayGuard(
+        message: MessageEntity,
+        marker: SeenMessageNonceEntity,
+        now: Long,
+        maxLiveMarkers: Int
+    ): ReplayPersistenceResult {
+        deleteExpiredReplayMarkers(now)
+        if (hasReplayMarker(marker.senderFingerprint, marker.nonceHash)) {
+            return ReplayPersistenceResult.DUPLICATE
+        }
+        if (countLiveReplayMarkers(now) >= maxLiveMarkers) {
+            return ReplayPersistenceResult.CAPACITY_REACHED
+        }
+        if (insertReplayMarker(marker) == -1L) {
+            return ReplayPersistenceResult.DUPLICATE
+        }
+        upsert(message)
+        return ReplayPersistenceResult.ACCEPTED
+    }
 
     /** All messages for a server, ordered oldest → newest. */
     @Query("SELECT * FROM messages WHERE server_id = :serverId ORDER BY server_msg_id ASC")

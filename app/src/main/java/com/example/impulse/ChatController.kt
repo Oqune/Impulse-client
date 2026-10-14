@@ -3,9 +3,12 @@ package com.example.impulse
 import android.content.Context
 import com.example.impulse.data.MessageRepository
 import com.example.impulse.data.PublicKeyRepository
+import com.example.impulse.data.ReplayNonce
 import com.example.impulse.data.ServerConfig
 import com.example.impulse.data.db.MessageEntity
+import com.example.impulse.data.db.ReplayPersistenceResult
 import com.example.impulse.security.PqcCrypto
+import com.example.impulse.security.InnerEnvelopeSignatureVerifier
 import com.example.impulse.security.SecureKeyManager
 import com.example.impulse.security.TrustedCertManager
 import com.example.impulse.transport.ConnectionState
@@ -29,6 +32,7 @@ import kotlinx.coroutines.withTimeout
 import kotlinx.coroutines.withContext
 import kotlinx.coroutines.NonCancellable
 import java.util.concurrent.atomic.AtomicLong
+import java.util.concurrent.atomic.AtomicBoolean
 
 class ChatController(private val context: Context) {
 
@@ -59,6 +63,8 @@ class ChatController(private val context: Context) {
     private val lock = Any()
 
     @Volatile private var client: WebTransportClient? = null
+    /** Incremented whenever a transport incarnation is replaced or invalidated. Guarded by [lock]. */
+    private var connectionGeneration: Long = 0L
     @Volatile var currentServer: ServerConfig? = null
         private set
     @Volatile var clientName: String = ""
@@ -83,6 +89,7 @@ class ChatController(private val context: Context) {
 
     private lateinit var keyManager: SecureKeyManager
     private lateinit var keyRepo: PublicKeyRepository
+    private val keyInitLock = Any()
 
     val publicKeyHash: String
         get() {
@@ -126,21 +133,68 @@ class ChatController(private val context: Context) {
         val queuedAt: Long = System.currentTimeMillis()
     )
 
-    private val pendingMessages = mutableMapOf<String, MutableList<PendingMessage>>()
-    private val pendingMessagesLock = Any()
+    private val processedMsgIds = LinkedHashSet<Long>(512)
+    private val dedupLock = Any()
+    private val pendingMessages = PendingMessageBuffer<PendingMessage>(
+        maxItems = PendingMessageBuffer.MAX_ITEMS,
+        maxItemsPerKey = PendingMessageBuffer.MAX_ITEMS_PER_KEY,
+        maxBytes = PendingMessageBuffer.MAX_BYTES,
+        ttlMillis = PendingMessageBuffer.TTL_MILLIS,
+        keyOf = { it.senderFingerprint },
+        queuedAtOf = { it.queuedAt },
+        bytesOf = ::pendingMessageBytes,
+        onExpired = { expired ->
+            if (expired.serverMsgId > 0) synchronized(dedupLock) { processedMsgIds.remove(expired.serverMsgId) }
+        }
+    )
 
     private data class OutboxEntry(
-        val serverId: String,
-        val frame: ByteArray,
-        var retries: Int = 0,
-        val queuedAt: Long = System.currentTimeMillis()
+        override val serverId: String,
+        override val frame: ByteArray,
+        override val queuedAt: Long = System.currentTimeMillis()
+    ) : PersistedOutboxFrame
+    private data class OutboxFlushTarget(
+        val identity: ConnectionIdentity,
+        val transport: WebTransportClient
+    )
+    private data class ActiveConnection(
+        val identity: ConnectionIdentity,
+        val transport: WebTransportClient
     )
     private val outbox = mutableListOf<OutboxEntry>()
     private val outboxLock = Any()
-    @Volatile private var flushOutboxRunning = false
+    private val flushOutboxRunning = AtomicBoolean(false)
 
-    private val processedMsgIds = LinkedHashSet<Long>(512)
-    private val dedupLock = Any()
+    private fun captureReadyConnection(): ActiveConnection? = synchronized(lock) {
+        if (_state.value != ConnectionState.READY) return@synchronized null
+        val serverId = currentServer?.id ?: return@synchronized null
+        val activeClient = client ?: return@synchronized null
+        ActiveConnection(ConnectionIdentity(connectionGeneration, serverId), activeClient)
+    }
+
+    private fun isCurrentConnection(connection: ActiveConnection): Boolean =
+        isCurrentConnection(connection.identity.generation, connection.identity.serverId, connection.transport)
+
+    private fun queueOutboxFrame(serverId: String, frame: ByteArray) {
+        synchronized(outboxLock) { outbox.add(OutboxEntry(serverId, frame)) }
+        persistOutbox(serverId)
+        if (!flushOutboxRunning.get()) scope.launch { flushOutbox() }
+    }
+
+    private fun emitLocalEchoIfCurrent(connection: ActiveConnection, message: DecryptedMessage): Boolean =
+        synchronized(lock) {
+            if (!isCurrentConnectionLocked(
+                    connection.identity.generation,
+                    connection.identity.serverId,
+                    connection.transport
+                )
+            ) {
+                false
+            } else {
+                synchronized(listeners) { listeners.forEach { it(message) } }
+                true
+            }
+        }
 
     // C4 replay cache: tracks (senderFingerprint:nonce) to reject message replays
     private val seenNonces = LinkedHashMap<String, Long>(512, 0.75f, true)
@@ -163,14 +217,17 @@ class ChatController(private val context: Context) {
     fun removeMessageListener(l: (DecryptedMessage) -> Unit) = synchronized(listeners) { listeners.remove(l) }
 
     private fun ensureKeyPair() {
-        keyManager = SecureKeyManager
-        PqcCrypto.ensureProvider()
-        keyManager.ensureKeyPair(context)
-        keyRepo = PublicKeyRepository(context)
+        synchronized(keyInitLock) {
+            if (::keyManager.isInitialized && ::keyRepo.isInitialized) return
+            keyManager = SecureKeyManager
+            PqcCrypto.ensureProvider()
+            keyManager.ensureKeyPair(context)
+            keyRepo = PublicKeyRepository(context)
+        }
     }
 
     fun connect(server: ServerConfig, name: String) {
-        synchronized(lock) {
+        val generation = synchronized(lock) {
             val cur = _state.value
             if (cur == ConnectionState.CONNECTING ||
                 cur == ConnectionState.CONNECTED ||
@@ -181,12 +238,14 @@ class ChatController(private val context: Context) {
                 LogManager.w(TAG, "connect ignored: already active (state=$cur)")
                 return
             }
+            connectionGeneration++
             userDisconnect = false
             reconnectJob?.cancel()
             reconnectJob = null
             currentServer = server
             clientName = name
             _state.value = ConnectionState.CONNECTING
+            connectionGeneration
         }
         LogManager.i(TAG, "connect: server=${server.id} name='$name'")
         // Key generation (ML-KEM + ML-DSA) can throw on some devices (e.g.
@@ -196,8 +255,14 @@ class ChatController(private val context: Context) {
             ensureKeyPair()
         } catch (t: Throwable) {
             LogManager.e(TAG, "ensureKeyPair failed on connect", t)
-            _state.value = ConnectionState.ERROR
-            _lastError.value = "Ошибка генерации ключей: ${t.message}"
+            val current = synchronized(lock) {
+                if (connectionGeneration != generation || currentServer?.id != server.id) false else {
+                    _state.value = ConnectionState.ERROR
+                    _lastError.value = "Ошибка генерации ключей: ${t.message}"
+                    true
+                }
+            }
+            if (!current) return
             com.example.impulse.util.CrashLog.writeCrash(
                 com.example.impulse.util.CrashLog.buildCrashReport(
                     thread = Thread.currentThread(),
@@ -214,46 +279,83 @@ class ChatController(private val context: Context) {
             )
             return
         }
-        _lastError.value = null
+        synchronized(lock) {
+            if (connectionGeneration != generation || currentServer?.id != server.id) return
+            _lastError.value = null
+        }
 
         val hashes = certManager.getHashes(server.id)
 
         if (!certManager.isTrusted(server.id)) {
-            _state.value = ConnectionState.ERROR
-            _lastError.value = "Нет доверенного сертификата сервера. Отсканируйте QR-код с экрана сервера."
+            synchronized(lock) {
+                if (connectionGeneration != generation || currentServer?.id != server.id) return
+                _state.value = ConnectionState.ERROR
+                _lastError.value = "Нет доверенного сертификата сервера. Отсканируйте QR-код с экрана сервера."
+            }
             LogManager.w(TAG, "No trusted cert for ${server.id}; QR scan required.")
             return
         }
 
         LogManager.i(TAG, "connect: server=${server.id} ip=${server.ipAddress} pinnedHashes=${hashes.size}")
 
-        synchronized(lock) {
-            client?.destroy()
-            client = null
-        }
-        authChallengeNonce = CompletableDeferred()
-        pendingSaltB64 = ""
-
+        if (!isCurrentGeneration(generation, server.id)) return
         val clientHolder = arrayOfNulls<WebTransportClient>(1)
         val wtClient = WebTransportClient(
             context = context,
             serverCertHashes = hashes,
-            onFrame = { raw -> handleIncoming(raw) },
-            onState = { s -> onTransportState(s) },
-            onCertHashPush = { h -> certManager.rotateHash(server.id, h) },
-            onSessionError = { code -> _lastError.value = "Ошибка сессии WebTransport (code=$code). " +
-                "Возможно, сервер не поддерживает HTTP/3 (QUIC) или недоступен на ${server.ipAddress}:${server.port}." },
+            onFrame = { raw ->
+                val source = clientHolder[0]
+                if (source != null && isCurrentConnection(generation, server.id, source)) {
+                    handleIncoming(raw, generation, server, source)
+                }
+            },
+            onState = { s ->
+                val source = clientHolder[0]
+                if (source != null) onTransportState(s, generation, server.id, source)
+            },
+            onCertHashPush = { h ->
+                val source = clientHolder[0]
+                if (source != null && isCurrentConnection(generation, server.id, source)) {
+                    certManager.rotateHash(server.id, h)
+                }
+            },
+            onSessionError = { code ->
+                val source = clientHolder[0]
+                if (source != null && isCurrentConnection(generation, server.id, source)) {
+                    setLastErrorForConnection(
+                        generation,
+                        server.id,
+                        source,
+                        "Ошибка сессии WebTransport (code=$code). " +
+                            "Возможно, сервер не поддерживает HTTP/3 (QUIC) или недоступен на ${server.ipAddress}:${server.port}."
+                    )
+                }
+            },
             onReady = {
-                LogManager.i(TAG, "onReady FIRED — launching sendAuth")
-                scope.launch {
-                    val liveClient = synchronized(lock) { client }
-                    LogManager.i(TAG, "sendAuth coroutine started, transport=${liveClient != null}")
-                    sendAuth(liveClient)
+                val source = clientHolder[0]
+                if (source != null && isCurrentConnection(generation, server.id, source)) {
+                    LogManager.i(TAG, "onReady FIRED — launching sendAuth")
+                    val challenge = authChallengeNonce
+                    scope.launch {
+                        if (!isCurrentConnection(generation, server.id, source)) return@launch
+                        LogManager.i(TAG, "sendAuth coroutine started, transport=current")
+                        sendAuth(source, server, generation, challenge)
+                    }
                 }
             },
         )
         clientHolder[0] = wtClient
-        synchronized(lock) { client = wtClient }
+        synchronized(lock) {
+            if (connectionGeneration != generation || currentServer?.id != server.id) {
+                wtClient.destroy()
+                return
+            }
+            client?.destroy()
+            authChallengeNonce.completeExceptionally(IllegalStateException("connection replaced"))
+            authChallengeNonce = CompletableDeferred()
+            pendingSaltB64 = ""
+            client = wtClient
+        }
         scope.launch {
             try {
                 val purged = repo.purgeExpired()
@@ -278,6 +380,7 @@ class ChatController(private val context: Context) {
     fun disconnect() {
         val clientToDestroy: WebTransportClient?
         synchronized(lock) {
+            connectionGeneration++
             userDisconnect = true
             reconnectJob?.cancel()
             reconnectJob = null
@@ -287,6 +390,11 @@ class ChatController(private val context: Context) {
             authTimeoutJob = null
             clientToDestroy = client
             client = null
+            pendingSaltB64 = ""
+            authChallengeNonce.completeExceptionally(IllegalStateException("disconnected"))
+            authChallengeNonce = CompletableDeferred()
+            _state.value = ConnectionState.DISCONNECTED
+            _lastError.value = null
         }
         if (clientToDestroy != null) {
             // Best-effort notify the server and destroy asynchronously without blocking caller thread
@@ -299,17 +407,11 @@ class ChatController(private val context: Context) {
                 clientToDestroy.destroy()
             }
         }
-        pendingSaltB64 = ""
         // Keep the outbox across disconnect/reconnect so queued messages are
         // NOT lost (Bug: "outbox cleared on disconnect drops messages"). The
         // flush loop re-runs on the next READY. Only `userDisconnect` from the
         // UI should clear it explicitly (see disconnectUser).
-        synchronized(outboxLock) { flushOutboxRunning = false }
-        synchronized(pendingMessagesLock) { pendingMessages.clear() }
-        authChallengeNonce.completeExceptionally(IllegalStateException("disconnected"))
-        authChallengeNonce = CompletableDeferred()
-        _state.value = ConnectionState.DISCONNECTED
-        _lastError.value = null
+        pendingMessages.clear()
         synchronized(dedupLock) { processedMsgIds.clear() }
     }
 
@@ -331,54 +433,113 @@ class ChatController(private val context: Context) {
         }
     }
 
-    private fun onTransportState(s: ConnectionState) {
-        LogManager.i(TAG, "transport state → $s")
-        when (s) {
-            ConnectionState.CONNECTING -> {
-                _state.value = s
-                _lastError.value = null
-            }
-            ConnectionState.CONNECTED -> {
-                _state.value = s
-                // The transport handshake succeeded — the network is healthy,
-                // so reset the exponential-backoff counter for the next failure.
-                reconnectAttempts = 0
-            }
-            ConnectionState.ERROR -> {
-                synchronized(lock) {
-                    heartbeatJob?.cancel()
-                    heartbeatJob = null
-                }
-                _state.value = s
-                cancelAuthTimeout()
-                scheduleReconnect()
-            }
-            else -> { }
+    private fun isCurrentGeneration(generation: Long, serverId: String): Boolean = synchronized(lock) {
+        connectionGeneration == generation && currentServer?.id == serverId
+    }
+
+    private fun isCurrentConnection(generation: Long, serverId: String, transport: WebTransportClient): Boolean =
+        synchronized(lock) { isCurrentConnectionLocked(generation, serverId, transport) }
+
+    private fun isCurrentConnectionLocked(generation: Long, serverId: String, transport: WebTransportClient): Boolean =
+        matchesConnectionIdentity(
+            ConnectionIdentity(generation, serverId),
+            ConnectionIdentity(connectionGeneration, currentServer?.id ?: ""),
+            transport,
+            client
+        )
+
+    private fun setStateForConnection(
+        generation: Long,
+        serverId: String,
+        transport: WebTransportClient,
+        state: ConnectionState
+    ): Boolean = synchronized(lock) {
+        if (!isCurrentConnectionLocked(generation, serverId, transport)) return@synchronized false
+        _state.value = state
+        true
+    }
+
+    private fun setLastErrorForConnection(
+        generation: Long,
+        serverId: String,
+        transport: WebTransportClient,
+        message: String
+    ): Boolean = synchronized(lock) {
+        if (!isCurrentConnectionLocked(generation, serverId, transport)) return@synchronized false
+        _lastError.value = message
+        true
+    }
+
+    private fun setLastErrorForConnection(connection: ActiveConnection, message: String): Boolean =
+        setLastErrorForConnection(
+            connection.identity.generation,
+            connection.identity.serverId,
+            connection.transport,
+            message
+        )
+
+    private fun failCurrentConnection(generation: Long, serverId: String, transport: WebTransportClient) {
+        synchronized(lock) {
+            if (!isCurrentConnectionLocked(generation, serverId, transport)) return
+            _state.value = ConnectionState.ERROR
+            scheduleReconnect()
         }
     }
 
-    private suspend fun sendAuth(transport: WebTransportClient? = client) {
-        LogManager.i(TAG, "sendAuth: STARTED (transport=${transport != null}, server=${currentServer?.id})")
-        if (userDisconnect) return
-        val server = currentServer ?: run {
-            LogManager.e(TAG, "sendAuth: no current server configured")
-            _state.value = ConnectionState.ERROR
-            return
+    private fun onTransportState(
+        s: ConnectionState,
+        generation: Long,
+        serverId: String,
+        transport: WebTransportClient
+    ) {
+        synchronized(lock) {
+            if (!isCurrentConnectionLocked(generation, serverId, transport)) return
+            LogManager.i(TAG, "transport state → $s")
+            when (s) {
+                ConnectionState.CONNECTING -> {
+                    _state.value = s
+                    _lastError.value = null
+                }
+                ConnectionState.CONNECTED -> {
+                    _state.value = s
+                    // The transport handshake succeeded — the network is healthy,
+                    // so reset the exponential-backoff counter for the next failure.
+                    reconnectAttempts = 0
+                }
+                ConnectionState.ERROR -> {
+                    heartbeatJob?.cancel()
+                    heartbeatJob = null
+                    _state.value = s
+                    cancelAuthTimeout()
+                    scheduleReconnect()
+                }
+                else -> { }
+            }
         }
+    }
+
+    private suspend fun sendAuth(
+        transport: WebTransportClient,
+        server: ServerConfig,
+        generation: Long,
+        challenge: CompletableDeferred<ByteArray?>
+    ) {
+        if (!isCurrentConnection(generation, server.id, transport) || userDisconnect) return
+        LogManager.i(TAG, "sendAuth: STARTED (transport=current, server=${server.id})")
         val password = server.password
         LogManager.i(TAG, "sendAuth: password=${password.length} chars, waiting for challenge nonce...")
         val nonce = try {
-            withTimeout(5000) { authChallengeNonce.await() }
+            withTimeout(5000) { challenge.await() }
         } catch (e: CancellationException) {
             throw e
         } catch (e: Exception) {
             LogManager.e(TAG, "sendAuth: challenge nonce not received after 5s: ${e.message}")
-            if (!userDisconnect) {
-                _state.value = ConnectionState.ERROR
-                scheduleReconnect()
+            if (isCurrentConnection(generation, server.id, transport) && !userDisconnect) {
+                failCurrentConnection(generation, server.id, transport)
             }
             return
         }
+        if (!isCurrentConnection(generation, server.id, transport) || userDisconnect) return
         LogManager.i(TAG, "sendAuth: building auth frame (password=${password.length} chars, nonce=${nonce?.size} bytes)")
         val frame: ByteArray
         try {
@@ -390,41 +551,45 @@ class ChatController(private val context: Context) {
             throw e
         } catch (e: Exception) {
             LogManager.e(TAG, "sendAuth: buildAuth FAILED: ${e.message}", e)
-            if (!userDisconnect) {
-                _state.value = ConnectionState.ERROR
-                scheduleReconnect()
+            if (isCurrentConnection(generation, server.id, transport) && !userDisconnect) {
+                failCurrentConnection(generation, server.id, transport)
             }
             return
         }
+        if (!isCurrentConnection(generation, server.id, transport) || userDisconnect) return
         LogManager.i(TAG, "sendAuth: sending frame via transport...")
-        val ok = withContext(Dispatchers.IO) { transport?.send(frame) ?: false }
-        LogManager.i(TAG, "sendAuth: transport.send() returned $ok (transport=${transport != null})")
+        val ok = withContext(Dispatchers.IO) { transport.send(frame) }
+        LogManager.i(TAG, "sendAuth: transport.send() returned $ok (transport=current)")
+        if (!isCurrentConnection(generation, server.id, transport) || userDisconnect) return
         if (!ok) {
             LogManager.e(TAG, "sendAuth FAILED — transport.send() returned false (state=${_state.value})")
-            if (!userDisconnect) {
-                _state.value = ConnectionState.ERROR
-                scheduleReconnect()
-            }
+            if (!userDisconnect) failCurrentConnection(generation, server.id, transport)
             return
         }
-        _state.value = ConnectionState.AUTHENTICATING
+        if (!setStateForConnection(generation, server.id, transport, ConnectionState.AUTHENTICATING)) return
         LogManager.i(TAG, "AUTH SENT → waiting for server response (timeout=${AUTH_TIMEOUT_MS}ms)")
-        startAuthTimeout()
+            startAuthTimeout(generation, server.id, transport)
     }
 
-    private fun startAuthTimeout() {
-        cancelAuthTimeout()
-        authTimeoutJob = scope.launch {
-            delay(AUTH_TIMEOUT_MS)
-            val currentState = _state.value
-            if (currentState == ConnectionState.CONNECTED ||
-                currentState == ConnectionState.AUTHENTICATING
-            ) {
-                LogManager.e(TAG, "AUTH TIMEOUT after ${AUTH_TIMEOUT_MS}ms — state=$currentState → ERROR")
-                _state.value = ConnectionState.ERROR
-                scheduleReconnect()
-            } else {
-                LogManager.d(TAG, "auth timeout fired but state=$currentState (already past auth), ignoring")
+    private fun startAuthTimeout(generation: Long, serverId: String, transport: WebTransportClient) {
+        synchronized(lock) {
+            if (!isCurrentConnectionLocked(generation, serverId, transport)) return
+            cancelAuthTimeout()
+            authTimeoutJob = scope.launch {
+                delay(AUTH_TIMEOUT_MS)
+                synchronized(lock) {
+                    if (!isCurrentConnectionLocked(generation, serverId, transport)) return@launch
+                    val currentState = _state.value
+                    if (currentState == ConnectionState.CONNECTED ||
+                        currentState == ConnectionState.AUTHENTICATING
+                    ) {
+                        LogManager.e(TAG, "AUTH TIMEOUT after ${AUTH_TIMEOUT_MS}ms — state=$currentState → ERROR")
+                        _state.value = ConnectionState.ERROR
+                        scheduleReconnect()
+                    } else {
+                        LogManager.d(TAG, "auth timeout fired but state=$currentState (already past auth), ignoring")
+                    }
+                }
             }
         }
     }
@@ -463,13 +628,15 @@ class ChatController(private val context: Context) {
     // ------------------------------------------------------------------
 
     suspend fun sendChat(plaintext: String): Boolean {
-        if (_state.value != ConnectionState.READY) {
+        val connection = captureReadyConnection()
+        if (connection == null) {
             LogManager.w(TAG, "sendChat ignored: not READY (state=${_state.value})")
             return false
         }
-        val serverId = currentServer?.id ?: return false
+        val serverId = connection.identity.serverId
 
         val allKemKeys = keyRepo.getAllKemPublicKeys(serverId)
+        if (!isCurrentConnection(connection)) return false
         val ownPub = keyManager.getKemPublicKey()
         val peerKeys = allKemKeys.filter { !it.contentEquals(ownPub) }
         if (peerKeys.isEmpty()) {
@@ -477,7 +644,10 @@ class ChatController(private val context: Context) {
             // design limitation of per-recipient KEM wrapping (a 1:1 chat needs
             // at least one known peer), NOT a transport regression.
             LogManager.w(TAG, "No peer keys cached; cannot send.")
-            _lastError.value = "Нет известных собеседников. Подключитесь вторым устройством, чтобы обмениваться сообщениями."
+            setLastErrorForConnection(
+                connection,
+                "Нет известных собеседников. Подключитесь вторым устройством, чтобы обмениваться сообщениями."
+            )
             return false
         }
 
@@ -519,21 +689,24 @@ class ChatController(private val context: Context) {
 
         val blob = buildPerRecipientBlob(recipients)
         val frame = Protocol.buildData(blob)
-        val c = synchronized(lock) { client }
-        val ok = withContext(Dispatchers.IO) { c?.send(frame) ?: false }
+        if (!isCurrentConnection(connection)) {
+            LogManager.i(TAG, "sendChat: connection changed during encryption; retaining frame for originating server")
+            queueOutboxFrame(serverId, frame)
+            return false
+        }
+        val ok = withContext(Dispatchers.IO) { connection.transport.send(frame) }
+        if (!isCurrentConnection(connection)) {
+            if (!ok) queueOutboxFrame(serverId, frame)
+            return false
+        }
 
         if (ok) {
             val tempId = tempIdCounter.getAndDecrement()
             val msg = DecryptedMessage(tempId, clientName, publicKeyHash, plaintext, true, System.currentTimeMillis())
-            synchronized(listeners) { listeners.forEach { it(msg) } }
+            if (!emitLocalEchoIfCurrent(connection, msg)) return false
         } else {
             LogManager.w(TAG, "sendChat: transport send failed, queuing in outbox")
-            val sid = currentServer?.id ?: ""
-            synchronized(outboxLock) { outbox.add(OutboxEntry(sid, frame)) }
-            persistOutbox()
-            if (!flushOutboxRunning) {
-                scope.launch { flushOutbox() }
-            }
+            queueOutboxFrame(serverId, frame)
         }
         return ok
     }
@@ -544,15 +717,17 @@ class ChatController(private val context: Context) {
      * recipient (and the sender, for local echo) holds a decipherable entry.
      */
     suspend fun sendDirectMessage(plaintext: String, recipientFingerprint: String): Boolean {
-        if (_state.value != ConnectionState.READY) {
+        val connection = captureReadyConnection()
+        if (connection == null) {
             LogManager.w(TAG, "sendDirect ignored: not READY (state=${_state.value})")
             return false
         }
-        val serverId = currentServer?.id ?: return false
+        val serverId = connection.identity.serverId
         val recipientPub = keyRepo.getKemPublicKey(serverId, recipientFingerprint)
+        if (!isCurrentConnection(connection)) return false
         if (recipientPub == null) {
             LogManager.w(TAG, "sendDirect: no KEM key for $recipientFingerprint")
-            _lastError.value = "Получатель не найден — обменяйтесь ключами."
+            setLastErrorForConnection(connection, "Получатель не найден — обменяйтесь ключами.")
             return false
         }
 
@@ -592,21 +767,24 @@ class ChatController(private val context: Context) {
 
         val blob = buildPerRecipientBlob(recipients)
         val frame = Protocol.buildData(blob)
-        val c = synchronized(lock) { client }
-        val ok = withContext(Dispatchers.IO) { c?.send(frame) ?: false }
+        if (!isCurrentConnection(connection)) {
+            LogManager.i(TAG, "sendDirect: connection changed during encryption; retaining frame for originating server")
+            queueOutboxFrame(serverId, frame)
+            return false
+        }
+        val ok = withContext(Dispatchers.IO) { connection.transport.send(frame) }
+        if (!isCurrentConnection(connection)) {
+            if (!ok) queueOutboxFrame(serverId, frame)
+            return false
+        }
 
         if (ok) {
             val tempId = tempIdCounter.getAndDecrement()
             val msg = DecryptedMessage(tempId, clientName, publicKeyHash, plaintext, true, System.currentTimeMillis(), "dm:$recipientFingerprint")
-            synchronized(listeners) { listeners.forEach { it(msg) } }
+            if (!emitLocalEchoIfCurrent(connection, msg)) return false
         } else {
             LogManager.w(TAG, "sendDirect: transport send failed, queuing in outbox")
-            val sid = currentServer?.id ?: ""
-            synchronized(outboxLock) { outbox.add(OutboxEntry(sid, frame)) }
-            persistOutbox()
-            if (!flushOutboxRunning) {
-                scope.launch { flushOutbox() }
-            }
+            queueOutboxFrame(serverId, frame)
         }
         return ok
     }
@@ -660,38 +838,64 @@ class ChatController(private val context: Context) {
     }
 
     private suspend fun flushOutbox() {
-        if (flushOutboxRunning) return
-        flushOutboxRunning = true
+        if (!flushOutboxRunning.compareAndSet(false, true)) return
         try {
-            val curServer = currentServer?.id ?: return
+            val target = synchronized(lock) {
+                val serverId = currentServer?.id ?: return@synchronized null
+                val activeClient = client ?: return@synchronized null
+                OutboxFlushTarget(ConnectionIdentity(connectionGeneration, serverId), activeClient)
+            } ?: return
+            fun targetIsCurrent(): Boolean = synchronized(lock) {
+                matchesConnectionIdentity(
+                    target.identity,
+                    ConnectionIdentity(connectionGeneration, currentServer?.id ?: ""),
+                    target.transport,
+                    client
+                ) && _state.value == ConnectionState.READY
+            }
             val entries: List<OutboxEntry>
             synchronized(outboxLock) {
-                entries = outbox.filter { it.serverId == curServer }
+                entries = outbox.filter { it.serverId == target.identity.serverId }
             }
             if (entries.isEmpty()) return
 
-            for (entry in entries) {
-                if (_state.value == ConnectionState.DISCONNECTED) return
-                if (entry.retries >= MAX_OUTBOX_RETRIES) {
-                    LogManager.w(TAG, "Outbox: dropping message after ${MAX_OUTBOX_RETRIES} retries")
+            flushOutboxBatch(
+                entries = entries,
+                canContinue = { targetIsCurrent() },
+                send = { entry ->
+                    if (!targetIsCurrent() || entry.serverId != target.identity.serverId) {
+                        false
+                    } else {
+                        withContext(Dispatchers.IO) { target.transport.send(entry.frame) }
+                    }
+                },
+                onDelivered = { entry ->
                     synchronized(outboxLock) { outbox.remove(entry) }
-                    persistOutbox()
-                    continue
-                }
-                val c = synchronized(lock) { client }
-                val ok = withContext(Dispatchers.IO) { c?.send(entry.frame) ?: false }
-                if (ok) {
-                    synchronized(outboxLock) { outbox.remove(entry) }
-                    persistOutbox()
-                    LogManager.i(TAG, "Outbox: message sent successfully on retry ${entry.retries}")
-                } else {
-                    entry.retries++
-                    LogManager.w(TAG, "Outbox: retry ${entry.retries} failed")
-                    delay(1000L * entry.retries)
-                }
-            }
+                    persistOutbox(entry.serverId)
+                    LogManager.i(TAG, "Outbox: queued message sent successfully")
+                },
+                onFailure = { entry ->
+                    LogManager.w(TAG, "Outbox: send failed; retaining frame for next READY connection")
+                    persistOutbox(entry.serverId)
+                    if (targetIsCurrent() && !userDisconnect) {
+                        onTransportState(
+                            ConnectionState.ERROR,
+                            target.identity.generation,
+                            target.identity.serverId,
+                            target.transport
+                        )
+                    }
+                },
+            )
         } finally {
-            flushOutboxRunning = false
+            flushOutboxRunning.set(false)
+            val readyServerId = synchronized(lock) {
+                currentServer?.id.takeIf { _state.value == ConnectionState.READY && client != null }
+            }
+            if (readyServerId != null) {
+                val hasQueuedFrames = synchronized(outboxLock) { outbox.any { it.serverId == readyServerId } }
+                if (hasQueuedFrames) scope.launch { flushOutbox() }
+            }
         }
     }
 
@@ -700,10 +904,9 @@ class ChatController(private val context: Context) {
      * Frames are already-encrypted blobs (safe to store). Per SPEC C2 the
      * cleartext body is NOT persisted — only the encrypted frame is kept, so a
      * process kill / ADB / backup pull cannot reveal message content.
-     * Format: JSON array of [serverId, frameB64, retries, queuedAt].
+     * Format: JSON array of [serverId, frameB64, queuedAt].
      */
-    private fun persistOutbox() {
-        val serverId = currentServer?.id ?: return
+    private fun persistOutbox(serverId: String) {
         try {
             val entries: List<OutboxEntry>
             synchronized(outboxLock) { entries = outbox.filter { it.serverId == serverId } }
@@ -712,7 +915,6 @@ class ChatController(private val context: Context) {
                 val obj = org.json.JSONObject()
                 obj.put("s", e.serverId)
                 obj.put("f", android.util.Base64.encodeToString(e.frame, android.util.Base64.NO_WRAP))
-                obj.put("r", e.retries)
                 obj.put("t", e.queuedAt)
                 arr.put(obj)
             }
@@ -723,8 +925,7 @@ class ChatController(private val context: Context) {
     }
 
     /** Load a previously-persisted outbox into memory (call once, at connect). */
-    private fun restoreOutbox() {
-        val serverId = currentServer?.id ?: return
+    private fun restoreOutbox(serverId: String) {
         try {
             val raw = outboxPrefs.getString("outbox_$serverId", null) ?: return
             val arr = org.json.JSONArray(raw)
@@ -732,17 +933,21 @@ class ChatController(private val context: Context) {
             for (i in 0 until arr.length()) {
                 val obj = arr.getJSONObject(i)
                 val frame = android.util.Base64.decode(obj.getString("f"), android.util.Base64.DEFAULT)
+                val entryServerId = obj.optString("s", serverId)
+                if (entryServerId != serverId || frame.isEmpty()) continue
                 restored.add(OutboxEntry(
-                    serverId = obj.optString("s", serverId),
+                    serverId = serverId,
                     frame = frame,
                     queuedAt = obj.optLong("t", System.currentTimeMillis()),
-                    retries = obj.optInt("r", 0),
                 ))
             }
             synchronized(outboxLock) {
-                if (outbox.isEmpty()) outbox.addAll(restored)
+                val merged = mergeRestoredOutbox(outbox, restored) { restoredServerId, frame, queuedAt ->
+                    OutboxEntry(restoredServerId, frame, queuedAt)
+                }
+                outbox.clear()
+                outbox.addAll(merged)
             }
-            outboxPrefs.edit().remove("outbox_$serverId").apply()
             if (restored.isNotEmpty()) {
                 LogManager.i(TAG, "restored ${restored.size} queued messages from disk for server $serverId")
             }
@@ -770,9 +975,14 @@ class ChatController(private val context: Context) {
     // Per-Recipient KEM Wrapping — receive
     // ------------------------------------------------------------------
 
-    private fun onData(r: Protocol.Reader) {
+    private suspend fun onData(
+        r: Protocol.Reader,
+        generation: Long,
+        serverId: String,
+        transport: WebTransportClient
+    ) {
         val frame = Protocol.parseData(r)
-        val serverId = currentServer?.id ?: return
+        if (!isCurrentConnection(generation, serverId, transport)) return
 
         if (frame.serverMsgId > 0) {
             synchronized(dedupLock) {
@@ -822,6 +1032,8 @@ class ChatController(private val context: Context) {
                     sharedSecret = keyManager.decapsulateKem(encKey)
                     innerBytes = try {
                         PqcCrypto.aesDecrypt(sharedSecret, ciphertext)
+                    } catch (e: CancellationException) {
+                        throw e
                     } catch (_: Exception) {
                         null
                     }
@@ -834,24 +1046,21 @@ class ChatController(private val context: Context) {
                     val realId = frame.serverMsgId
                     val ts = if (frame.timestamp != 0L) frame.timestamp else System.currentTimeMillis()
 
-                    scope.launch {
-                        val dsaPub = keyRepo.getDsaPublicKey(serverId, senderFingerprint)
-                        if (dsaPub == null) {
-                            LogManager.w(TAG, "DSA key missing for $senderFingerprint, queuing pending message")
-                            val pending = PendingMessage(
-                                serverMsgId = realId,
-                                senderFingerprint = senderFingerprint,
-                                env = env,
-                                ciphertext = payload,
-                                timestamp = ts,
-                                isOwn = isOwn
-                            )
-                            synchronized(pendingMessagesLock) {
-                                pendingMessages.getOrPut(senderFingerprint) { mutableListOf() }.add(pending)
-                            }
-                            sendKeyExchangeRequest(senderFingerprint)
-                            return@launch
+                    val dsaPub = keyRepo.getDsaPublicKey(serverId, senderFingerprint)
+                    if (dsaPub == null) {
+                        LogManager.w(TAG, "DSA key missing, message requires key exchange")
+                        val pending = PendingMessage(
+                            serverMsgId = realId,
+                            senderFingerprint = senderFingerprint,
+                            env = env,
+                            ciphertext = payload,
+                            timestamp = ts,
+                            isOwn = isOwn
+                        )
+                        if (queuePendingMessage(pending)) {
+                            sendKeyExchangeRequest(senderFingerprint, generation, serverId, transport)
                         }
+                    } else {
                         processVerifiedMessage(serverId, realId, env, payload, ts, isOwn, senderFingerprint, dsaPub)
                     }
                 } finally {
@@ -864,6 +1073,8 @@ class ChatController(private val context: Context) {
             } else if (!accepted) {
                 LogManager.w(TAG, "All our recipient entries failed to decrypt (possible decoy entries)")
             }
+        } catch (e: CancellationException) {
+            throw e
         } catch (e: Exception) {
             LogManager.e(TAG, "Per-Recipient parse failed", e)
         }
@@ -874,57 +1085,6 @@ class ChatController(private val context: Context) {
         payload: ByteArray, ts: Long, isOwn: Boolean,
         senderFingerprint: String, dsaPub: ByteArray
     ) {
-        // Rebuild the canonical signed form. New envelopes sign sender+content
-        // together with clientTs+nonce+dm; old envelopes (no ts/nonce) still
-        // verify against the legacy canonical form for compatibility.
-        val canonical = if (env.clientTs != 0L || env.nonce.isNotEmpty()) {
-            Protocol.buildSignedInnerEnvelope(env.sender, "", env.content, env.clientTs, env.nonce, env.dm)
-        } else {
-            Protocol.buildInnerEnvelope(env.sender, "", env.content)
-        }
-        val sigBytes = runCatching {
-            Protocol.base64Decode(env.signature)
-        }.getOrNull()
-        if (sigBytes == null || sigBytes.isEmpty()) {
-            LogManager.w(TAG, "REJECT msg $realId from ${env.sender}: missing ML-DSA-65 signature")
-            return
-        }
-        if (!keyManager.verifyDsa(dsaPub, canonical, sigBytes)) {
-            LogManager.w(TAG, "ML-DSA-65 signature verification FAILED for msg $realId from ${env.sender}")
-            return
-        }
-
-        // Clock skew validation: reject messages outside the 4-day (96h) TTL + overlap window
-        if (env.clientTs != 0L) {
-            val maxClockSkewMs = 4 * 24 * 3600 * 1000L // 96h (72h message TTL + 24h grace overlap)
-            val skew = kotlin.math.abs(System.currentTimeMillis() - env.clientTs)
-            if (skew > maxClockSkewMs) {
-                LogManager.w(TAG, "REJECT msg $realId from ${env.sender}: clock skew exceeded ($skew ms)")
-                return
-            }
-        }
-
-        // C4 Replay protection: verify that this message nonce from this sender hasn't been seen before
-        if (env.nonce.isNotEmpty()) {
-            val nonceKey = "$senderFingerprint:${env.nonce}"
-            val isDuplicate = synchronized(seenNoncesLock) {
-                if (seenNonces.containsKey(nonceKey)) {
-                    true
-                } else {
-                    if (seenNonces.size >= 2000) {
-                        val oldest = seenNonces.keys.firstOrNull()
-                        if (oldest != null) seenNonces.remove(oldest)
-                    }
-                    seenNonces[nonceKey] = System.currentTimeMillis()
-                    false
-                }
-            }
-            if (isDuplicate) {
-                LogManager.w(TAG, "REJECT msg $realId from ${env.sender}: replay detected for nonce ${env.nonce}")
-                return
-            }
-        }
-
         // Symmetric conversation key: both sides address the thread by the OTHER
         // participant's fingerprint, so the sender and receiver share ONE thread:
         //  - received DM (isOwn=false): other = senderFingerprint (peer).
@@ -937,18 +1097,73 @@ class ChatController(private val context: Context) {
             env.dm.isNotEmpty() -> "dm:$senderFingerprint"
             else -> "group"
         }
-        repo.upsert(
-            MessageEntity(
-                serverId = serverId,
-                serverMsgId = realId,
-                sender = env.sender,
-                ciphertext = payload,
-                iv = byteArrayOf(),
-                timestamp = ts,
-                isOwn = isOwn,
-                conversationId = conversationId
-            )
+        val row = MessageEntity(
+            serverId = serverId,
+            serverMsgId = realId,
+            sender = env.sender,
+            ciphertext = payload,
+            iv = byteArrayOf(),
+            timestamp = ts,
+            isOwn = isOwn,
+            conversationId = conversationId
         )
+        val acceptedAt = System.currentTimeMillis()
+        val persisted = InnerEnvelopeSignatureVerifier.verifyFreshAndPersist(
+            envelope = env,
+            publicKey = dsaPub,
+            now = acceptedAt,
+            freshnessWindowMs = ReplayNonce.FRESHNESS_WINDOW_MS,
+            verifySignature = { publicKey, message, signature ->
+                keyManager.verifyDsa(publicKey, message, signature)
+            }
+        ) {
+            if (env.nonce.isEmpty()) {
+                repo.upsert(row)
+                ReplayPersistenceResult.ACCEPTED
+            } else {
+                val nonceKey = "$senderFingerprint:${ReplayNonce.hash(env.nonce)}"
+                val cachedDuplicate = synchronized(seenNoncesLock) {
+                    val expiresAt = seenNonces[nonceKey]
+                    if (expiresAt != null && expiresAt <= acceptedAt) {
+                        seenNonces.remove(nonceKey)
+                        false
+                    } else expiresAt != null
+                }
+                if (cachedDuplicate) {
+                    ReplayPersistenceResult.DUPLICATE
+                } else {
+                    val marker = ReplayNonce.marker(
+                        senderFingerprint, env.nonce, env.clientTs, acceptedAt
+                    )!!
+                    repo.persistReplayProtected(row, marker, acceptedAt)
+                }
+            }
+        }
+        if (persisted == null) {
+            LogManager.w(TAG, "REJECT msg $realId from ${env.sender}: invalid signature or signed timestamp")
+            return
+        }
+        when (persisted) {
+            ReplayPersistenceResult.DUPLICATE -> {
+                LogManager.w(TAG, "REJECT msg $realId from ${env.sender}: replay detected")
+                return
+            }
+            ReplayPersistenceResult.CAPACITY_REACHED -> {
+                LogManager.w(TAG, "Replay journal capacity reached; rejecting msg $realId")
+                _lastError.value = "Локальный журнал защиты от повторов заполнен; новые сообщения временно скрыты."
+                return
+            }
+            ReplayPersistenceResult.ACCEPTED -> Unit
+        }
+        if (env.nonce.isNotEmpty()) {
+            val nonceKey = "$senderFingerprint:${ReplayNonce.hash(env.nonce)}"
+            synchronized(seenNoncesLock) {
+                if (seenNonces.size >= 2000) seenNonces.remove(seenNonces.keys.firstOrNull())
+                seenNonces[nonceKey] = ReplayNonce.marker(
+                    senderFingerprint, env.nonce, env.clientTs, acceptedAt
+                )!!.expiresAt
+            }
+        }
 
         if (!isOwn && env.sender.isNotBlank()) {
             recordPeerName(serverId, senderFingerprint, env.sender)
@@ -958,51 +1173,93 @@ class ChatController(private val context: Context) {
         synchronized(listeners) { listeners.forEach { it(msg) } }
     }
 
-    private fun sendKeyExchangeRequest(senderFingerprint: String) {
+    private fun sendKeyExchangeRequest(
+        senderFingerprint: String,
+        generation: Long,
+        serverId: String,
+        transport: WebTransportClient
+    ) {
         scope.launch {
             try {
+                if (!isCurrentConnection(generation, serverId, transport)) return@launch
                 val ownKemPub = keyManager.getKemPublicKey()
                 val ownDsaPub = keyManager.getDsaPublicKey()
                 val ownSig = keyManager.signDsa(ownKemPub + ownDsaPub) // C1 attestation
-                val c = synchronized(lock) { client }
-                val ok = withContext(Dispatchers.IO) { c?.send(Protocol.buildCombinedKeyExchange(ownKemPub, ownDsaPub, ownSig)) ?: false }
+                if (!isCurrentConnection(generation, serverId, transport)) return@launch
+                val ok = withContext(Dispatchers.IO) {
+                    transport.send(Protocol.buildCombinedKeyExchange(ownKemPub, ownDsaPub, ownSig))
+                }
+                if (!isCurrentConnection(generation, serverId, transport)) return@launch
                 LogManager.i(TAG, "Combined key exchange request sent (ok=$ok) for pending msgs from $senderFingerprint")
+            } catch (e: CancellationException) {
+                throw e
             } catch (e: Exception) {
                 LogManager.w(TAG, "Failed to send key exchange request", e)
             }
         }
     }
 
-    private fun processPendingMessages(senderFingerprint: String) {
-        val pendingList: List<PendingMessage>
-        val now = System.currentTimeMillis()
-        synchronized(pendingMessagesLock) {
-            val all = pendingMessages.remove(senderFingerprint) ?: return
-            val (fresh, expired) = all.partition { now - it.queuedAt < PENDING_MSG_TTL_MS }
-            if (expired.isNotEmpty()) {
-                LogManager.w(TAG, "Discarding ${expired.size} expired pending messages from $senderFingerprint")
-            }
-            if (fresh.isEmpty()) return
-            pendingList = fresh
-        }
-        val serverId = currentServer?.id ?: return
-        LogManager.i(TAG, "Processing ${pendingList.size} pending messages from $senderFingerprint")
-
-        scope.launch {
-            for (pending in pendingList) {
+    private suspend fun processPendingMessages(senderFingerprint: String, serverId: String) {
+        val pendingList = pendingMessages.take(senderFingerprint)
+        if (pendingList.isEmpty()) return
+        LogManager.i(TAG, "Processing ${pendingList.size} bounded pending messages")
+        for (pending in pendingList) {
+            try {
                 val dsaPub = keyRepo.getDsaPublicKey(serverId, pending.senderFingerprint)
                 if (dsaPub == null) {
-                    LogManager.w(TAG, "DSA key still missing for ${pending.senderFingerprint}, re-queuing")
-                    synchronized(pendingMessagesLock) {
-                        pendingMessages.getOrPut(pending.senderFingerprint) { mutableListOf() }.add(pending)
+                    if (queuePendingMessage(pending)) {
+                        LogManager.w(TAG, "Sender DSA key is still unavailable; retaining message within limits")
                     }
                     continue
                 }
-
-                processVerifiedMessage(serverId, pending.serverMsgId, pending.env, pending.ciphertext, pending.timestamp, pending.isOwn, pending.senderFingerprint, dsaPub)
+                processVerifiedMessage(
+                    serverId, pending.serverMsgId, pending.env, pending.ciphertext, pending.timestamp,
+                    pending.isOwn, pending.senderFingerprint, dsaPub
+                )
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                LogManager.w(TAG, "Pending message processing failed", e)
             }
         }
     }
+
+    private fun queuePendingMessage(pending: PendingMessage): Boolean {
+        return when (pendingMessages.offer(pending)) {
+            PendingMessageBuffer.OfferResult.ACCEPTED -> {
+                if (pending.serverMsgId > 0) {
+                    synchronized(dedupLock) {
+                        processedMsgIds.add(pending.serverMsgId)
+                        if (processedMsgIds.size > 2000) {
+                            val iter = processedMsgIds.iterator()
+                            repeat(500) { if (iter.hasNext()) { iter.next(); iter.remove() } }
+                        }
+                    }
+                }
+                true
+            }
+            PendingMessageBuffer.OfferResult.EXPIRED -> {
+                if (pending.serverMsgId > 0) synchronized(dedupLock) { processedMsgIds.remove(pending.serverMsgId) }
+                false
+            }
+            PendingMessageBuffer.OfferResult.LIMIT_REACHED -> {
+                if (pending.serverMsgId > 0) synchronized(dedupLock) { processedMsgIds.remove(pending.serverMsgId) }
+                LogManager.w(TAG, "Pending-key queue limit reached; rejecting newest message")
+                _lastError.value = "Очередь сообщений от неизвестных ключей заполнена; некоторые сообщения отклонены."
+                false
+            }
+        }
+    }
+
+    private fun pendingMessageBytes(pending: PendingMessage): Long =
+        pending.ciphertext.size.toLong() +
+            pending.senderFingerprint.toByteArray(Charsets.UTF_8).size +
+            pending.env.sender.toByteArray(Charsets.UTF_8).size +
+            pending.env.content.toByteArray(Charsets.UTF_8).size +
+            pending.env.nonce.toByteArray(Charsets.UTF_8).size +
+            pending.env.dm.toByteArray(Charsets.UTF_8).size +
+            pending.env.signature.toByteArray(Charsets.UTF_8).size +
+            256L
 
     /**
      * Decrypts a per-recipient blob from a sync response or stored message.
@@ -1040,6 +1297,8 @@ class ChatController(private val context: Context) {
                         return null
                     }
                     return DecryptedBlob(senderFingerprint, env)
+                } catch (e: CancellationException) {
+                    throw e
                 } catch (e: Exception) {
                     LogManager.w(TAG, "decryptPerRecipientBlob: decrypt failed for sender=$senderFingerprint: ${e.message}")
                     return null
@@ -1057,9 +1316,14 @@ class ChatController(private val context: Context) {
         val env: Protocol.InnerEnvelope
     )
 
-    private fun onSyncResponse(r: Protocol.Reader) {
+    private suspend fun onSyncResponse(
+        r: Protocol.Reader,
+        generation: Long,
+        serverId: String,
+        transport: WebTransportClient
+    ) {
         val resp = Protocol.parseSyncResponse(r)
-        val serverId = currentServer?.id ?: return
+        if (!isCurrentConnection(generation, serverId, transport)) return
         LogManager.i(TAG, "SyncResponse: ${resp.messages.size} messages")
         var maxId = 0L
 
@@ -1082,52 +1346,49 @@ class ChatController(private val context: Context) {
             toProcess.add(m)
         }
 
-        // Process all messages SEQUENTIALLY in a single coroutine to preserve order
-        if (toProcess.isNotEmpty()) {
-            scope.launch {
-                for (m in toProcess) {
-                    val result = runCatching { decryptPerRecipientBlob(m.payload, serverId) }.getOrNull()
-                    if (result == null) {
-                        LogManager.w(TAG, "SyncResponse decrypt failed for ${m.id}")
-                        continue
-                    }
-                    val senderFingerprint = result.senderFingerprint
-                    val env = result.env
-                    val sender = env.sender
-                    val isOwn = senderFingerprint == ownFingerprint()
-                    LogManager.d(TAG, "onSyncResponse: msgId=${m.id} sender='$sender' isOwn=$isOwn dm=${env.dm.take(8)}")
-
-                    val dsaPub = keyRepo.getDsaPublicKey(serverId, senderFingerprint)
-                    if (dsaPub == null) {
-                        LogManager.w(TAG, "DSA key missing for sync msg from $senderFingerprint, queuing")
-                        val pending = PendingMessage(
-                            serverMsgId = m.id,
-                            senderFingerprint = senderFingerprint,
-                            env = env,
-                            ciphertext = m.payload,
-                            timestamp = m.timestamp,
-                            isOwn = isOwn
-                        )
-                        synchronized(pendingMessagesLock) {
-                            pendingMessages.getOrPut(senderFingerprint) { mutableListOf() }.add(pending)
-                        }
-                        sendKeyExchangeRequest(senderFingerprint)
-                        continue
-                    }
-
-                    processVerifiedMessage(serverId, m.id, env, m.payload, m.timestamp, isOwn, senderFingerprint, dsaPub)
+        for (m in toProcess) {
+            try {
+                val result = decryptPerRecipientBlob(m.payload, serverId)
+                if (result == null) {
+                    LogManager.w(TAG, "SyncResponse decrypt failed for ${m.id}")
+                    continue
                 }
+                val senderFingerprint = result.senderFingerprint
+                val env = result.env
+                val isOwn = senderFingerprint == ownFingerprint()
+                LogManager.d(TAG, "onSyncResponse: msgId=${m.id} sender='${env.sender}' isOwn=$isOwn dm=${env.dm.take(8)}")
+
+                val dsaPub = keyRepo.getDsaPublicKey(serverId, senderFingerprint)
+                if (dsaPub == null) {
+                    val pending = PendingMessage(
+                        serverMsgId = m.id,
+                        senderFingerprint = senderFingerprint,
+                        env = env,
+                        ciphertext = m.payload,
+                        timestamp = m.timestamp,
+                        isOwn = isOwn
+                    )
+                    if (queuePendingMessage(pending)) {
+                        sendKeyExchangeRequest(senderFingerprint, generation, serverId, transport)
+                    }
+                    continue
+                }
+
+                processVerifiedMessage(serverId, m.id, env, m.payload, m.timestamp, isOwn, senderFingerprint, dsaPub)
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                LogManager.w(TAG, "SyncResponse message processing failed for ${m.id}", e)
             }
         }
 
         if (resp.messages.size >= 500 && maxId > 0) {
             LogManager.i(TAG, "SyncResponse got 500 msgs (maxId=$maxId), fetching more...")
-            scope.launch {
-                delay(200)
-                val c = synchronized(lock) { client }
-                val ok = withContext(Dispatchers.IO) { c?.send(Protocol.buildSync(maxId)) ?: false }
-                LogManager.i(TAG, "Follow-up sync request sent (ok=$ok, lastSeenId=$maxId)")
-            }
+            delay(200)
+            if (!isCurrentConnection(generation, serverId, transport)) return
+            val ok = withContext(Dispatchers.IO) { transport.send(Protocol.buildSync(maxId)) }
+            if (!isCurrentConnection(generation, serverId, transport)) return
+            LogManager.i(TAG, "Follow-up sync request sent (ok=$ok, lastSeenId=$maxId)")
         }
     }
 
@@ -1135,24 +1396,26 @@ class ChatController(private val context: Context) {
         LogManager.d(TAG, "heartbeat received from server")
     }
 
-    private fun startHeartbeat() {
+    private fun startHeartbeat(generation: Long, serverId: String, transport: WebTransportClient) {
         synchronized(lock) {
+            if (!isCurrentConnectionLocked(generation, serverId, transport)) return
             heartbeatJob?.cancel()
             heartbeatJob = scope.launch {
                 LogManager.i(TAG, "heartbeat started (interval=${HEARTBEAT_INTERVAL_MS}ms)")
                 var heartbeatCount = 0
-                while (isActive) {
+                while (isActive && isCurrentConnection(generation, serverId, transport)) {
                     delay(HEARTBEAT_INTERVAL_MS)
-                    if (!isActive) break
-                    val c = synchronized(lock) { client } ?: break
-                    val ok = withContext(Dispatchers.IO) { c.send(Protocol.buildHeartbeat()) }
+                    if (!isActive || !isCurrentConnection(generation, serverId, transport)) break
+                    val ok = withContext(Dispatchers.IO) { transport.send(Protocol.buildHeartbeat()) }
+                    if (!isCurrentConnection(generation, serverId, transport)) break
                     LogManager.d(TAG, "heartbeat sent (ok=$ok)")
 
                     heartbeatCount++
                     if (heartbeatCount % RESYNC_EVERY_N_HEARTBEATS == 0) {
-                        val lastId = repo.lastSeenId(currentServer?.id ?: "")
-                        val c2 = synchronized(lock) { client }
-                        val syncOk = withContext(Dispatchers.IO) { c2?.send(Protocol.buildSync(lastId)) ?: false }
+                        val lastId = repo.lastSeenId(serverId)
+                        if (!isCurrentConnection(generation, serverId, transport)) break
+                        val syncOk = withContext(Dispatchers.IO) { transport.send(Protocol.buildSync(lastId)) }
+                        if (!isCurrentConnection(generation, serverId, transport)) break
                         LogManager.i(TAG, "Periodic re-sync sent (ok=$syncOk, lastSeenId=$lastId)")
                     }
                 }
@@ -1161,20 +1424,45 @@ class ChatController(private val context: Context) {
         }
     }
 
-    fun decryptEntity(entity: MessageEntity): DecryptedMessage? {
-        val serverId = currentServer?.id ?: return null
+    suspend fun decryptEntity(entity: MessageEntity): DecryptedMessage? = decryptAndVerifyStoredEntity(entity)
+
+    private suspend fun decryptAndVerifyStoredEntity(entity: MessageEntity): DecryptedMessage? {
         return try {
-            val result = decryptPerRecipientBlob(entity.ciphertext, serverId) ?: return null
+            ensureKeyPair()
+            val result = decryptPerRecipientBlob(entity.ciphertext, entity.serverId) ?: return null
+            val dsaPub = keyRepo.getDsaPublicKey(entity.serverId, result.senderFingerprint)
+            if (dsaPub == null) {
+                LogManager.w(TAG, "history verification unavailable for ${entity.serverMsgId}: sender DSA key missing")
+                return null
+            }
+            if (!InnerEnvelopeSignatureVerifier.verify(result.env, dsaPub) { publicKey, message, signature ->
+                    keyManager.verifyDsa(publicKey, message, signature)
+                }) {
+                LogManager.w(TAG, "history signature verification failed for ${entity.serverMsgId}")
+                return null
+            }
+
+            val isOwn = result.senderFingerprint == keyManager.getFingerprint()
+            val conversationId = when {
+                result.env.dm.isNotEmpty() && isOwn -> "dm:${result.env.dm}"
+                result.env.dm.isNotEmpty() -> "dm:${result.senderFingerprint}"
+                else -> "group"
+            }
+            if (entity.isOwn != isOwn || entity.conversationId != conversationId) {
+                LogManager.w(TAG, "history routing metadata mismatch for ${entity.serverMsgId}; dropping persisted row")
+                return null
+            }
             DecryptedMessage(
                 serverMsgId = entity.serverMsgId,
                 sender = result.env.sender,
                 senderFingerprint = result.senderFingerprint.take(8),
                 plaintext = result.env.content,
-                isOwn = entity.isOwn,
+                isOwn = isOwn,
                 timestamp = entity.timestamp,
-                conversationId = entity.conversationId
+                conversationId = conversationId
             )
         } catch (ex: Exception) {
+            if (ex is CancellationException) throw ex
             LogManager.w(TAG, "decryptEntity failed for ${entity.serverMsgId}", ex)
             null
         }
@@ -1182,21 +1470,10 @@ class ChatController(private val context: Context) {
 
     suspend fun decryptHistory(serverId: String): List<DecryptedMessage> {
         val entities = repo.load(serverId)
-        return entities.mapNotNull { e ->
-            try {
-                val result = decryptPerRecipientBlob(e.ciphertext, serverId) ?: return@mapNotNull null
-                DecryptedMessage(
-                    serverMsgId = e.serverMsgId,
-                    sender = result.env.sender,
-                    senderFingerprint = result.senderFingerprint.take(8),
-                    plaintext = result.env.content,
-                    isOwn = e.isOwn,
-                    timestamp = e.timestamp,
-                    conversationId = e.conversationId
-                )
-            } catch (ex: Exception) {
-                LogManager.w(TAG, "history decrypt failed for ${e.serverMsgId}", ex)
-                null
+        return buildList {
+            for (entity in entities) {
+                if (entity.serverId != serverId) continue
+                decryptAndVerifyStoredEntity(entity)?.let(::add)
             }
         }
     }
@@ -1205,7 +1482,13 @@ class ChatController(private val context: Context) {
     // Key exchange handling
     // ------------------------------------------------------------------
 
-    private fun handleIncoming(raw: ByteArray) {
+    private suspend fun handleIncoming(
+        raw: ByteArray,
+        generation: Long,
+        server: ServerConfig,
+        transport: WebTransportClient
+    ) {
+        if (!isCurrentConnection(generation, server.id, transport)) return
         if (raw.isEmpty()) return
         val opcode = raw[0]
         val opcodeName = when (opcode) {
@@ -1222,64 +1505,84 @@ class ChatController(private val context: Context) {
         try {
             val r = Protocol.Reader(raw, 1)
             when (opcode) {
-                Protocol.OP_AUTH_RESULT -> onAuthResult(r)
-                Protocol.OP_SYNC_RESPONSE -> onSyncResponse(r)
-                Protocol.OP_DATA -> onData(r)
+                Protocol.OP_AUTH_RESULT -> onAuthResult(r, generation, server, transport)
+                Protocol.OP_SYNC_RESPONSE -> onSyncResponse(r, generation, server.id, transport)
+                Protocol.OP_DATA -> onData(r, generation, server.id, transport)
                 Protocol.OP_HEARTBEAT -> onHeartbeat()
-                Protocol.OP_KEY_EXCHANGE_KEM_DSA -> onCombinedKeyExchange(r)
-                Protocol.OP_NEW_CERT_HASH -> onNewCertHash(r)
-                Protocol.OP_AUTH_CHALLENGE -> onAuthChallenge(r)
+                Protocol.OP_KEY_EXCHANGE_KEM_DSA -> onCombinedKeyExchange(r, generation, server.id, transport)
+                Protocol.OP_NEW_CERT_HASH -> onNewCertHash(r, server.id)
+                Protocol.OP_AUTH_CHALLENGE -> onAuthChallenge(r, generation, server.id, transport)
                 else -> LogManager.w(TAG, "UNKNOWN opcode 0x%02x (${raw.size} bytes)".format(opcode))
             }
+        } catch (e: CancellationException) {
+            throw e
         } catch (e: Exception) {
             LogManager.e(TAG, "PARSE FAILED opcode=0x%02x: ${e.message}".format(opcode), e)
         }
     }
 
-    private fun onAuthChallenge(r: Protocol.Reader) {
+    private fun onAuthChallenge(
+        r: Protocol.Reader,
+        generation: Long,
+        serverId: String,
+        transport: WebTransportClient
+    ) {
         val frame = Protocol.parseAuthChallenge(r)
-        pendingSaltB64 = frame.saltB64
-        pendingArgonMemKB = frame.argonMemKB
-        pendingArgonIter = frame.argonIterations
-        pendingArgonPar = frame.argonParallelism
-        authChallengeNonce.complete(frame.nonce)
+        synchronized(lock) {
+            if (!isCurrentConnectionLocked(generation, serverId, transport)) return
+            pendingSaltB64 = frame.saltB64
+            pendingArgonMemKB = frame.argonMemKB
+            pendingArgonIter = frame.argonIterations
+            pendingArgonPar = frame.argonParallelism
+            authChallengeNonce.complete(frame.nonce)
+        }
         LogManager.i(TAG, "AUTH CHALLENGE received (nonce=${frame.nonce.size} bytes, salt=${frame.saltB64.length} chars, argon2 m=${frame.argonMemKB} t=${frame.argonIterations} p=${frame.argonParallelism})")
     }
 
-    private fun onNewCertHash(r: Protocol.Reader) {
+    private fun onNewCertHash(r: Protocol.Reader, serverId: String) {
         val frame = Protocol.parseNewCertHash(r)
-        val serverId = currentServer?.id ?: return
         certManager.rotateHash(serverId, frame.hash)
         LogManager.i(TAG, "NEW CERT HASH received and stored as pending: ${frame.hash.take(16)}...")
     }
 
-    private fun onAuthResult(r: Protocol.Reader) {
+    private fun onAuthResult(
+        r: Protocol.Reader,
+        generation: Long,
+        server: ServerConfig,
+        transport: WebTransportClient
+    ) {
+        if (!isCurrentConnection(generation, server.id, transport)) return
         val res = Protocol.parseAuthResult(r)
         if (!res.success) {
             LogManager.e(TAG, "AUTH REJECTED by server: ${res.errorMessage ?: "no reason"}")
-            cancelAuthTimeout()
-            if (!userDisconnect) {
-                _state.value = ConnectionState.ERROR
-                _lastError.value = "Аутентификация отклонена сервером: ${res.errorMessage ?: "нет причины"}"
+            synchronized(lock) {
+                if (isCurrentConnectionLocked(generation, server.id, transport) && !userDisconnect) {
+                    cancelAuthTimeout()
+                    _state.value = ConnectionState.ERROR
+                    _lastError.value = "Аутентификация отклонена сервером: ${res.errorMessage ?: "нет причины"}"
+                }
             }
             return
         }
-        cancelAuthTimeout()
+        synchronized(lock) {
+            if (!isCurrentConnectionLocked(generation, server.id, transport) || userDisconnect) return
+            cancelAuthTimeout()
+            _state.value = ConnectionState.AUTHENTICATING
+        }
         LogManager.i(TAG, "AUTH SUCCESS — publishing keys + requesting sync (clientName='$clientName')")
-        _state.value = ConnectionState.AUTHENTICATING
         scope.launch {
-            if (userDisconnect) return@launch
-            // Cache our own key pair. Guarded: a storage failure here must NOT
-            // block the KeyExchange/Sync that follows (Bug: "client stuck on
-            // SYNC — KeyExchange never sent because cacheKey threw").
+            if (!isCurrentConnection(generation, server.id, transport) || userDisconnect) return@launch
+            // Cache our own key pair. Storage failure must not block KeyExchange/Sync.
             try {
                 val ownFp = keyManager.getFingerprint()
                 keyRepo.cacheKey(
-                    currentServer?.id ?: "",
+                    server.id,
                     ownFp,
                     keyManager.getKemPublicKey(),
                     keyManager.getDsaPublicKey()
                 )
+            } catch (t: CancellationException) {
+                throw t
             } catch (t: Throwable) {
                 LogManager.e(TAG, "cacheKey failed (non-fatal)", t)
                 com.example.impulse.util.CrashLog.writeCrash(
@@ -1297,85 +1600,107 @@ class ChatController(private val context: Context) {
                     )
                 )
             }
+            if (!isCurrentConnection(generation, server.id, transport) || userDisconnect) return@launch
 
             val kemPub = keyManager.getKemPublicKey()
             val dsaPub = keyManager.getDsaPublicKey()
             val dsaSig = keyManager.signDsa(kemPub + dsaPub) // C1 attestation
-            // Send KeyExchange + Sync. Never throw out of here: a transient
-            // failure must NOT strand the client on SYNC or spin reconnect.
-            // Each send is retried a few times before we give up and drop the
-            // connection to ERROR (which triggers reconnect).
+            // Send KeyExchange + Sync on the transport that authenticated this connection.
             var keySent = false
             for (attempt in 1..3) {
-                keySent = withContext(Dispatchers.IO) { synchronized(lock) { client }?.send(Protocol.buildCombinedKeyExchange(kemPub, dsaPub, dsaSig)) ?: false }
+                if (!isCurrentConnection(generation, server.id, transport) || userDisconnect) return@launch
+                keySent = withContext(Dispatchers.IO) {
+                    transport.send(Protocol.buildCombinedKeyExchange(kemPub, dsaPub, dsaSig))
+                }
+                if (!isCurrentConnection(generation, server.id, transport)) return@launch
                 if (keySent || userDisconnect) break
                 LogManager.w(TAG, "KeyExchange send attempt $attempt failed, retrying")
                 delay(300L * attempt)
             }
             LogManager.i(TAG, "KeyExchange combined KEM+DSA sent (ok=$keySent)")
-            if (userDisconnect) return@launch
+            if (!isCurrentConnection(generation, server.id, transport) || userDisconnect) return@launch
             if (!keySent) {
                 LogManager.e(TAG, "KeyExchange could not be sent after 3 attempts — dropping to ERROR for reconnect")
-                _state.value = ConnectionState.ERROR
-                scheduleReconnect()
+                failCurrentConnection(generation, server.id, transport)
                 return@launch
             }
 
-            val lastSeen = runCatching { lastSeenId() }.getOrDefault(0L)
+            val lastSeen = try {
+                repo.lastSeenId(server.id)
+            } catch (e: CancellationException) {
+                throw e
+            } catch (_: Exception) {
+                0L
+            }
+            if (!isCurrentConnection(generation, server.id, transport) || userDisconnect) return@launch
             var syncSent = false
             for (attempt in 1..3) {
-                syncSent = withContext(Dispatchers.IO) { synchronized(lock) { client }?.send(Protocol.buildSync(lastSeen)) ?: false }
+                if (!isCurrentConnection(generation, server.id, transport) || userDisconnect) return@launch
+                syncSent = withContext(Dispatchers.IO) { transport.send(Protocol.buildSync(lastSeen)) }
+                if (!isCurrentConnection(generation, server.id, transport)) return@launch
                 if (syncSent || userDisconnect) break
                 LogManager.w(TAG, "Sync send attempt $attempt failed, retrying")
                 delay(300L * attempt)
             }
             LogManager.i(TAG, "Sync request sent (ok=$syncSent, lastSeenId=$lastSeen)")
-            if (userDisconnect) return@launch
+            if (!isCurrentConnection(generation, server.id, transport) || userDisconnect) return@launch
             if (!syncSent) {
                 LogManager.e(TAG, "Sync could not be sent after 3 attempts — dropping to ERROR for reconnect")
-                _state.value = ConnectionState.ERROR
-                scheduleReconnect()
+                failCurrentConnection(generation, server.id, transport)
                 return@launch
             }
 
-            // Guard: if a disconnect raced in while we were authenticating, do
-            // NOT flip back to READY with a null client (Bug: "state becomes
-            // READY after user disconnect"). Leave the controller DISCONNECTED.
-            if (userDisconnect || synchronized(lock) { client } == null) {
-                LogManager.w(TAG, "AUTH SUCCESS but disconnect raced — staying DISCONNECTED")
-                return@launch
+            val becameReady = synchronized(lock) {
+                if (!isCurrentConnectionLocked(generation, server.id, transport) || userDisconnect) {
+                    false
+                } else {
+                    _state.value = ConnectionState.AUTHENTICATED
+                    _state.value = ConnectionState.READY
+                    true
+                }
             }
-
-            _state.value = ConnectionState.AUTHENTICATED
-            _state.value = ConnectionState.READY
+            if (!becameReady) return@launch
             LogManager.i(TAG, "READY")
+            startHeartbeat(generation, server.id, transport)
 
-            // Restore any messages queued before a previous disconnect / kill.
-            restoreOutbox()
-
+            restoreOutbox(server.id)
             synchronized(outboxLock) {
-                if (outbox.isNotEmpty() && !flushOutboxRunning) {
-                    LogManager.i(TAG, "READY: outbox has ${outbox.size} queued messages, flushing")
+                if (outbox.any { it.serverId == server.id } && !flushOutboxRunning.get()) {
+                    LogManager.i(TAG, "READY: outbox has queued messages for this server, flushing")
                     scope.launch { flushOutbox() }
                 }
             }
 
-            val messages = repo.load(currentServer?.id ?: "")
+            if (!isCurrentConnection(generation, server.id, transport)) return@launch
+            val messages = repo.load(server.id)
+            if (!isCurrentConnection(generation, server.id, transport)) return@launch
             if (messages.isEmpty()) {
-                _lastError.value = "Вы присоединились к чату. Сообщения до вашего подключения недоступны."
+                setLastErrorForConnection(
+                    generation,
+                    server.id,
+                    transport,
+                    "Вы присоединились к чату. Сообщения до вашего подключения недоступны."
+                )
             }
 
             delay(3000)
-            val c2 = synchronized(lock) { client }
-            val reSyncOk = withContext(Dispatchers.IO) { c2?.send(Protocol.buildSync(lastSeenId())) ?: false }
-            LogManager.i(TAG, "Delayed re-sync sent (ok=$reSyncOk, lastSeenId=${lastSeenId()})")
+            if (!isCurrentConnection(generation, server.id, transport)) return@launch
+            val delayedLastSeen = repo.lastSeenId(server.id)
+            if (!isCurrentConnection(generation, server.id, transport)) return@launch
+            val reSyncOk = withContext(Dispatchers.IO) { transport.send(Protocol.buildSync(delayedLastSeen)) }
+            if (!isCurrentConnection(generation, server.id, transport)) return@launch
+            LogManager.i(TAG, "Delayed re-sync sent (ok=$reSyncOk, lastSeenId=$delayedLastSeen)")
         }
-        startHeartbeat()
     }
 
-    private fun onCombinedKeyExchange(r: Protocol.Reader) {
+    private suspend fun onCombinedKeyExchange(
+        r: Protocol.Reader,
+        generation: Long,
+        serverId: String,
+        transport: WebTransportClient
+    ) {
         val frame = Protocol.parseCombinedKeyExchange(r)
-        val serverId = currentServer?.id ?: return
+        if (!isCurrentConnection(generation, serverId, transport)) return
 
         try {
             PqcCrypto.validateKemPublicKey(frame.kemPublicKey)
@@ -1387,33 +1712,36 @@ class ChatController(private val context: Context) {
             // (kemPub || dsaPub). The sender must prove ownership of the DSA
             // private key. We only trust a key if (a) it is brand-new TOFU, or
             // (b) it carries a valid signature from the ALREADY-KNOWN DSA key.
-            // The DB lookup is suspend, so run the trust decision in the scope.
-            // The trust formula is factored into Protocol.evaluateKeyExchangeTrust
+            // The read loop awaits this bounded trust/cache path so inbound frames
+            // cannot enqueue unbounded key-exchange coroutines. The trust formula is
+            // factored into Protocol.evaluateKeyExchangeTrust
             // so it is unit-testable on the JVM without an Android Context
             // (see C1AttestationTest). Behaviour is unchanged.
-            scope.launch {
-                val existingDsa = keyRepo.findDsaKeyByPub(serverId, frame.dsaPublicKey)
-                    ?: keyRepo.getDsaPublicKey(serverId, kemFp)
-                val trusted = Protocol.evaluateKeyExchangeTrust(
-                    existingDsa = existingDsa,
-                    kemPublicKey = frame.kemPublicKey,
-                    dsaPublicKey = frame.dsaPublicKey,
-                    signature = frame.signature,
-                    verify = { dsaPub, data, sig -> keyManager.verifyDsa(dsaPub, data, sig) }
-                )
+            val existingDsa = keyRepo.findDsaKeyByPub(serverId, frame.dsaPublicKey)
+                ?: keyRepo.getDsaPublicKey(serverId, kemFp)
+            if (!isCurrentConnection(generation, serverId, transport)) return
+            val trusted = Protocol.evaluateKeyExchangeTrust(
+                existingDsa = existingDsa,
+                kemPublicKey = frame.kemPublicKey,
+                dsaPublicKey = frame.dsaPublicKey,
+                signature = frame.signature,
+                verify = { dsaPub, data, sig -> keyManager.verifyDsa(dsaPub, data, sig) }
+            )
 
-                if (!trusted) {
-                    LogManager.w(TAG, "CombinedKeyExchange REJECTED: attestation failed for dsa_fp=$dsaFp (possible MITM)")
-                    return@launch
-                }
-
-                keyRepo.cacheKey(serverId, kemFp, frame.kemPublicKey, frame.dsaPublicKey)
-                val attestVerified = frame.signature != null && keyManager.verifyDsa(
-                    frame.dsaPublicKey, frame.kemPublicKey + frame.dsaPublicKey, frame.signature
-                )
-                LogManager.i(TAG, "CombinedKeyExchange: kem_fp=$kemFp dsa_fp=$dsaFp cached (attestation ${if (attestVerified) "verified" else "TOFU"})")
-                processPendingMessages(kemFp)
+            if (!trusted) {
+                LogManager.w(TAG, "CombinedKeyExchange REJECTED: attestation failed for dsa_fp=$dsaFp (possible MITM)")
+                return
             }
+
+            keyRepo.cacheKey(serverId, kemFp, frame.kemPublicKey, frame.dsaPublicKey)
+            if (!isCurrentConnection(generation, serverId, transport)) return
+            val attestVerified = frame.signature != null && keyManager.verifyDsa(
+                frame.dsaPublicKey, frame.kemPublicKey + frame.dsaPublicKey, frame.signature
+            )
+            LogManager.i(TAG, "CombinedKeyExchange: kem_fp=$kemFp dsa_fp=$dsaFp cached (attestation ${if (attestVerified) "verified" else "TOFU"})")
+            processPendingMessages(kemFp, serverId)
+        } catch (e: CancellationException) {
+            throw e
         } catch (e: Exception) {
             LogManager.w(TAG, "CombinedKeyExchange validation failed: ${e.message}", e)
         }
@@ -1431,8 +1759,6 @@ class ChatController(private val context: Context) {
         private const val AUTH_TIMEOUT_MS = 15_000L
         private const val RECONNECT_BASE_DELAY_MS = 5_000L
         private const val RECONNECT_MAX_BACKOFF_SHIFT = 4 // caps at 5s * 2^4 = 80s
-        private const val PENDING_MSG_TTL_MS = 120_000L
         private const val RESYNC_EVERY_N_HEARTBEATS = 2
-        private const val MAX_OUTBOX_RETRIES = 3
     }
 }

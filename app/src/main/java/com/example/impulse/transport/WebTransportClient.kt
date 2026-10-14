@@ -41,7 +41,7 @@ import android.os.Build
 class WebTransportClient(
     private val context: Context,
     private val serverCertHashes: List<String>,
-    private val onFrame: (ByteArray) -> Unit,
+    private val onFrame: suspend (ByteArray) -> Unit,
     private val onState: (ConnectionState) -> Unit,
     private val onCertHashPush: (String) -> Unit,
     private val onSessionError: ((Int) -> Unit)? = null,
@@ -193,8 +193,8 @@ class WebTransportClient(
         setState(ConnectionState.CONNECTING)
         val startTime = System.currentTimeMillis()
 
-        if (isEmulatorBuild(Build.HARDWARE, Build.MODEL, Build.FINGERPRINT)) {
-            LogManager.e(TAG, "ABORT: WebTransport requires a physical device (QUIC native libs unavailable on emulators)")
+        if (!supportsNativeQuic(Build.SUPPORTED_ABIS.toList())) {
+            LogManager.e(TAG, "ABORT: WebTransport native libraries unavailable for this device ABI")
             cancelConnectTimeout()
             setState(ConnectionState.ERROR)
             return
@@ -264,7 +264,7 @@ class WebTransportClient(
                 }
             } catch (e: CancellationException) {
                 throw e
-            } catch (e: ExceptionInInitializerError) {
+            } catch (e: LinkageError) {
                 if (intentionalClose.get()) return@launch
                 LogManager.e(TAG, "QUIC library init failed (missing native libs): ${e.message}", e)
                 cancelConnectTimeout()
@@ -381,6 +381,8 @@ class WebTransportClient(
             pos += frameLen
             try {
                 dispatch(frame)
+            } catch (e: CancellationException) {
+                throw e
             } catch (e: Exception) {
                 LogManager.w(TAG, "dispatch failed for frame: ${e.message}")
             }

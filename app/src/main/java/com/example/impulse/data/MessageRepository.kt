@@ -4,6 +4,8 @@ import android.content.Context
 import com.example.impulse.data.db.MessageDao
 import com.example.impulse.data.db.MessageDatabase
 import com.example.impulse.data.db.MessageEntity
+import com.example.impulse.data.db.ReplayPersistenceResult
+import com.example.impulse.data.db.SeenMessageNonceEntity
 import com.example.impulse.util.LogManager
 import kotlinx.coroutines.flow.Flow
 import java.util.concurrent.TimeUnit
@@ -29,6 +31,14 @@ class MessageRepository(context: Context) {
     suspend fun upsert(message: MessageEntity) {
         dao.upsert(message)
     }
+
+    suspend fun persistReplayProtected(
+        message: MessageEntity,
+        marker: SeenMessageNonceEntity,
+        now: Long
+    ): ReplayPersistenceResult = dao.upsertWithReplayGuard(
+        message, marker, now, ReplayNonce.MAX_LIVE_MARKERS
+    )
 
     fun observe(serverId: String): Flow<List<MessageEntity>> = dao.observeForServer(serverId)
 
@@ -64,6 +74,7 @@ class MessageRepository(context: Context) {
     suspend fun purgeExpired(): Int {
         val cutoff = System.currentTimeMillis() - TimeUnit.HOURS.toMillis(TTL_HOURS)
         val removed = dao.deleteOlderThan(cutoff)
+        dao.purgeExpiredReplayMarkers(System.currentTimeMillis())
         LogManager.i("MessageRepository", "TTL purge: removed $removed messages older than $TTL_HOURS h")
         return removed
     }
