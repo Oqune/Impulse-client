@@ -31,8 +31,8 @@ android {
         applicationId = "com.example.impulse"
         minSdk = 28 // WebTransport via socket-http3 (third-party), no native API 33+ needed
         targetSdk = 36
-        versionCode = 23
-        versionName = "3.2.0"
+        versionCode = 24
+        versionName = "3.2.1"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
     }
@@ -55,7 +55,7 @@ android {
             reset()
             // x86 is listed so a universal APK is installable on x86 emulators;
             // note socket-quic-quiche-android ships no x86 native lib, so QUIC
-            // degrades to the emulator guard (WebTransportClient) on those ABIs.
+            // fails closed at the ABI guard (WebTransportClient) on x86.
             include("arm64-v8a", "armeabi-v7a", "x86_64", "x86")
             isUniversalApk = true
         }

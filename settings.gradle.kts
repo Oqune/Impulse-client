@@ -1,4 +1,15 @@
 pluginManagement {
+    // Kotlin 2.4 requires R8 9.1.29; override AGP 8.13's bundled R8 only.
+    // R8's stable releases are published to this official Maven repository;
+    // Google Maven mirrors and Maven Central do not contain this artifact.
+    buildscript {
+        repositories {
+            maven("https://storage.googleapis.com/r8-releases/raw")
+        }
+        dependencies {
+            classpath("com.android.tools:r8:9.1.29")
+        }
+    }
     repositories {
         // Aliyun/public зеркалирует Maven Central — для kotlin-reflect и т.д.
         maven("https://maven.aliyun.com/repository/public")
