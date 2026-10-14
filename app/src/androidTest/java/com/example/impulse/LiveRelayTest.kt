@@ -87,8 +87,15 @@ class LiveRelayTest {
                 awaitMessage("$run-offline-ack")
             } else {
                 repeat(groupMessages) { awaitMessage("$run-group-$it") }
+                val deliveredGroup = messages.filter { it.plaintext.startsWith("$run-group-") }
+                assertEquals(groupMessages, deliveredGroup.size)
+                assertEquals(groupMessages, deliveredGroup.map { it.plaintext }.distinct().size)
+                // Initial Sync and live broadcast can interleave on the relay.
+                // Check persisted chronological history, the source of chat UI,
+                // instead of requiring callbacks to arrive in relay-ID order.
                 assertEquals((0 until groupMessages).map { "$run-group-$it" },
-                    messages.filter { it.plaintext.startsWith("$run-group-") }.map { it.plaintext })
+                    controller.decryptHistory(server.id)
+                        .filter { it.plaintext.startsWith("$run-group-") }.map { it.plaintext })
                 awaitMessage("$run-direct")
                 assertTrue(messages.first { it.plaintext == "$run-direct" }.conversationId.startsWith("dm:"))
                 assertTrue(controller.sendDirectMessage("$run-online-ack", peer))
@@ -125,6 +132,43 @@ class LiveRelayTest {
             }
             assertFalse(controller.decryptHistory(server.id).isEmpty())
         } finally {
+            controller.destroy()
+            certs.forget(server.id)
+        }
+    }
+
+    @Test
+    fun nonResponsiveEndpointHasFiniteConnectDeadline() = runBlocking {
+        val args = InstrumentationRegistry.getArguments()
+        assumeTrue("Explicit non-responsive test endpoint required", args.containsKey("relayDeadlineHost"))
+        val context = ApplicationProvider.getApplicationContext<Context>()
+        val server = ServerConfig("audit-connect-deadline", "Deadline test",
+            args.getString("relayDeadlineHost")!!, 59999, "No relay expected", "audit-only")
+        val certs = TrustedCertManager(context)
+        certs.trustHash(server.id, args.getString("relayHash") ?: error("relayHash required"))
+        val controller = ChatController(context)
+        controller.setAutoReconnect(false)
+        val sessionOpened = AtomicBoolean(false)
+        val observer = launch(start = CoroutineStart.UNDISPATCHED) {
+            controller.state.collect { state ->
+                if (state == ConnectionState.CONNECTED || state == ConnectionState.AUTHENTICATING ||
+                    state == ConnectionState.AUTHENTICATED || state == ConnectionState.READY) sessionOpened.set(true)
+            }
+        }
+        val started = android.os.SystemClock.elapsedRealtime()
+        try {
+            controller.connect(server, "Audit-deadline")
+            withTimeout(25_000) {
+                while (controller.state.value != ConnectionState.ERROR) delay(50)
+            }
+            val elapsed = android.os.SystemClock.elapsedRealtime() - started
+            assertFalse("No session may open at the non-responsive endpoint", sessionOpened.get())
+            assertTrue("Setup must be bounded to the application deadline", elapsed < 25_000)
+            val progress = android.os.Bundle()
+            progress.putString("stream", "Connect deadline reached ERROR after ${elapsed}ms\n")
+            InstrumentationRegistry.getInstrumentation().sendStatus(0, progress)
+        } finally {
+            observer.cancel()
             controller.destroy()
             certs.forget(server.id)
         }

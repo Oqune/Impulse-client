@@ -35,6 +35,7 @@ import java.io.ByteArrayOutputStream
 import java.net.URI
 import com.ditchoom.buffer.Default
 import java.util.concurrent.atomic.AtomicBoolean
+import kotlin.time.Duration
 import kotlin.time.Duration.Companion.seconds
 import android.os.Build
 
@@ -171,7 +172,15 @@ class WebTransportClient(
         val job = scope.launch {
             delay(CONNECT_TIMEOUT_MS)
             if (intentionalClose.get()) return@launch
-            if (_state.value == ConnectionState.CONNECTING) {
+            val timedOut = synchronized(lock) {
+                if (_state.value == ConnectionState.CONNECTING && !intentionalClose.get()) {
+                    connectionJob?.cancel()
+                    true
+                } else {
+                    false
+                }
+            }
+            if (timedOut) {
                 LogManager.e(TAG, "CONNECT TIMEOUT after ${CONNECT_TIMEOUT_MS}ms — no response from server, state→ERROR")
                 setState(ConnectionState.ERROR)
             }
@@ -211,7 +220,7 @@ class WebTransportClient(
                     setState(ConnectionState.ERROR)
                     return@launch
                 }
-                LogManager.i(TAG, "QUIC options: idleTimeout=120s keepAlive=15s handshakeTimeout=300s")
+                LogManager.i(TAG, "QUIC options: idleTimeout=120s keepAlive=15s connectDeadline=${CONNECT_TIMEOUT_MS}ms")
                 val quicOptions = QuicOptions(
                     alpnProtocols = listOf("h3"),
                     serverCertificateHashes = pinned,
@@ -223,7 +232,11 @@ class WebTransportClient(
                     hostname = targetHost,
                     port = currentPort,
                     quicOptions = quicOptions,
-                    timeout = 300.seconds,
+                    // socket-quic 3.9.5 applies this timeout to both the QUIC
+                    // handshake and the entire callback (including runReadLoop).
+                    // The finite application connect deadline above cancels setup;
+                    // an established session instead uses the read-idle timeout.
+                    timeout = Duration.INFINITE,
                     webTransport = WebTransportOptions(maxSessions = 1),
                 ) {
                     LogManager.i(TAG, "HTTP/3 connection established, opening WebTransport session...")
