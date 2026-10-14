@@ -1,6 +1,6 @@
 # R8 override for Kotlin 2.4 release shrinking
 
-Date: 2026-10-14  
+Date: 2026-10-14
 Status: Approved for implementation by project owner
 
 ## Problem

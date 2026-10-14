@@ -1,6 +1,6 @@
 # Connection-generation guards for stale callbacks and outbox sends
 
-Date: 2026-10-14  
+Date: 2026-10-14
 Status: Implemented within the owner's authorized audit and remediation scope; root review and final gates required
 
 ## Problem

@@ -33,7 +33,7 @@ jobs:
         run: chmod +x gradlew
 
       - name: Run unit tests (Test-Gate)
-        run: ./gradlew testDebugUnitTest
+        run: ./gradlew testDebugUnitTest lintDebug
 
       - name: Restore signing keystore from secrets
         if: startsWith(github.ref, 'refs/tags/v')
@@ -90,6 +90,11 @@ jobs:
       contents: write
 
     steps:
+      - uses: actions/checkout@v4
+
+      - name: Require reviewed release notes
+        run: test -s "docs/releases/${GITHUB_REF_NAME}.md"
+
       - name: Download APK artifact
         uses: actions/download-artifact@v4
         with:
@@ -100,5 +105,7 @@ jobs:
         uses: softprops/action-gh-release@v2
         with:
           name: Impulse Client ${{ github.ref_name }}
-          files: artifacts/*.apk
-          generate_release_notes: true
+          files: artifacts/*-release.apk
+          body_path: docs/releases/${{ github.ref_name }}.md
+          draft: true
+          fail_on_unmatched_files: true

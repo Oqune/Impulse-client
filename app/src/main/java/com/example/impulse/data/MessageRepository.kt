@@ -24,9 +24,8 @@ class MessageRepository(context: Context) {
     private val dao: MessageDao = MessageDatabase.getInstance(context).messageDao()
 
     /**
-     * Inserts or replaces a message keyed by (server_id, server_msg_id). Used to
-     * replace an optimistic local copy (negative temp id) with the authoritative
-     * server-assigned row once the relay echoes the message.
+     * Inserts or replaces a message with the same (server_id, server_msg_id).
+     * Negative optimistic IDs and positive relay IDs remain distinct rows.
      */
     suspend fun upsert(message: MessageEntity) {
         dao.upsert(message)

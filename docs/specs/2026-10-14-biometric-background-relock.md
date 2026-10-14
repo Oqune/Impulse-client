@@ -1,6 +1,6 @@
 # Re-lock biometric gate after backgrounding
 
-Date: 2026-10-14  
+Date: 2026-10-14
 Status: Approved by project owner
 
 ## Problem
