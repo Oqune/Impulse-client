@@ -115,9 +115,9 @@
     <!-- User Settings — Danger Zone -->
     <string name="user_danger_zone">Danger zone</string>
     <string name="user_reset_keys">Reset encryption keys</string>
-    <string name="user_reset_keys_desc">Delete all ML-KEM and ML-DSA key pairs. You will need to re-exchange keys with peers.</string>
+    <string name="user_reset_keys_desc">Delete the ML-KEM-768 key pair and Dilithium3 signing key pair. You will need to re-exchange keys with peers.</string>
     <string name="user_reset_keys_title">Reset keys?</string>
-    <string name="user_reset_keys_warning">This will permanently delete all encryption keys (ML-KEM and ML-DSA). All peer key caches will become invalid. You will need to re-scan QR codes and re-exchange keys with every peer.</string>
+    <string name="user_reset_keys_warning">This will permanently delete the ML-KEM-768 keys and Dilithium3 signing keys. All peer key caches will become invalid. You will need to re-scan QR codes and re-exchange keys with every peer.</string>
     <string name="user_reset_keys_done">Keys reset. Restart the app to generate new keys.</string>
 
     <!-- AppSettingsScreen -->

@@ -115,9 +115,9 @@
     <!-- User Settings — Danger Zone -->
     <string name="user_danger_zone">Опасная зона</string>
     <string name="user_reset_keys">Сбросить ключи шифрования</string>
-    <string name="user_reset_keys_desc">Удалить все пары ключей ML-KEM и ML-DSA. Потребуется повторный обмен ключами с собеседниками.</string>
+    <string name="user_reset_keys_desc">Удалить пару ключей ML-KEM-768 и пару ключей подписи Dilithium3. Потребуется повторный обмен ключами с собеседниками.</string>
     <string name="user_reset_keys_title">Сбросить ключи?</string>
-    <string name="user_reset_keys_warning">Это навсегда удалит все ключи шифрования (ML-KEM и ML-DSA). Все кэши ключей собеседников станут недействительными. Потребуется заново сканировать QR-коды и обмениваться ключами.</string>
+    <string name="user_reset_keys_warning">Это навсегда удалит ключи ML-KEM-768 и ключи подписи Dilithium3. Все кэши ключей собеседников станут недействительными. Потребуется заново сканировать QR-коды и обмениваться ключами.</string>
     <string name="user_reset_keys_done">Ключи сброшены. Перезапустите приложение для генерации новых ключей.</string>
 
     <!-- AppSettingsScreen -->

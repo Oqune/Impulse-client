@@ -400,7 +400,8 @@ fun HomeScreen(
                 )
                 val techs = listOf(
                     "ML-KEM-768" to "Post-Quantum KEM",
-                    "ML-DSA-65" to "Post-Quantum Sign",
+                    // Current signatures use Bouncy Castle's Dilithium3 legacy API, not ML-DSA-65/FIPS 204.
+                    "Dilithium3" to "Post-Quantum Signature",
                     "WebTransport" to "HTTP/3 + QUIC",
                     "AES-256-GCM" to "AEAD Cipher",
                     "Argon2id" to "Key Derivation",
